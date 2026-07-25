@@ -8,81 +8,53 @@ import (
 )
 
 // The tests here drive a real tmux server, because the behavior they cover exists
-// only in the interaction with one: which window a teardown leaves behind. Nothing
-// else in the suite runs under tmux — every other test unsets $TMUX so that no
-// windows are opened — and that is precisely why a teardown could orphan the
-// window named after the stream without any test noticing.
+// only in the interaction with one: which window a teardown closes, and which it
+// leaves alone.
 //
-// The server is private to the test: its own socket, its own session, killed
-// afterwards, so a developer's own tmux session is never touched.
+// The server is the one every fixture already owns — its own socket, killed
+// afterwards — so a developer's own tmux is never touched. The helpers are shared
+// with tmuxsession_test.go, which covers where windows are put in the first place.
 
-// tmuxServer starts a private tmux server and points the tmux package at it.
-//
-// $TMUX carries the socket path, which is how a tmux client finds its server, so
-// setting it both makes tmux.Inside() true and directs every call in the package
-// under test at this server rather than the user's.
-func tmuxServer(t *testing.T, startDir string) (label string) {
+// tmuxctl runs a tmux command against the test's private server.
+func tmuxctl(t *testing.T, args ...string) (string, error) {
 	t.Helper()
-	if _, err := exec.LookPath("tmux"); err != nil {
-		t.Skip("tmux is not installed")
+	label := os.Getenv("TREEMUX_TMUX_LABEL")
+	if label == "" {
+		t.Fatal("no private tmux server — newFixture is what sets TREEMUX_TMUX_LABEL")
 	}
-	label = "treemux-test-" + t.Name()
-
-	ctl := func(args ...string) (string, error) {
-		out, err := exec.Command("tmux", append([]string{"-L", label}, args...)...).CombinedOutput()
-		return strings.TrimSpace(string(out)), err
-	}
-
-	// A stale server from an interrupted run would silently host the windows this
-	// test then asserts about.
-	_, _ = ctl("kill-server")
-
-	// Registered before the server exists so an early failure still tears down,
-	// and reading socket at cleanup time rather than now. kill-server does not
-	// unlink the socket file, so the test would otherwise leave one behind in the
-	// developer's tmp directory on every run.
-	var socket string
-	t.Cleanup(func() {
-		_, _ = ctl("kill-server")
-		if socket != "" {
-			_ = os.Remove(socket)
-		}
-	})
-
-	if out, err := ctl("new-session", "-d", "-s", "base", "-c", startDir); err != nil {
-		t.Skipf("cannot start a tmux server here: %v\n%s", err, out)
-	}
-	socket, err := ctl("display-message", "-p", "#{socket_path}")
-	if err != nil {
-		t.Skipf("cannot read the socket path: %v", err)
-	}
-	// The pid and session fields are not read by the operations under test; the
-	// socket path is what matters.
-	t.Setenv("TMUX", socket+",0,0")
-	return label
+	out, err := exec.Command("tmux", append([]string{"-L", label}, args...)...).CombinedOutput()
+	return strings.TrimSpace(string(out)), err
 }
 
-// openWindowOn creates a window sitting in dir, running something long-lived so
-// the window stays open until the code under test closes it.
-func openWindowOn(t *testing.T, label, name, dir string) {
+// startSession creates a session holding one window that sits in dir and stays
+// open, standing in for a session treemux itself would have created.
+func startSession(t *testing.T, session, window, dir string) {
 	t.Helper()
-	out, err := exec.Command("tmux", "-L", label, "new-window", "-d", "-n", name, "-c", dir, "sleep 300").CombinedOutput()
-	if err != nil {
+	requireTmux(t)
+	if out, err := tmuxctl(t, "new-session", "-d", "-s", session, "-n", window, "-c", dir, "sleep 300"); err != nil {
+		t.Skipf("cannot start a tmux server here: %v\n%s", err, out)
+	}
+}
+
+// openWindowOn adds a window sitting in dir to a session that already exists.
+func openWindowOn(t *testing.T, session, window, dir string) {
+	t.Helper()
+	if out, err := tmuxctl(t, "new-window", "-d", "-t", "="+session+":", "-n", window, "-c", dir, "sleep 300"); err != nil {
 		t.Fatalf("open a window on %s: %v\n%s", dir, err, out)
 	}
 }
 
-// windowsOn reports how many panes are sitting in dir.
-func windowsOn(t *testing.T, label, dir string) int {
+// panesOn reports how many panes are sitting in dir, across every session.
+func panesOn(t *testing.T, dir string) int {
 	t.Helper()
-	out, err := exec.Command("tmux", "-L", label, "list-panes", "-a", "-F", "#{pane_current_path}").CombinedOutput()
+	out, err := tmuxctl(t, "list-panes", "-a", "-F", "#{pane_current_path}")
 	if err != nil {
 		// No panes at all is a valid answer: killing the last window ends the
 		// server, which reports an error rather than an empty list.
 		return 0
 	}
 	count := 0
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+	for _, line := range strings.Split(out, "\n") {
 		if strings.TrimSpace(line) == dir {
 			count++
 		}
@@ -98,9 +70,9 @@ func TestRmClosesTheWindowOnTheRemovedWorktree(t *testing.T) {
 	f := newFixture(t, "")
 	wt := f.Worktree("winsome")
 
-	label := tmuxServer(t, f.MainDir)
-	openWindowOn(t, label, "WINSOME", wt.Dir)
-	if got := windowsOn(t, label, wt.Dir); got != 1 {
+	startSession(t, "proj", "MAIN", f.MainDir)
+	openWindowOn(t, "proj", "WINSOME", wt.Dir)
+	if got := panesOn(t, wt.Dir); got != 1 {
 		t.Fatalf("%d panes in the worktree before removal, want 1", got)
 	}
 
@@ -113,7 +85,7 @@ func TestRmClosesTheWindowOnTheRemovedWorktree(t *testing.T) {
 		t.Fatalf("rm: %v\n%s", r.err, r.both())
 	}
 
-	if got := windowsOn(t, label, wt.Dir); got != 0 {
+	if got := panesOn(t, wt.Dir); got != 0 {
 		t.Errorf("%d panes still sitting in the deleted %s, want none", got, wt.Dir)
 	}
 	// And it says so, since a window closing is not something to do silently.
@@ -129,9 +101,9 @@ func TestRmLeavesOtherWindowsAlone(t *testing.T) {
 	doomed := f.Worktree("doomed")
 	keeper := f.Worktree("keeper")
 
-	label := tmuxServer(t, f.MainDir)
-	openWindowOn(t, label, "DOOMED", doomed.Dir)
-	openWindowOn(t, label, "KEEPER", keeper.Dir)
+	startSession(t, "proj", "MAIN", f.MainDir)
+	openWindowOn(t, "proj", "DOOMED", doomed.Dir)
+	openWindowOn(t, "proj", "KEEPER", keeper.Dir)
 
 	if err := os.Chdir(f.MainDir); err != nil {
 		t.Fatal(err)
@@ -140,14 +112,14 @@ func TestRmLeavesOtherWindowsAlone(t *testing.T) {
 		t.Fatalf("rm: %v\n%s", r.err, r.both())
 	}
 
-	if got := windowsOn(t, label, doomed.Dir); got != 0 {
+	if got := panesOn(t, doomed.Dir); got != 0 {
 		t.Errorf("%d panes still in the removed worktree, want none", got)
 	}
-	if got := windowsOn(t, label, keeper.Dir); got != 1 {
+	if got := panesOn(t, keeper.Dir); got != 1 {
 		t.Errorf("%d panes in the untouched worktree, want 1 — an unrelated window was closed", got)
 	}
 	// The base window the command was run from must survive too.
-	if got := windowsOn(t, label, f.MainDir); got != 1 {
+	if got := panesOn(t, f.MainDir); got != 1 {
 		t.Errorf("%d panes in the main checkout, want 1 — the caller's own window was closed", got)
 	}
 }
@@ -158,8 +130,7 @@ func TestRmWithNoWindowOpenSaysNothing(t *testing.T) {
 	f := newFixture(t, "")
 	f.Worktree("quiet")
 
-	label := tmuxServer(t, f.MainDir)
-	_ = label
+	startSession(t, "proj", "MAIN", f.MainDir)
 
 	if err := os.Chdir(f.MainDir); err != nil {
 		t.Fatal(err)
@@ -170,5 +141,34 @@ func TestRmWithNoWindowOpenSaysNothing(t *testing.T) {
 	}
 	if strings.Contains(r.stderr, "tmux window") {
 		t.Errorf("stderr = %q, want no mention of a window that was never open", r.stderr)
+	}
+}
+
+// TestRmClosesAWindowInAnotherSession covers the window that a session per
+// repository does not account for: one opened by hand, or before this repo had a
+// session of its own. Its directory is being deleted either way, so leaving it
+// behind would strand it exactly as the in-session case would.
+//
+// It is also the case where closing the window ends its session, which is worth
+// saying before an attached client is moved somewhere it did not ask to be.
+func TestRmClosesAWindowInAnotherSession(t *testing.T) {
+	f := newFixture(t, "")
+	wt := f.Worktree("astray")
+
+	startSession(t, "someone-elses-session", "ASTRAY", wt.Dir)
+
+	if err := os.Chdir(f.MainDir); err != nil {
+		t.Fatal(err)
+	}
+	r := f.exec("rm", "--yes", "astray")
+	if r.err != nil {
+		t.Fatalf("rm: %v\n%s", r.err, r.both())
+	}
+
+	if got := panesOn(t, wt.Dir); got != 0 {
+		t.Errorf("%d panes still sitting in the deleted %s, want none", got, wt.Dir)
+	}
+	if !strings.Contains(r.stderr, "the last in session someone-elses-session") {
+		t.Errorf("stderr = %q, want the ending session named", r.stderr)
 	}
 }

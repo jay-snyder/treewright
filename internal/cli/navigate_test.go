@@ -88,7 +88,9 @@ func TestAnUnambiguousPrefixNamesAWorktree(t *testing.T) {
 			if !strings.Contains(r.stderr, "eng-1646 matches worktree eng-1646-app-landing-page-redesign") {
 				t.Errorf("stderr = %q, want the expansion reported", r.stderr)
 			}
-			if !strings.Contains(r.both(), f.DirFor("eng-1646-app-landing-page-redesign")) {
+			// cd and rm answer with a path, so the path they resolved to is part
+			// of the answer. resume answers with a window, and names it instead.
+			if cmd != "resume" && !strings.Contains(r.both(), f.DirFor("eng-1646-app-landing-page-redesign")) {
 				t.Errorf("output = %q, want the resolved worktree", r.both())
 			}
 		})

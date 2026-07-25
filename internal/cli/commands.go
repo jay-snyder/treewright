@@ -83,11 +83,14 @@ func cmdNew(env *Env, args []string) error {
 	// nowhere else: `cd "$(treemux new foo)"` is meant to work.
 	fmt.Fprintln(env.Stdout, dir)
 
-	if !tmux.Inside() {
-		env.progressf("not in tmux; worktree ready at %s — cd in and run %s yourself", dir, cfg.Command)
-		return nil
+	// Reported rather than returned: the worktree exists, the branch exists, and
+	// the path is already on stdout, so `cd "$(treemux new eng-1)"` must not fail
+	// because tmux could not be made to open a window. resume and base do return
+	// it, a window being the whole of what they were asked for.
+	if err := openWindow(env, cfg, dir, cfg.WindowName(slug, override), cfg.Command); err != nil {
+		env.warnf("%v", err)
 	}
-	return tmux.NewWindow(dir, cfg.WindowName(slug, override), cfg.Command)
+	return nil
 }
 
 // validateSlug rejects slugs that would not round-trip through a directory name
@@ -274,7 +277,7 @@ func cmdRm(env *Env, args []string) error {
 	// exists. This is usually not the caller's own window: `treemux rm eng-1` is
 	// run from the base window, and the one left pointing at a deleted directory
 	// is the window named after the stream.
-	staleWindow := tmux.OpenWindows()[dir]
+	staleWindow := tmux.Windows(sessionFor(cfg))[dir]
 
 	if err := repo.RemoveWorktree(dir); err != nil {
 		return err
@@ -317,21 +320,31 @@ func escapeDeletedDir(env *Env, mainDir, goneDir string) {
 
 // offerWindowClose offers to close a tmux window whose worktree has been removed,
 // since it now points at a directory that does not exist. assumeYes closes
-// without asking, and an empty window means there was none open.
+// without asking, and a zero window means there was none open.
 //
 // The window is identified from the worktree's path rather than from the caller's
 // own pane, because a teardown is normally run from somewhere else: closing "the
 // window I am in" left the window named after the stream behind, still sitting in
 // the deleted directory.
-func offerWindowClose(env *Env, window string, assumeYes bool) {
-	if !tmux.Inside() || window == "" {
+//
+// No client is needed to close a window, so this runs outside tmux too: a stream
+// torn down from a plain shell should not leave a window behind in the session
+// waiting to be attached to.
+func offerWindowClose(env *Env, window tmux.Window, assumeYes bool) {
+	if window.ID == "" {
 		return
 	}
-	name := tmux.WindowName(window)
+	// Closing a session's last window ends the session, which moves an attached
+	// client elsewhere or detaches it. Normally the base window keeps the session
+	// alive, so this only comes up once that has been closed by hand.
+	last := ""
+	if tmux.LastInSession(window.ID) {
+		last = fmt.Sprintf(", the last in session %s, which ends with it", window.Session)
+	}
 
 	if assumeYes {
-		_ = tmux.KillWindow(window)
-		env.progressf("closed its tmux window (%s)", name)
+		_ = tmux.KillWindow(window.ID)
+		env.progressf("closed its tmux window (%s%s)", window.Name, last)
 		return
 	}
 
@@ -340,19 +353,19 @@ func offerWindowClose(env *Env, window string, assumeYes bool) {
 		// Nobody to ask — treemux was run by a script or an agent. Say what to
 		// run rather than closing a window unasked, since something may still be
 		// running in it.
-		env.progressf("its tmux window (%s) now points at a deleted directory; close it with: tmux kill-window -t %s",
-			name, window)
+		env.progressf("its tmux window (%s%s) now points at a deleted directory; close it with: tmux kill-window -t %s",
+			window.Name, last, window.ID)
 		return
 	}
 	defer tty.Close()
 
-	fmt.Fprintf(tty, "close its tmux window (%s)? [y/N] ", name)
+	fmt.Fprintf(tty, "close its tmux window (%s%s)? [y/N] ", window.Name, last)
 	answer, err := bufio.NewReader(tty).ReadString('\n')
 	if err != nil {
 		return
 	}
 	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(answer)), "y") {
-		_ = tmux.KillWindow(window)
+		_ = tmux.KillWindow(window.ID)
 	}
 }
 
@@ -374,7 +387,8 @@ func cmdLs(env *Env, args []string) error {
 	if err != nil {
 		return err
 	}
-	windows := tmux.OpenWindows()
+	session := sessionFor(cfg)
+	windows := tmux.Windows(session)
 
 	infos := make([]git.Info, 0, len(managed))
 	for _, wt := range managed {
@@ -390,7 +404,7 @@ func cmdLs(env *Env, args []string) error {
 		env.progressf("no worktrees for %s", repo.Name())
 		return nil
 	}
-	worktreeTable(infos, windows).Render(env.Stdout, ui.ColorEnabled(env.Stdout))
+	worktreeTable(infos, windows, session).Render(env.Stdout, ui.ColorEnabled(env.Stdout))
 	return nil
 }
 
@@ -446,7 +460,7 @@ func cmdPrune(env *Env, args []string) error {
 	// rm: prune can delete the very directory their shell sits in. Open windows
 	// are looked up for the same reason too, and while the worktrees still exist.
 	wd, wdErr := os.Getwd()
-	windows := tmux.OpenWindows()
+	windows := tmux.Windows(sessionFor(cfg))
 	stranded := ""
 
 	for _, wt := range targets {
@@ -502,25 +516,14 @@ func cmdResume(env *Env, args []string) error {
 		return fmt.Errorf("no worktrees to resume for %s", repo.Name())
 	}
 
-	// Fetched once and used both to render the menu and to decide below whether a
-	// window is already open on the chosen worktree.
-	windows := tmux.OpenWindows()
-
-	target, err := chooseWorktree(env, cfg, repo, managed, windows, slug)
+	target, err := chooseWorktree(env, cfg, repo, managed, slug)
 	if err != nil {
 		return err
 	}
 
-	if !tmux.Inside() {
-		env.progressf("not in tmux; run: cd %s && %s", target.Dir, cfg.ResumeCommand)
-		return nil
-	}
-	// A window already sitting in that directory is the session being asked for;
-	// switch to it rather than opening a duplicate.
-	if existing := windows[target.Dir]; existing != "" {
-		return tmux.SelectWindow(existing)
-	}
-	return tmux.NewWindow(target.Dir, cfg.WindowName(target.Slug, ""), cfg.ResumeCommand)
+	// openWindow does the rest: a window already open on that worktree is the
+	// session being asked for, so it is switched to rather than duplicated.
+	return openWindow(env, cfg, target.Dir, cfg.WindowName(target.Slug, ""), cfg.ResumeCommand)
 }
 
 // chooseWorktree picks the worktree a command should act on: the one named, the
@@ -529,7 +532,7 @@ func cmdResume(env *Env, args []string) error {
 // The menu is the `ls` table with a number beside each row, so the thing being
 // chosen from is the listing the user already reads, showing the status and
 // divergence that make the choice — not a bare list of names.
-func chooseWorktree(env *Env, cfg *config.Config, repo git.Repo, managed []git.Worktree, windows map[string]string, slug string) (git.Worktree, error) {
+func chooseWorktree(env *Env, cfg *config.Config, repo git.Repo, managed []git.Worktree, slug string) (git.Worktree, error) {
 	switch {
 	case slug != "":
 		return resolveSlug(env, repo, managed, slug)
@@ -543,9 +546,10 @@ func chooseWorktree(env *Env, cfg *config.Config, repo git.Repo, managed []git.W
 	for _, wt := range managed {
 		infos = append(infos, repo.Inspect(wt, cfg.BaseBranch))
 	}
+	session := sessionFor(cfg)
 	// The menu is a prompt, not an answer, so it goes to stderr: stdout still
 	// carries only the path the caller may be capturing.
-	header, rows := worktreeTable(infos, windows).Lines(ui.ColorEnabled(env.Stderr))
+	header, rows := worktreeTable(infos, tmux.Windows(session), session).Lines(ui.ColorEnabled(env.Stderr))
 	idx, err := ui.Pick(env.Stderr, header, rows)
 	if err != nil {
 		env.progressf("cancelled")
@@ -585,7 +589,7 @@ func cmdCd(env *Env, args []string) error {
 		return fmt.Errorf("no worktrees for %s — create one with \"treemux new <slug>\"", repo.Name())
 	}
 
-	target, err := chooseWorktree(env, cfg, repo, managed, tmux.OpenWindows(), slug)
+	target, err := chooseWorktree(env, cfg, repo, managed, slug)
 	if err != nil {
 		return err
 	}
@@ -618,11 +622,15 @@ func cmdBase(env *Env, args []string) error {
 		env.warnf("base checkout is on %s, not %s", where, cfg.BaseBranch)
 	}
 
-	if tmux.Inside() {
-		return tmux.NewWindow(cfg.MainDir, strings.ToUpper(cfg.BaseBranch), cfg.Command)
+	// The base window is found by the directory it sits in, like any other, so a
+	// session that already has one gets it selected rather than gaining a second
+	// window on the main checkout.
+	if tmux.Available() {
+		return openWindow(env, cfg, cfg.MainDir, strings.ToUpper(cfg.BaseBranch), cfg.Command)
 	}
 
-	// Outside tmux, run the command here and hand it the terminal.
+	// Without tmux there is no window to open, so run the command here and hand
+	// it the terminal.
 	cmd := exec.Command("sh", "-c", cfg.Command)
 	cmd.Dir = cfg.MainDir
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr

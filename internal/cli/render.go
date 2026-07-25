@@ -8,6 +8,7 @@ import (
 
 	"github.com/jay-snyder/treemux/internal/config"
 	"github.com/jay-snyder/treemux/internal/git"
+	"github.com/jay-snyder/treemux/internal/tmux"
 	"github.com/jay-snyder/treemux/internal/ui"
 )
 
@@ -61,6 +62,23 @@ func statusText(info git.Info) string {
 	}
 }
 
+// windowCell says where a worktree's window is, in the width of a table column.
+//
+// The window's own name is more use than a bare "open" — it is what the status
+// line shows — and a window that is not in this repository's session is named
+// with the session it is in instead, since that is the surprising case and the
+// one that explains why switching to it moves you somewhere unexpected.
+func windowCell(w tmux.Window, session string) string {
+	switch {
+	case w.ID == "":
+		return "-"
+	case w.Session != session:
+		return w.Session + ":" + w.Name
+	default:
+		return w.Name
+	}
+}
+
 // worktreeTable builds the table shown by `ls` and used as the `resume` and `cd`
 // menus, so a menu is a picker over the same rows the user already knows.
 //
@@ -68,7 +86,7 @@ func statusText(info git.Info) string {
 // holding it appears only when one of the rows is in fact the current directory:
 // a marker column that is blank on every row would be a permanent indent paid
 // for a case that is not occurring.
-func worktreeTable(infos []git.Info, windows map[string]string) ui.Table {
+func worktreeTable(infos []git.Info, windows map[string]tmux.Window, session string) ui.Table {
 	cwd, err := os.Getwd()
 	here := -1
 	if err == nil {
@@ -91,15 +109,11 @@ func worktreeTable(infos []git.Info, windows map[string]string) ui.Table {
 		if info.Compared {
 			divergence = fmt.Sprintf("+%d/-%d", info.Ahead, info.Behind)
 		}
-		window := "-"
-		if windows[info.Dir] != "" {
-			window = "open"
-		}
 		cells := []ui.Cell{
 			ui.Text(info.Slug),
 			ui.Colored(statusText(info), statusColor(info.Status)),
 			ui.Text(divergence),
-			ui.Text(window),
+			ui.Text(windowCell(windows[info.Dir], session)),
 		}
 		if here >= 0 {
 			marker := " "
@@ -126,20 +140,29 @@ type worktreeJSON struct {
 	Behind     *int   `json:"behind"`
 	DirtyFiles int    `json:"dirty_files"`
 	Unpushed   int    `json:"unpushed"`
-	Window     string `json:"window"`
+
+	// The open window, in three fields rather than one: the name is what a human
+	// reads, the id is what `tmux kill-window -t` takes, and the session is what
+	// `tmux attach -t` takes. All three are empty when no window is open.
+	Window        string `json:"window"`
+	WindowID      string `json:"window_id"`
+	WindowSession string `json:"window_session"`
 }
 
-func worktreesJSON(infos []git.Info, windows map[string]string) []worktreeJSON {
+func worktreesJSON(infos []git.Info, windows map[string]tmux.Window) []worktreeJSON {
 	out := make([]worktreeJSON, 0, len(infos))
 	for _, info := range infos {
+		w := windows[info.Dir]
 		row := worktreeJSON{
-			Slug:       info.Slug,
-			Dir:        info.Dir,
-			Branch:     info.Branch,
-			Status:     string(info.Status),
-			DirtyFiles: info.DirtyFiles,
-			Unpushed:   info.Unpushed,
-			Window:     windows[info.Dir],
+			Slug:          info.Slug,
+			Dir:           info.Dir,
+			Branch:        info.Branch,
+			Status:        string(info.Status),
+			DirtyFiles:    info.DirtyFiles,
+			Unpushed:      info.Unpushed,
+			Window:        w.Name,
+			WindowID:      w.ID,
+			WindowSession: w.Session,
 		}
 		if info.Compared {
 			ahead, behind := info.Ahead, info.Behind

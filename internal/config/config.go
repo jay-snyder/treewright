@@ -77,6 +77,12 @@ type Config struct {
 	// TicketPattern is a regular expression whose first submatch names the tmux
 	// window when it matches a slug. Defaults to DefaultTicketPattern.
 	TicketPattern string `toml:"ticket_pattern"`
+
+	// TmuxSession names the session holding this repository's windows. It
+	// defaults to the config's own name, and exists for the two cases the
+	// default cannot serve: a session name already taken by something else, and
+	// two configs that deliberately want to share one session.
+	TmuxSession string `toml:"tmux_session"`
 }
 
 // Dir returns the registry directory holding the per-repo config files.

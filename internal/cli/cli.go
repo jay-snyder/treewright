@@ -120,6 +120,11 @@ func init() {
 configured carry_files, runs post_create in the background, and opens a tmux
 window running the configured command.
 
+The window goes in this repository's own tmux session — named after its config —
+which is created if it is not running yet, so one repository's windows never mix
+with another's. Outside tmux the window is still created, detached, and treemux
+prints the command to attach with.
+
 The branch always forks from origin/<base_branch>; there is deliberately no flag
 to base it on anything else. When origin is unreachable, the local base branch is
 used instead and that is reported.
@@ -138,7 +143,8 @@ unless [window-name] overrides it.`,
 			args:    "[slug]",
 			summary: "reopen a window on an existing worktree",
 			long: `Opens a tmux window running the configured resume_command in the
-worktree, or switches to the window already open there.
+worktree, or switches to the window already open there — following it into
+another session if that is where it turns out to be.
 
 With no slug, a lone worktree is chosen automatically and otherwise a menu is
 shown. Naming a slug skips the menu, and an unambiguous prefix of one is enough.`,
@@ -163,7 +169,12 @@ shell for you.`,
 			summary: "open a window on the main checkout",
 			long: `Opens the persistent base window in the main checkout, for launching
 worktrees and asking general questions rather than for feature work. Warns when
-the checkout has drifted off the base branch.`,
+the checkout has drifted off the base branch.
+
+It is the same window every time: one already sitting in the main checkout is
+selected rather than a second one being opened beside it. Being the repository's
+session's first window, it is also what keeps that session alive as streams come
+and go.`,
 			run: cmdBase,
 		},
 		{
@@ -172,8 +183,10 @@ the checkout has drifted off the base branch.`,
 			args:    "[--json] [repo]",
 			summary: "list worktrees with their status",
 			long: `Prints one row per worktree: slug, status, divergence from
-origin/<base_branch>, and whether a tmux window is open in it. The worktree you
-are standing in is marked with an asterisk.
+origin/<base_branch>, and the tmux window open in it, by name. A window that is
+not in this repository's session is shown as session:window, since that is why
+resuming it would move you somewhere unexpected. The worktree you are standing in
+is marked with an asterisk.
 
 Changes no working tree, branch, or ref, though detecting a squash merge writes a
 dangling object to the object database. It also does not fetch, so a branch that

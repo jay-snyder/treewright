@@ -225,7 +225,11 @@ func renderConfig(name, mainDir, baseBranch, prefix string, carry []string) stri
 	fmt.Fprintf(&b, "# Regexp whose first submatch names the tmux window, so a slug like\n")
 	fmt.Fprintf(&b, "# eng-142-white-screen opens a window called ENG-142. Pin it to your own\n")
 	fmt.Fprintf(&b, "# ticket scheme to stop it matching any letters-dash-digits prefix.\n")
-	fmt.Fprintf(&b, "# ticket_pattern = %s\n", tomlString(config.DefaultTicketPattern))
+	fmt.Fprintf(&b, "# ticket_pattern = %s\n\n", tomlString(config.DefaultTicketPattern))
+
+	fmt.Fprintf(&b, "# The tmux session holding this repository's windows, so that they stay\n")
+	fmt.Fprintf(&b, "# separate from every other repository's. Defaults to %q.\n", name)
+	fmt.Fprintf(&b, "# tmux_session = %s\n", tomlString(name))
 
 	return b.String()
 }
@@ -295,6 +299,10 @@ func cmdConfig(env *Env, args []string) error {
 	add("resume_command", cfg.ResumeCommand, cfg.Explicit("resume_command"))
 	add("post_create", cfg.PostCreate, cfg.Explicit("post_create"))
 	add("ticket_pattern", cfg.TicketPattern, cfg.Explicit("ticket_pattern"))
+	// The session name in force, not the raw setting: what a reader wants to know
+	// is which session their windows land in, which is the config's name until
+	// tmux_session says otherwise.
+	add("tmux_session", sessionFor(cfg), cfg.Explicit("tmux_session"))
 
 	table.Render(env.Stdout, ui.ColorEnabled(env.Stdout))
 	return nil

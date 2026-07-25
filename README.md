@@ -10,17 +10,23 @@ your editor can all stay open per stream and never collide.
 
 ```mermaid
 flowchart TD
-    B["base session<br/>~/code/myrepo (on main)<br/>tmux window: MAIN"]
-    B -->|treemux new proj-142| W1["~/code/myrepo-proj-142<br/>branch alice/proj-142<br/>tmux window: PROJ-142"]
-    B -->|treemux new proj-143| W2["~/code/myrepo-proj-143<br/>branch alice/proj-143<br/>tmux window: PROJ-143"]
+    subgraph S["tmux session: myrepo"]
+        B["window MAIN<br/>~/code/myrepo (on main)"]
+        W1["window PROJ-142<br/>~/code/myrepo-proj-142<br/>branch alice/proj-142"]
+        W2["window PROJ-143<br/>~/code/myrepo-proj-143<br/>branch alice/proj-143"]
+    end
+    B -->|treemux new proj-142| W1
+    B -->|treemux new proj-143| W2
     W1 -.->|PR merges → treemux rm proj-142| X1["removed"]
     W2 -.->|PR merges → treemux rm proj-143| X2["removed"]
 ```
 
-- **One base session** lives in the main checkout, parked on the base branch. Use
-  it to spawn new work and ask general questions — never for feature work.
+- **One tmux session per repository**, named after its config, holding every
+  window treemux opens for it.
+- **One base window** sits in the main checkout, parked on the base branch. Use it
+  to spawn new work and ask general questions — never for feature work.
 - **Each stream** gets a worktree (`myrepo-<slug>`), a branch (`<prefix><slug>`),
-  and a tmux window named after its ticket.
+  and a window in that session named after its ticket.
 - **When the PR merges**, one command tears the whole stream down — and refuses
   if that would lose work.
 
@@ -94,6 +100,47 @@ treemux cd eng-142                 # jump between them
 treemux rm eng-142                 # when the PR merges
 ```
 
+## One session per repository
+
+Every repository's windows live in a tmux session of its own, named after its
+config: the base window in the main checkout, and one window per stream beside it.
+
+```
+tmux session "myrepo"                        tmux session "api-gateway"
+├── MAIN     ~/code/myrepo                   ├── MAIN     ~/code/api-gateway
+├── ENG-142  ~/code/myrepo-eng-142           └── API-7    ~/code/api-gateway-api-7
+└── ENG-143  ~/code/myrepo-eng-143
+```
+
+Two repositories sharing one session reads badly, which is what this exists to
+prevent: both have a window called `MAIN`, a ticket key alone does not say which
+checkout it belongs to, and a `treemux ls` for one repository describes windows
+sitting next to another's.
+
+What follows from it:
+
+- **`new` creates the session** when it is not running yet, so the first command
+  of the day is what establishes it. `resume` and `base` do the same.
+- **`base` is the same window every time.** A window already sitting in the main
+  checkout is selected rather than a second one opened beside it — and being the
+  session's first window, it is what keeps the session alive as streams come and go.
+- **Commands follow their window across sessions.** Resuming a stream while
+  attached to another repository's session switches you there.
+- **Outside tmux nothing is skipped.** The session and window are created
+  detached, and treemux prints the `tmux attach -t <session>` that reaches them.
+- **A window in the wrong session is used rather than duplicated** — one you
+  opened by hand, or one from before the repository had a session. `ls` shows it as
+  `session:window`, and `resume` switches to it there.
+
+`tmux_session` overrides the session name, for a name already taken by something
+else or two repositories that deliberately want to share one. `treemux doctor`
+reports which session each repository maps to, and warns when two configs name the
+same one.
+
+`TREEMUX_TMUX_LABEL` aims treemux at a non-default tmux server, the way `tmux -L`
+does. Inside tmux nothing needs it: treemux reaches the server it is running under
+through `$TMUX`.
+
 ## Configure
 
 One TOML file per repository, in
@@ -116,6 +163,7 @@ command        = "claude"              # launched by `new` and `base`
 resume_command = "claude --continue"   # launched by `resume`
 post_create    = "npm install"         # run in the background after `new` (default none)
 ticket_pattern = '(?i)^(proj-[0-9]+)'  # submatch 1 names the tmux window
+tmux_session   = "work"                # session holding the windows (default: the config's name)
 ```
 
 | Setting | Default | Purpose |
@@ -128,6 +176,7 @@ ticket_pattern = '(?i)^(proj-[0-9]+)'  # submatch 1 names the tmux window
 | `resume_command` | `claude --continue` | What `resume` launches. Set separately from `command`. |
 | `post_create` | none | Shell command run in the new worktree, in the background. Output goes to `<main_dir>/.git/treemux/post-create-<slug>.log`. |
 | `ticket_pattern` | `(?i)^([a-z]+-[0-9]+)` | Regexp whose first submatch names the tmux window. Non-matching slugs are truncated to 10 characters. |
+| `tmux_session` | the config's name | The tmux session this repository's windows go in. Periods and colons become dashes, since tmux reads them as target separators. |
 
 Unknown settings are an error rather than being silently ignored, so a
 misspelled key tells you instead of quietly doing nothing.
@@ -140,11 +189,11 @@ config, or the name you pass.
 
 | Command | What it does |
 |---|---|
-| `treemux new <slug> [window-name]` | Create a worktree and branch off the latest `origin/<base_branch>`, carry configured files in, and open a tmux window in it. |
-| `treemux resume [slug]` | Reopen a window on an existing worktree. Menu when the slug is omitted. |
+| `treemux new <slug> [window-name]` | Create a worktree and branch off the latest `origin/<base_branch>`, carry configured files in, and open a window on it in the repository's tmux session. |
+| `treemux resume [slug]` | Reopen a window on an existing worktree, or switch to the one already open. Menu when the slug is omitted. |
 | `treemux cd [slug]` | Move your shell into a worktree. Menu when the slug is omitted. |
-| `treemux base [repo]` | Open a window on the main checkout. |
-| `treemux ls [--json] [repo]` | List worktrees with status, divergence, and whether a tmux window is open in each. Changes no working tree, branch, or ref. |
+| `treemux base [repo]` | Select the base window on the main checkout, opening it if it is not there. |
+| `treemux ls [--json] [repo]` | List worktrees with status, divergence, and the tmux window open in each. Changes no working tree, branch, or ref. |
 | `treemux rm [-f] [-y] <slug>` | Tear down the worktree, branch, and stale remote ref, and offer to close its tmux window. Refuses when work would be lost, unless `--force`. |
 | `treemux prune [-y] [repo]` | Remove every merged, clean worktree. Lists them without `--yes`. |
 | `treemux setup [-n] [name]` | Write a config for the repository you are standing in, detecting what it can. |
@@ -200,7 +249,10 @@ Progress, warnings, prompts, and errors go to stderr, prefixed `warning:` or
 
 `ls` colors the status column when writing to a terminal, and stays plain when
 redirected or when `NO_COLOR` is set. `--json` reports `ahead` and `behind` as
-`null` rather than `0` when the branch cannot be compared to its base.
+`null` rather than `0` when the branch cannot be compared to its base, and
+describes an open window with three fields: `window` is its name, `window_id` is
+what `tmux kill-window -t` takes, and `window_session` is what `tmux attach -t`
+takes. All three are empty strings when no window is open.
 
 Exit codes: `0` success, `1` the command ran and failed, `2` it was invoked wrong.
 `doctor` exits `1` when a check fails, so it can gate a setup script.
@@ -267,10 +319,15 @@ config, or add a second one for a repository already registered.
 
 Removing a worktree leaves its tmux window pointing at a directory that is gone,
 so `rm` offers to close it — the window named after the stream, identified from the
-worktree's own path rather than from wherever you ran the command. `prune` asks per
-worktree it removed. Neither closes a window without asking unless you pass `--yes`
-to `rm`, because a window may still have a session running in it; with nobody to
-prompt, both print the `tmux kill-window` to run instead.
+worktree's own path rather than from wherever you ran the command, and closed even
+when it turns out to be in another session or when you are not in tmux at all.
+`prune` asks per worktree it removed. Neither closes a window without asking unless
+you pass `--yes` to `rm`, because a window may still have a session running in it;
+with nobody to prompt, both print the `tmux kill-window` to run instead.
+
+Closing a session's last window ends the session, which moves an attached client
+elsewhere or detaches it, so the prompt says when that is what is about to happen.
+Normally it is not: the base window outlives every stream.
 
 ## Development
 
@@ -283,6 +340,11 @@ gofmt -l .           # should print nothing
 The tests build real git repositories in temp directories and drive the
 subcommands end to end, including the squash-merge case, the removal guards, and
 the shell shims — each emitted shim is syntax-checked by the shell it targets.
+
+The tmux integration is tested against a real tmux server, private to each test:
+its own socket directory, its own server, killed afterwards, so a developer's own
+sessions and windows are never touched. Tests that need one skip when tmux is not
+installed, which is why CI installs it.
 
 Layout:
 

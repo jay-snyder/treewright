@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/jay-snyder/treemux/internal/config"
@@ -93,6 +94,7 @@ func cmdDoctor(env *Env, args []string) error {
 	for _, name := range names {
 		checkConfig(&r, name)
 	}
+	checkSessions(&r, names)
 	checkCurrentRepo(&r)
 
 	r.render(env)
@@ -112,10 +114,61 @@ func checkTmux(r *report) {
 		return
 	}
 	r.add(levelOK, "tmux at %s", path)
-	if !tmux.Inside() {
-		// Not a fault: treemux is often run from a plain shell, and every
-		// window-opening command says what to run by hand instead.
-		r.add(levelWarn, "not inside tmux — window commands will print what to run instead")
+	// Worth stating whenever it is set, because it redirects every tmux command
+	// treemux runs at a different server, and a window that opened "nowhere" is
+	// otherwise a mystery.
+	if label := os.Getenv("TREEMUX_TMUX_LABEL"); label != "" {
+		r.add(levelOK, "driving the tmux server %q, from TREEMUX_TMUX_LABEL", label)
+	}
+
+	switch session := tmux.CurrentSession(); {
+	case session != "":
+		r.add(levelOK, "attached to tmux session %s", session)
+	case tmux.Inside():
+		// $TMUX is set but the server behind it did not answer, which is what a
+		// stale environment inherited from a dead session looks like.
+		r.add(levelWarn, "$TMUX is set but its server does not answer — windows may open on another server")
+	default:
+		// Not a fault: treemux is often run from a plain shell, and windows are
+		// still opened, in the repository's own session, to attach to afterwards.
+		r.add(levelWarn, "not inside tmux — windows are created detached, and treemux says how to attach")
+	}
+}
+
+// checkSessions reports which session each repository's windows go to, and
+// catches the one way that can be got wrong: two configs naming one session,
+// which puts two repositories' windows back in the same status line — the thing
+// a session per repository exists to prevent.
+func checkSessions(r *report, names []string) {
+	if !tmux.Available() {
+		return
+	}
+	owners := make(map[string][]string)
+	for _, name := range names {
+		cfg, err := config.Load(filepath.Join(config.Dir(), name+".toml"))
+		if err != nil {
+			continue // already reported by checkConfig
+		}
+		session := sessionFor(cfg)
+		owners[session] = append(owners[session], name)
+		if tmux.HasSession(session) {
+			r.add(levelOK, "%s: tmux session %s is running", name, session)
+			continue
+		}
+		r.add(levelOK, "%s: tmux session %s, created by the first new, resume or base", name, session)
+	}
+
+	// Sorted, so that a report read twice reads the same way.
+	shared := make([]string, 0, len(owners))
+	for session, configs := range owners {
+		if len(configs) > 1 {
+			shared = append(shared, session)
+		}
+	}
+	sort.Strings(shared)
+	for _, session := range shared {
+		r.add(levelWarn, "configs %s share tmux session %s — their windows will mix",
+			strings.Join(owners[session], ", "), session)
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/jay-snyder/treemux/internal/gittest"
+	"github.com/jay-snyder/treemux/internal/tmux"
 )
 
 // fixture is a scratch repository plus a config registry pointing at it, so the
@@ -33,13 +35,91 @@ func newFixture(t *testing.T, extraConfig string) *fixture {
 	f.setConfig("main_dir = '" + repo.MainDir + "'\n" + extraConfig)
 
 	t.Setenv("TREEMUX_CONFIG_DIR", f.registry)
-	// Unset so every command takes its "not in tmux" branch and the test run
-	// opens no windows, and so no inherited eval file is written to.
+	// Unset so every command runs as it does from a plain shell — no client to
+	// switch, no inherited eval file to write to.
 	t.Setenv("TMUX", "")
 	t.Setenv("TMUX_PANE", "")
 	t.Setenv("TREEMUX_EVAL_FILE", "")
+	// Windows are still opened without a client, so every tmux command is aimed at
+	// a server private to this test. Nothing here can then open a window on, or
+	// kill a window in, the developer's own tmux — and a test that wants to assert
+	// about windows has a server it fully owns.
+	privateTmuxServer(t)
+	stubDefaultCommand(t)
 	t.Chdir(repo.MainDir)
 	return f
+}
+
+// stubDefaultCommand puts an inert "claude" first on PATH, that being what a new
+// window runs unless a test configures something else.
+//
+// Windows are real now, so without this a test that does not care what runs in
+// one would spawn a coding agent to find out — and only on a machine that has one
+// installed, which is the worst of both worlds. With it, every machine behaves the
+// same: the window opens, the command exits, the window closes.
+func stubDefaultCommand(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "claude"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write the claude stub: %v", err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+// requireTmux skips a test whose assertions need a real tmux server. CI installs
+// tmux, so a skip here means a developer's machine lacks it rather than that the
+// behavior is unverified.
+func requireTmux(t *testing.T) {
+	t.Helper()
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux is not installed")
+	}
+}
+
+// waitForFile polls for a file a background process is expected to create, since
+// neither post_create nor a command running in a tmux window is waited on.
+func waitForFile(t *testing.T, path, what string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(path); err == nil {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Errorf("%s never produced %s", what, path)
+}
+
+// privateTmuxServer points treemux at a tmux server of this test's own, in a
+// socket directory of its own, and takes both away afterwards. The server is not
+// started here: no test pays for one unless it runs a command that opens a window.
+//
+// The directory is under /tmp rather than the test's own temp directory because a
+// unix socket path is limited to little over a hundred characters, and a macOS
+// temp directory path is long enough to approach that by itself.
+//
+// Removing the directory is what cleans up, rather than asking tmux where its
+// socket is: kill-server does not unlink the socket, and a server whose last
+// window has already closed is not there to answer the question.
+func privateTmuxServer(t *testing.T) {
+	t.Helper()
+	dir, err := os.MkdirTemp("/tmp", "tmx")
+	if err != nil {
+		t.Fatalf("make a tmux socket directory: %v", err)
+	}
+	t.Setenv("TMUX_TMPDIR", dir)
+
+	// Sanitized for the same reason a session name is: a subtest's name contains
+	// a "/", which tmux would read as a path.
+	label := tmux.SessionName(strings.ReplaceAll(t.Name(), "/", "-"))
+	t.Setenv("TREEMUX_TMUX_LABEL", label)
+
+	// Registered after both Setenvs, so it runs before either is undone and the
+	// kill still finds the server.
+	t.Cleanup(func() {
+		_ = exec.Command("tmux", "-L", label, "kill-server").Run()
+		_ = os.RemoveAll(dir)
+	})
 }
 
 // setConfig writes the sole config, named "proj". base_branch and branch_prefix
@@ -317,15 +397,7 @@ func TestNewRunsPostCreate(t *testing.T) {
 	}
 	// The hook is deliberately not waited on, so poll for its effect rather than
 	// assuming it has already finished.
-	marker := filepath.Join(f.DirFor("hooked"), "post-create-marker")
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		if _, err := os.Stat(marker); err == nil {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Errorf("post_create never produced %s", marker)
+	waitForFile(t, filepath.Join(f.DirFor("hooked"), "post-create-marker"), "post_create")
 }
 
 // ---- rm --------------------------------------------------------------------
@@ -515,13 +587,17 @@ func TestPruneWithNothingToDo(t *testing.T) {
 // ---- resume ----------------------------------------------------------------
 
 func TestResume(t *testing.T) {
-	f := newFixture(t, "")
+	// The resume command outlives the command, so that the window it opens is
+	// still there to be reported on rather than having closed with it.
+	f := newFixture(t, "resume_command = 'sleep 300'\n")
 	f.mustRun("new", "alpha")
 	f.mustRun("new", "beta")
 
 	t.Run("explicit slug resolves without a prompt", func(t *testing.T) {
+		requireTmux(t)
 		out := f.mustRun("resume", "alpha")
-		want := "cd " + f.DirFor("alpha") + " && claude --continue"
+		// The window alpha's slug names, in the repository's own session.
+		want := "window ALPHA is open in tmux session proj"
 		if !strings.Contains(out, want) {
 			t.Errorf("output = %q, want %q", out, want)
 		}
@@ -529,8 +605,8 @@ func TestResume(t *testing.T) {
 
 	t.Run("prefixed slug is stripped", func(t *testing.T) {
 		out := f.mustRun("resume", "x/alpha")
-		if !strings.Contains(out, f.DirFor("alpha")) {
-			t.Errorf("output = %q, want the alpha worktree", out)
+		if !strings.Contains(out, `using "alpha"`) {
+			t.Errorf("output = %q, want the stripped prefix reported", out)
 		}
 	})
 
@@ -545,16 +621,19 @@ func TestResume(t *testing.T) {
 	})
 }
 
+// TestResumeUsesConfiguredCommand pins that the window runs what the config says
+// — nothing hardcodes any particular agent — by having resume_command leave a
+// file behind. The file appearing is the window having actually run it, which is
+// worth more than treemux reporting that it would.
 func TestResumeUsesConfiguredCommand(t *testing.T) {
-	f := newFixture(t, "command = 'codex'\nresume_command = 'codex resume'\n")
+	requireTmux(t)
+	marker := filepath.Join(t.TempDir(), "resumed")
+	f := newFixture(t, "command = 'true'\nresume_command = 'touch "+marker+"'\n")
 	f.mustRun("new", "solo")
 
-	// A lone worktree is chosen without a menu, and the configured command is
-	// what gets reported — nothing hardcodes any particular agent.
-	out := f.mustRun("resume")
-	if !strings.Contains(out, "codex resume") {
-		t.Errorf("output = %q, want the configured resume_command", out)
-	}
+	// A lone worktree is chosen without a menu.
+	f.mustRun("resume")
+	waitForFile(t, marker, "resume_command")
 }
 
 func TestResumeWithNoWorktrees(t *testing.T) {
@@ -802,9 +881,9 @@ func TestLsJSON(t *testing.T) {
 	if got.Ahead == nil || *got.Ahead != 1 {
 		t.Errorf("ahead = %v, want 1", got.Ahead)
 	}
-	if got.Window != "" {
-		t.Errorf("window = %q, want empty outside tmux", got.Window)
-	}
+	// The window fields are asserted by TestLsReportsTheOpenWindow, which owns a
+	// tmux server: whether a window is open here depends on how quickly the
+	// stubbed command exited, which is not this test's subject.
 }
 
 func TestLsJSONIsAnEmptyArrayWithNoWorktrees(t *testing.T) {

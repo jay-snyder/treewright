@@ -30,9 +30,18 @@ jobs:
       # targets, and skip any shell that is absent. Installing all three on
       # Linux is what actually covers the fish shim, since macOS runners (and
       # most development machines) have no fish.
-      - name: Install shells
+      #
+      # tmux is here for the same reason: the tests that cover a session per
+      # repository drive a real tmux server and skip when there is none, so an
+      # absent tmux would take the whole tmux integration out of CI without
+      # failing anything.
+      - name: Install shells and tmux
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y zsh fish
+        run: sudo apt-get update && sudo apt-get install -y zsh fish tmux
+
+      - name: Install tmux
+        if: runner.os == 'macOS'
+        run: command -v tmux || brew install tmux
 
       - name: gofmt
         run: |
