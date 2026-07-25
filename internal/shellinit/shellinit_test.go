@@ -106,8 +106,15 @@ func TestExternalCommandsResistAliases(t *testing.T) {
 }
 
 // TestWrapperSurvivesAnRmAlias runs the emitted shim in a real shell that has the
-// alias set, and checks the temp file is cleaned up without a prompt. This is the
-// end of the chain the unit test above only approximates.
+// alias set, and checks the temp file is cleaned up without a prompt.
+//
+// The shim is written to a file and sourced, rather than pasted into the program,
+// because that is the only shape in which the hazard occurs — and the shape a
+// startup file uses. Both shells expand aliases as they parse a function body, so
+// the alias has to already be in effect when the body is read: sourced after the
+// alias, `rm -f` becomes `rm -i -f`, while the same text inlined into one -c
+// argument is parsed before the alias statement ever runs and expands to nothing.
+// An earlier version of this test inlined it, and so proved nothing.
 func TestWrapperSurvivesAnRmAlias(t *testing.T) {
 	for _, shell := range []string{"zsh", "bash"} {
 		t.Run(shell, func(t *testing.T) {
@@ -120,18 +127,42 @@ func TestWrapperSurvivesAnRmAlias(t *testing.T) {
 				t.Fatalf("Script: %v", err)
 			}
 
+			dir := t.TempDir()
+			shim := filepath.Join(dir, "shim.sh")
+			if err := os.WriteFile(shim, []byte(script), 0o644); err != nil {
+				t.Fatalf("write shim: %v", err)
+			}
 			// A stub treemux on PATH that writes to the eval file, so the wrapper
 			// exercises the branch where it sources something and then cleans up.
-			dir := t.TempDir()
 			stub := filepath.Join(dir, "treemux")
 			if err := os.WriteFile(stub, []byte("#!/bin/sh\necho 'export TREEMUX_TEST_RAN=1' >> \"$TREEMUX_EVAL_FILE\"\n"), 0o755); err != nil {
 				t.Fatalf("write stub: %v", err)
 			}
 
-			// The alias is defined before the function, which is what makes zsh and
-			// bash bake it into the body.
-			program := "alias rm='rm -i'\nalias mktemp='mktemp -q'\n" + script +
-				"\ntreemux ls\necho \"ran=$TREEMUX_TEST_RAN\"\necho \"leftover=$(ls \"${TMPDIR:-/tmp}\" | grep -c '^treemux-eval\\.' || true)\"\n"
+			// bash disables alias expansion entirely when not interactive, so
+			// without this the bash case would silently test nothing.
+			//
+			// The probe is what keeps this test honest. It is a function defined
+			// the same way, through a fresh parse with the alias already in force,
+			// and it is expected to come out rewritten — proving aliases really
+			// are active here. The wrapper, defined identically but guarded with
+			// `command`, is expected to come out untouched. Asserting only the
+			// second would pass on a shell that expands nothing at all.
+			program := "shopt -s expand_aliases 2>/dev/null\n" +
+				"alias rm='rm -i'\nalias mktemp='mktemp -q'\n" +
+				"source " + shim + "\n" +
+				"treemux ls\n" +
+				"echo \"ran=$TREEMUX_TEST_RAN\"\n" +
+				"echo \"leftover=$(ls \"$TMPDIR\" | grep -c '^treemux-eval\\.' || true)\"\n" +
+				"eval 'probe() { rm -f /probe; }'\n" +
+				"case \"$(typeset -f probe)\" in\n" +
+				"  *'rm -i'*) echo 'aliases-active=yes' ;;\n" +
+				"  *) echo 'aliases-active=no' ;;\n" +
+				"esac\n" +
+				"case \"$(typeset -f treemux)\" in\n" +
+				"  *'rm -i'*) echo 'wrapper-rewritten=yes' ;;\n" +
+				"  *) echo 'wrapper-rewritten=no' ;;\n" +
+				"esac\n"
 
 			cmd := exec.Command(bin, "-c", program)
 			cmd.Env = append(os.Environ(), "PATH="+dir+string(os.PathListSeparator)+os.Getenv("PATH"), "TMPDIR="+dir)
@@ -144,6 +175,15 @@ func TestWrapperSurvivesAnRmAlias(t *testing.T) {
 			}
 			if !strings.Contains(string(out), "leftover=0") {
 				t.Errorf("the eval file was left behind, so cleanup did not run:\n%s", out)
+			}
+			// The guard against this test quietly ceasing to test anything: without
+			// an active alias, the run proves only that the wrapper works, not that
+			// it is immune to one.
+			if !strings.Contains(string(out), "aliases-active=yes") {
+				t.Errorf("%s expanded no alias into the probe, so this run proves nothing about the wrapper:\n%s", shell, out)
+			}
+			if !strings.Contains(string(out), "wrapper-rewritten=no") {
+				t.Errorf("the rm alias was baked into the wrapper body:\n%s", out)
 			}
 		})
 	}

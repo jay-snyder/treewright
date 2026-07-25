@@ -13,17 +13,24 @@ import (
 // CI deliberately has no tmux. The findings about configs are what these tests
 // pin, since those are the ones treemux computes.
 
-// findings splits doctor's report into level and detail per line.
-func findings(t *testing.T, f *fixture) map[string]string {
+// finding is one line of doctor's report.
+type finding struct{ level, detail string }
+
+// findings splits doctor's report into one entry per line, in the order printed.
+//
+// A slice rather than a map, and the reason is a test that passed on Linux and
+// failed on macOS: with map iteration, a substring matching two findings returned
+// whichever the runtime reached first. Order here is doctor's own.
+func findings(t *testing.T, f *fixture) []finding {
 	t.Helper()
 	r := f.exec("doctor")
-	found := map[string]string{}
+	var found []finding
 	for _, line := range strings.Split(strings.TrimRight(r.stdout, "\n"), "\n") {
 		level, detail, ok := strings.Cut(strings.TrimSpace(line), " ")
 		if !ok {
 			continue
 		}
-		found[strings.TrimSpace(detail)] = level
+		found = append(found, finding{level: level, detail: strings.TrimSpace(detail)})
 	}
 	if len(found) == 0 {
 		t.Fatalf("doctor printed nothing to stdout\nstderr: %s", r.stderr)
@@ -31,14 +38,30 @@ func findings(t *testing.T, f *fixture) map[string]string {
 	return found
 }
 
-// has reports the level of the first finding containing substr.
-func has(found map[string]string, substr string) string {
-	for detail, level := range found {
-		if strings.Contains(detail, substr) {
-			return level
+// has reports the level of the finding containing substr, and fails when substr
+// matches more than one.
+//
+// The ambiguity check is the point: "not on PATH" appears both in the tmux check
+// and in the command check, so on a machine without tmux an assertion meant for
+// one silently read the other. A substring that no longer identifies a single
+// finding is a broken assertion, not a passing one.
+func has(t *testing.T, found []finding, substr string) string {
+	t.Helper()
+	var matched []finding
+	for _, fi := range found {
+		if strings.Contains(fi.detail, substr) {
+			matched = append(matched, fi)
 		}
 	}
-	return ""
+	switch len(matched) {
+	case 0:
+		return ""
+	case 1:
+		return matched[0].level
+	default:
+		t.Fatalf("%q matches %d findings, so the assertion is ambiguous: %v", substr, len(matched), matched)
+		return ""
+	}
 }
 
 func TestDoctorApprovesAHealthySetup(t *testing.T) {
@@ -51,7 +74,7 @@ func TestDoctorApprovesAHealthySetup(t *testing.T) {
 		{"proj: forks from origin/main", "ok"},
 		{`here, commands use "proj"`, "ok"},
 	} {
-		if got := has(found, tc.substr); got != tc.want {
+		if got := has(t, found, tc.substr); got != tc.want {
 			t.Errorf("finding for %q = %q, want %q\nall: %v", tc.substr, got, tc.want, found)
 		}
 	}
@@ -96,10 +119,10 @@ func TestDoctorReportsMissingCarryFiles(t *testing.T) {
 	// A stale carry_files entry breaks the app inside a fresh worktree and says
 	// nothing until then, so it is worth a warning here — but not a failure, since
 	// treemux itself still works.
-	if got := has(found, "carry_files .env is missing"); got != "warn" {
+	if got := has(t, found, "carry_files .env is missing"); got != "warn" {
 		t.Errorf("finding = %q, want a warning\nall: %v", got, found)
 	}
-	if got := has(found, "apps/api/.env is missing"); got != "warn" {
+	if got := has(t, found, "apps/api/.env is missing"); got != "warn" {
 		t.Errorf("finding = %q, want a warning for the nested path", got)
 	}
 }
@@ -113,7 +136,7 @@ func TestDoctorReportsStrayRegistryFiles(t *testing.T) {
 	}
 
 	found := findings(t, f)
-	switch got := has(found, "proj.zsh"); got {
+	switch got := has(t, found, "proj.zsh"); got {
 	case "warn": // as intended
 	case "":
 		t.Errorf("the stray file went unmentioned\nall: %v", found)
@@ -139,7 +162,7 @@ func TestDoctorReportsAMissingCommand(t *testing.T) {
 	f := newFixture(t, "command = 'definitely-not-installed-anywhere'\nresume_command = 'true'\n")
 
 	found := findings(t, f)
-	if got := has(found, "not on PATH"); got != "warn" {
+	if got := has(t, found, `runs "definitely-not-installed-anywhere"`); got != "warn" {
 		t.Errorf("finding = %q, want a warning that the command is missing\nall: %v", got, found)
 	}
 }
@@ -150,7 +173,7 @@ func TestDoctorOutsideARepository(t *testing.T) {
 
 	found := findings(t, f)
 	// Not a fault, but it explains why commands here ask for a [repo].
-	if got := has(found, "not inside a git repository"); got != "warn" {
+	if got := has(t, found, "not inside a git repository"); got != "warn" {
 		t.Errorf("finding = %q, want a warning\nall: %v", got, found)
 	}
 }
