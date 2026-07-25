@@ -65,6 +65,11 @@ otherwise be left in a directory that no longer exists — with the integration 
 moves you to the main checkout automatically. Everything else works either way;
 without it, treemux prints the `cd` for you to run.
 
+If a shell function named `treemux` already exists in your shell — migrating from
+a shell-script predecessor, say — write the eval as `eval "$(command treemux
+shell-init zsh)"`. `command` skips functions and aliases, so the line cannot ask
+the thing being replaced for its own replacement.
+
 ## Get started
 
 Inside the repository you want to work on:
