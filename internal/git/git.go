@@ -164,6 +164,64 @@ func CurrentBranch(dir string) (string, error) {
 	return runIn(dir, "branch", "--show-current")
 }
 
+// ---- introspection, for setup and doctor -----------------------------------
+
+// DefaultBranch reports the branch a clone of this repo would check out, by
+// reading the symbolic ref origin/HEAD that git records at clone time.
+//
+// Falls back to whatever the main checkout currently has out, then to "main".
+// The point is to guess a base branch well enough that a generated config is
+// usually right, not to be authoritative: the value lands in a file the user can
+// edit, and every command reports which branch it forked from.
+//
+// origin/HEAD is only trusted when the branch it names still resolves. It is a
+// symbolic ref recorded once, at clone time, from whatever the remote's own HEAD
+// then said — so it can outlive a renamed default branch, or name a branch that
+// was never pushed at all. Returning such a name would put a base_branch in a
+// generated config that nothing can fork from.
+func (r Repo) DefaultBranch() string {
+	if out, err := r.run("symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"); err == nil {
+		if branch := strings.TrimPrefix(out, "refs/remotes/origin/"); branch != out && branch != "" {
+			if r.RefExists("refs/remotes/origin/" + branch) {
+				return branch
+			}
+		}
+	}
+	if branch, err := CurrentBranch(r.Dir); err == nil && branch != "" {
+		return branch
+	}
+	return "main"
+}
+
+// UserEmail reports the git identity in force for this repo, respecting any
+// repo-local override of the global setting. Empty when none is configured.
+func (r Repo) UserEmail() string {
+	out, err := r.run("config", "user.email")
+	if err != nil {
+		return ""
+	}
+	return out
+}
+
+// HasRemote reports whether a remote of this name is configured.
+func (r Repo) HasRemote(name string) bool {
+	return r.runOK("remote", "get-url", name)
+}
+
+// IgnoredFiles lists paths git is ignoring, relative to the main checkout.
+//
+// --directory collapses a wholly ignored directory into a single entry ending in
+// "/", which is what keeps node_modules from contributing thousands of paths
+// while still listing an ignored file that sits in an otherwise tracked
+// directory, such as apps/api/.env.
+func (r Repo) IgnoredFiles() []string {
+	out, err := r.run("ls-files", "--others", "--ignored", "--exclude-standard", "--directory")
+	if err != nil || out == "" {
+		return nil
+	}
+	return strings.Split(out, "\n")
+}
+
 // ---- state queries ---------------------------------------------------------
 
 // DirtyFiles counts uncommitted changes in a worktree, staged or not, including

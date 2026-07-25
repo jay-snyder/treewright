@@ -283,3 +283,80 @@ func TestWorktreesReportsBranchWithoutRefPrefix(t *testing.T) {
 		}
 	}
 }
+
+// ---- introspection, as setup and doctor use it -----------------------------
+
+// TestDefaultBranchReadsOriginHEAD covers the value setup writes as base_branch.
+// The clone below is what records origin/HEAD; a repo assembled by init and
+// remote add — which is what the fixture is — has no such ref, so both the
+// preferred route and the fallback are exercised.
+func TestDefaultBranchReadsOriginHEAD(t *testing.T) {
+	f := gittest.New(t)
+
+	if got := (git.Repo{Dir: f.MainDir}).DefaultBranch(); got != "main" {
+		t.Errorf("DefaultBranch with no origin/HEAD = %q, want main from the checked-out branch", got)
+	}
+
+	clone := filepath.Join(f.Root, "cloned")
+	f.Git(f.Root, "clone", "--quiet", f.Origin, clone)
+	if got := (git.Repo{Dir: clone}).DefaultBranch(); got != "main" {
+		t.Errorf("DefaultBranch in a clone = %q, want main", got)
+	}
+
+	// origin/HEAD is recorded once, at clone time, and survives the branch it
+	// names being renamed or never pushed. Trusting it blindly would write a
+	// base_branch into a generated config that nothing can fork from.
+	f.Git(clone, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk")
+	if got := (git.Repo{Dir: clone}).DefaultBranch(); got != "main" {
+		t.Errorf("DefaultBranch with a stale origin/HEAD = %q, want the checked-out main", got)
+	}
+}
+
+func TestUserEmailAndRemote(t *testing.T) {
+	f := gittest.New(t)
+	repo := git.Repo{Dir: f.MainDir}
+
+	if got := repo.UserEmail(); got != "test@example.com" {
+		t.Errorf("UserEmail = %q, want the repo-local identity", got)
+	}
+	if !repo.HasRemote("origin") {
+		t.Error("HasRemote(origin) = false, want true")
+	}
+	if repo.HasRemote("upstream") {
+		t.Error("HasRemote(upstream) = true, want false for a remote that is not configured")
+	}
+}
+
+// TestIgnoredFilesCollapsesIgnoredDirectories is why setup can propose carry
+// files at all: without the collapse, a repo with node_modules reports thousands
+// of paths and nothing useful can be filtered out of them.
+func TestIgnoredFilesCollapsesIgnoredDirectories(t *testing.T) {
+	f := gittest.New(t)
+	f.Write(f.MainDir, ".gitignore", ".env\nnode_modules/\n")
+	f.Git(f.MainDir, "add", ".gitignore")
+	f.Git(f.MainDir, "commit", "--quiet", "-m", "ignore rules")
+
+	f.Write(f.MainDir, ".env", "SECRET=1\n")
+	f.Write(f.MainDir, "node_modules/pkg/index.js", "module.exports = 1\n")
+	f.Write(f.MainDir, "node_modules/pkg/.env", "junk\n")
+
+	got := (git.Repo{Dir: f.MainDir}).IgnoredFiles()
+	var sawEnv, sawDir bool
+	for _, rel := range got {
+		switch rel {
+		case ".env":
+			sawEnv = true
+		case "node_modules/":
+			sawDir = true
+		}
+		if strings.HasPrefix(rel, "node_modules/") && rel != "node_modules/" {
+			t.Errorf("listed %q inside a wholly ignored directory", rel)
+		}
+	}
+	if !sawEnv {
+		t.Errorf("IgnoredFiles = %v, want .env listed individually", got)
+	}
+	if !sawDir {
+		t.Errorf("IgnoredFiles = %v, want node_modules collapsed to one entry", got)
+	}
+}

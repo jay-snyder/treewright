@@ -356,3 +356,28 @@ func TestBranchAndDirFor(t *testing.T) {
 		t.Errorf("DirFor = %q, want %q", got, want)
 	}
 }
+
+// ---- reporting -------------------------------------------------------------
+
+// TestExplicitDistinguishesSettingFromDefaulting is what lets `treemux config`
+// say which values were chosen. A setting that happens to match its default is
+// the case that makes comparing values insufficient.
+func TestExplicitDistinguishesSettingFromDefaulting(t *testing.T) {
+	dir := registry(t, map[string]string{
+		"proj": "main_dir = \"/tmp/repo\"\nbase_branch = \"" + DefaultBaseBranch + "\"\n",
+	})
+
+	c, err := Load(filepath.Join(dir, "proj.toml"))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !c.Explicit("base_branch") {
+		t.Error("base_branch was set to the default value, and reads as never set")
+	}
+	if c.Explicit("command") {
+		t.Error("command was never set, and reads as explicit")
+	}
+	if got, want := c.Path(), filepath.Join(dir, "proj.toml"); got != want {
+		t.Errorf("Path = %q, want %q", got, want)
+	}
+}

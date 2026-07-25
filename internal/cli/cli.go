@@ -87,16 +87,22 @@ type flagDoc struct {
 
 type command struct {
 	name    string
-	args    string // argument spec shown in usage, e.g. "<slug> [window-name]"
-	summary string // one line, for the command list
-	long    string // optional detail paragraphs
+	aliases []string // accepted spellings, kept out of help so one name is canonical
+	args    string   // argument spec shown in usage, e.g. "<slug> [window-name]"
+	summary string   // one line, for the command list
+	long    string   // optional detail paragraphs
 	flags   []flagDoc
 	hidden  bool // kept out of help and completion
 	run     func(*Env, []string) error
 }
 
-// commands is ordered as it should read in help: the everyday lifecycle first,
-// then inspection, then setup.
+// commands is ordered as it should read in help: first the four that get you
+// into a stream of work, then inspection, then teardown, then installation.
+//
+// Several carry aliases for the name a newcomer is likelier to reach for.
+// They are deliberately absent from help and completion: accepting a second
+// spelling costs nothing, but listing it would present two names for one thing
+// and leave the reader deciding which is real.
 //
 // Populated in init rather than as a var literal because the table names
 // cmdComplete, which reads the table back to list a command's flags — written as
@@ -107,6 +113,7 @@ func init() {
 	commands = []*command{
 		{
 			name:    "new",
+			aliases: []string{"create"},
 			args:    "<slug> [window-name]",
 			summary: "create a worktree and branch, and open a tmux window in it",
 			long: `Creates the worktree repo-<slug> on branch <prefix><slug>, copies in the
@@ -117,12 +124,69 @@ The branch always forks from origin/<base_branch>; there is deliberately no flag
 to base it on anything else. When origin is unreachable, the local base branch is
 used instead and that is reported.
 
+When a branch of that name already exists — your own earlier work, or a colleague's
+pull request you have fetched — it is checked out rather than recreated, so this is
+also how you get a worktree onto an existing branch.
+
 The window is named after a ticket key found in the slug, or the truncated slug,
 unless [window-name] overrides it.`,
 			run: cmdNew,
 		},
 		{
+			name:    "resume",
+			aliases: []string{"reopen"},
+			args:    "[slug]",
+			summary: "reopen a window on an existing worktree",
+			long: `Opens a tmux window running the configured resume_command in the
+worktree, or switches to the window already open there.
+
+With no slug, a lone worktree is chosen automatically and otherwise a menu is
+shown. Naming a slug skips the menu, and an unambiguous prefix of one is enough.`,
+			run: cmdResume,
+		},
+		{
+			name:    "cd",
+			args:    "[slug]",
+			summary: "move your shell into a worktree",
+			long: `Changes the calling shell's directory to a worktree, choosing from a
+menu when no slug is given. An unambiguous prefix of a slug is enough.
+
+The path is also printed, so this works without the shell integration as
+cd "$(treemux cd <slug>)" — but with the integration loaded, treemux moves your
+shell for you.`,
+			run: cmdCd,
+		},
+		{
+			name:    "base",
+			aliases: []string{"main", "home"},
+			args:    "[repo]",
+			summary: "open a window on the main checkout",
+			long: `Opens the persistent base window in the main checkout, for launching
+worktrees and asking general questions rather than for feature work. Warns when
+the checkout has drifted off the base branch.`,
+			run: cmdBase,
+		},
+		{
+			name:    "ls",
+			aliases: []string{"list", "status"},
+			args:    "[--json] [repo]",
+			summary: "list worktrees with their status",
+			long: `Prints one row per worktree: slug, status, divergence from
+origin/<base_branch>, and whether a tmux window is open in it. The worktree you
+are standing in is marked with an asterisk.
+
+Changes no working tree, branch, or ref, though detecting a squash merge writes a
+dangling object to the object database. It also does not fetch, so a branch that
+landed since your last fetch still reads as active; rm and prune fetch before they
+judge, and so can disagree with a stale listing.`,
+			flags: []flagDoc{
+				{"--json", "print machine-readable output instead of a table"},
+			},
+			run: cmdLs,
+		},
+		{
 			name:    "rm",
+			aliases: []string{"remove", "delete"},
 			args:    "[-f] [-y] <slug>",
 			summary: "tear down a worktree and its branch",
 			long: `Removes the worktree, deletes the local branch, and prunes the stale
@@ -130,26 +194,18 @@ remote-tracking ref.
 
 Refuses when the branch holds work that exists nowhere else — uncommitted changes
 or commits on no origin ref — unless --force is given. Work that reached origin
-only as a squash merge is recognized as landed and does not trigger the refusal.`,
+only as a squash merge is recognized as landed and does not trigger the refusal.
+
+An unambiguous prefix of a slug is enough to name it.
+
+The tmux window open on that worktree is now pointing at a directory that no
+longer exists, so treemux offers to close it — the window named after the stream,
+not whichever one you happened to run this from.`,
 			flags: []flagDoc{
 				{"-f, --force", "remove even when unsaved work would be lost"},
-				{"-y, --yes", "do not ask before closing the tmux window"},
+				{"-y, --yes", "close the worktree's tmux window without asking"},
 			},
 			run: cmdRm,
-		},
-		{
-			name:    "ls",
-			args:    "[--json] [repo]",
-			summary: "list worktrees with their status",
-			long: `Prints one row per worktree: slug, status, divergence from
-origin/<base_branch>, and whether a tmux window is open in it.
-
-Changes no working tree, branch, or ref, though detecting a squash merge writes a
-dangling object to the object database.`,
-			flags: []flagDoc{
-				{"--json", "print machine-readable output instead of a table"},
-			},
-			run: cmdLs,
 		},
 		{
 			name:    "prune",
@@ -159,43 +215,72 @@ dangling object to the object database.`,
 whose tree is clean. Nothing is removed until --yes is given.
 
 A pushed but unmerged branch is never a target: prune reaps landed work, not open
-pull requests.`,
+pull requests.
+
+Closing the tmux window left open on each removed worktree is asked about
+separately: --yes answers for the worktrees, not for windows that may still have
+something running in them.`,
 			flags: []flagDoc{
 				{"-y, --yes", "actually remove them, instead of listing"},
 			},
 			run: cmdPrune,
 		},
 		{
-			name:    "resume",
-			args:    "[slug]",
-			summary: "reopen a window on an existing worktree",
-			long: `Opens a tmux window running the configured resume_command in the
-worktree, or switches to the window already open there.
+			name:    "setup",
+			args:    "[-n] [name]",
+			summary: "write a config for the repository you are standing in",
+			long: `Registers the current repository by writing a config file for it,
+filling in what can be detected: the main checkout, the base branch from
+origin/HEAD, a branch prefix from your git email, and any gitignored env files
+worth carrying into new worktrees.
 
-With no slug, a lone worktree is chosen automatically and otherwise a menu is
-shown. Naming a slug skips the menu.`,
-			run: cmdResume,
+Everything it guesses is reported and written as editable TOML — the file is the
+record, not this command. It refuses to overwrite an existing config.
+
+The name defaults to the repository's directory name, and is what you pass to
+commands that take a [repo].`,
+			flags: []flagDoc{
+				{"-n, --dry-run", "print the config instead of writing it"},
+			},
+			run: cmdSetup,
 		},
 		{
-			name:    "base",
+			name:    "config",
 			args:    "[repo]",
-			summary: "open a window on the main checkout",
-			long: `Opens the persistent base window in the main checkout, for launching
-worktrees and asking general questions rather than for feature work. Warns when
-the checkout has drifted off the base branch.`,
-			run: cmdBase,
+			summary: "print the settings in force, defaults included",
+			long: `Prints the configuration this repository is actually running under:
+every setting with its value, defaults filled in, paths expanded, and the file it
+was read from.
+
+What a config file leaves out is where confusion lives — this is how you find out
+which base branch a command would really fork from.`,
+			run: cmdConfig,
 		},
 		{
-			name:    "init",
+			name:    "doctor",
+			summary: "check the installation and every registered config",
+			long: `Verifies the parts that have to line up for treemux to work: tmux
+installed, the shell integration loaded, the registry readable, and for each
+config its main checkout, origin remote, base branch, carry_files and command.
+
+Exits non-zero when a check fails, so it can gate a setup script. Warnings — a
+missing carry file, no tmux server running yet — do not fail the run.`,
+			run: cmdDoctor,
+		},
+		{
+			// Named for what it does to a shell, leaving "init" to read as
+			// "initialize this repository" — which is what a newcomer expects it to
+			// mean, and is what setup does.
+			name:    "shell-init",
 			args:    "<shell>",
 			summary: "print the shell integration for zsh, bash, or fish",
 			long: `Prints a snippet to load from your shell's startup file:
 
-    eval "$(treemux init zsh)"     # or bash
-    treemux init fish | source
+    eval "$(treemux shell-init zsh)"     # or bash
+    treemux shell-init fish | source
 
-It defines a wrapper function, so that rm can move your shell out of a directory
-it just deleted, and registers tab completion.`,
+It defines a wrapper function, so that cd can move your shell and rm can move it
+out of a directory it just deleted, and registers tab completion.`,
 			run: cmdInit,
 		},
 		{
@@ -208,13 +293,86 @@ it just deleted, and registers tab completion.`,
 	}
 }
 
+// lookup finds a command by its canonical name or any of its aliases.
 func lookup(name string) *command {
 	for _, c := range commands {
 		if c.name == name {
 			return c
 		}
+		for _, alias := range c.aliases {
+			if alias == name {
+				return c
+			}
+		}
 	}
 	return nil
+}
+
+// suggest names the command a mistyped word most likely meant, or "" when
+// nothing is close enough to be worth guessing at.
+//
+// Aliases are searched alongside canonical names but resolve to the canonical
+// one, so a user who types "remov" is told about rm rather than about a name
+// help does not list.
+func suggest(name string) string {
+	best, bestDist := "", 0
+	for _, c := range commands {
+		if c.hidden {
+			continue
+		}
+		for _, candidate := range append([]string{c.name}, c.aliases...) {
+			// A prefix of a command is nearly always that command — "wor" for
+			// worktree — and beats any edit-distance reading of it.
+			if len(name) >= 2 && strings.HasPrefix(candidate, name) {
+				return c.name
+			}
+			// Otherwise allow one edit per three characters, so short names are
+			// not matched by anything vaguely similar: "ls" tolerates no typo,
+			// "resume" tolerates two.
+			budget := 1 + len(candidate)/3
+			if d := editDistance(name, candidate); d <= budget && (best == "" || d < bestDist) {
+				best, bestDist = c.name, d
+			}
+		}
+	}
+	return best
+}
+
+// editDistance is the Levenshtein distance between two words: how many single
+// character insertions, deletions or substitutions separate them.
+//
+// Only one row of the matrix is kept, since each cell depends solely on the row
+// above and the cell to its left.
+func editDistance(a, b string) int {
+	prev := make([]int, len(b)+1)
+	curr := make([]int, len(b)+1)
+	for j := range prev {
+		prev[j] = j
+	}
+	for i := 1; i <= len(a); i++ {
+		curr[0] = i
+		for j := 1; j <= len(b); j++ {
+			cost := 1
+			if a[i-1] == b[j-1] {
+				cost = 0
+			}
+			curr[j] = min(prev[j]+1, min(curr[j-1]+1, prev[j-1]+cost))
+		}
+		prev, curr = curr, prev
+	}
+	return prev[len(b)]
+}
+
+// unknownCommand reports a name that is not a command, pointing at the nearest
+// one when there is a plausible candidate.
+func unknownCommand(env *Env, name string) error {
+	if did := suggest(name); did != "" {
+		fmt.Fprintf(env.Stderr, "error: unknown command %q — did you mean %q?\n\n", name, did)
+	} else {
+		fmt.Fprintf(env.Stderr, "error: unknown command %q\n\n", name)
+	}
+	writeOverview(env.Stderr)
+	return ErrUsage
 }
 
 // ---- dispatch --------------------------------------------------------------
@@ -239,9 +397,7 @@ func Run(env Env) error {
 		if len(rest) > 0 {
 			target := lookup(rest[0])
 			if target == nil || target.hidden {
-				fmt.Fprintf(env.Stderr, "error: unknown command %q\n\n", rest[0])
-				writeOverview(env.Stderr)
-				return ErrUsage
+				return unknownCommand(&env, rest[0])
 			}
 			writeCommandHelp(env.Stdout, target)
 			return nil
@@ -255,9 +411,7 @@ func Run(env Env) error {
 
 	cmd := lookup(name)
 	if cmd == nil {
-		fmt.Fprintf(env.Stderr, "error: unknown command %q\n\n", name)
-		writeOverview(env.Stderr)
-		return ErrUsage
+		return unknownCommand(&env, name)
 	}
 
 	// -h on a subcommand is a request for its help, not a flag it must accept.
@@ -306,7 +460,8 @@ func writeOverview(w io.Writer) {
 		fmt.Fprintf(w, "  %-*s  %s\n", width, strings.TrimSpace(c.name+" "+c.args), c.summary)
 	}
 
-	fmt.Fprintf(w, "\nrun \"treemux help <command>\" for detail on one command.\n")
+	fmt.Fprintf(w, "\nrun \"treemux help <command>\" for detail on one command,\n")
+	fmt.Fprintf(w, "or \"treemux setup\" inside a repository to register it.\n")
 	fmt.Fprintf(w, "\nconfig: %s/<name>.toml\n", config.Dir())
 }
 

@@ -10,17 +10,17 @@ import (
 
 // cmdInit prints the shell integration for the named shell.
 func cmdInit(env *Env, args []string) error {
-	positional, err := parseArgs("init", args, nil, 1)
+	positional, err := parseArgs("shell-init", args, nil, 1)
 	if err != nil {
 		return err
 	}
 	shell := at(positional, 0)
 	if shell == "" {
-		return usageErrorf("init", "a shell is required (one of: %s)", strings.Join(shellinit.Shells(), ", "))
+		return usageErrorf("shell-init", "a shell is required (one of: %s)", strings.Join(shellinit.Shells(), ", "))
 	}
 	script, err := shellinit.Script(shell)
 	if err != nil {
-		return usageErrorf("init", "%v", err)
+		return usageErrorf("shell-init", "%v", err)
 	}
 	fmt.Fprint(env.Stdout, script)
 	return nil

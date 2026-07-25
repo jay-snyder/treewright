@@ -40,6 +40,15 @@ func cmdNew(env *Env, args []string) error {
 	dir := cfg.DirFor(slug)
 	branch := cfg.BranchFor(slug)
 
+	// Checked before anything is reported, because git's own refusal arrives
+	// several steps in — after "reusing existing branch" has already been printed
+	// — and says "already exists" about a path rather than naming the command
+	// that opens what is already there.
+	if _, err := os.Stat(dir); err == nil {
+		return fmt.Errorf("worktree for %s already exists at %s — open it with \"treemux resume %s\"",
+			slug, dir, slug)
+	}
+
 	switch {
 	case repo.BranchExists(branch):
 		env.progressf("reusing existing branch %s", branch)
@@ -81,17 +90,43 @@ func cmdNew(env *Env, args []string) error {
 	return tmux.NewWindow(dir, cfg.WindowName(slug, override), cfg.Command)
 }
 
-// validateSlug rejects slugs that would not round-trip through a directory name.
+// validateSlug rejects slugs that would not round-trip through a directory name
+// or a branch name.
 //
 // A slug containing "/" turns "<repo>-a/b" into a nested path: `new` silently
 // creates the intermediate "<repo>-a" directory and `rm` later removes only the
 // leaf, leaving it behind empty.
+//
+// The rest of the rules are git's, from check-ref-format. They are restated here
+// rather than delegated to git so that the answer is one sentence naming the
+// slug, instead of git's several lines about ref syntax arriving from three steps
+// deeper — by which point treemux has already announced what it was about to do.
 func validateSlug(slug string) error {
 	if slug == "" {
 		return usageErrorf("new", "the slug is empty once the branch prefix is removed")
 	}
 	if strings.Contains(slug, "/") {
 		return usageErrorf("new", "slug %q cannot contain %q — it would nest the worktree inside a stray directory", slug, "/")
+	}
+	if strings.ContainsAny(slug, " \t\n") {
+		return usageErrorf("new", "slug %q cannot contain whitespace — it becomes both a directory and a branch name", slug)
+	}
+	// git rejects these outright in a ref name; ~^: and ? * [ are its wildcard
+	// and revision syntax, and control characters are simply forbidden.
+	for _, r := range slug {
+		if strings.ContainsRune("~^:?*[\\", r) || r < 0x20 || r == 0x7f {
+			return usageErrorf("new", "slug %q cannot contain %q — git does not allow it in a branch name", slug, r)
+		}
+	}
+	// The positional rules: a leading dash reads as a flag, and the others are
+	// spellings git reserves.
+	switch {
+	case strings.HasPrefix(slug, "-"):
+		return usageErrorf("new", "slug %q cannot start with %q — it would read as a flag", slug, "-")
+	case strings.HasPrefix(slug, "."), strings.HasSuffix(slug, "."):
+		return usageErrorf("new", "slug %q cannot start or end with %q — git does not allow it in a branch name", slug, ".")
+	case strings.Contains(slug, ".."), strings.Contains(slug, "@{"), strings.HasSuffix(slug, ".lock"):
+		return usageErrorf("new", "slug %q is not usable as a branch name — git reserves %q, %q and a %q suffix", slug, "..", "@{", ".lock")
 	}
 	return nil
 }
@@ -195,8 +230,18 @@ func cmdRm(env *Env, args []string) error {
 	slug = stripPrefix(env, cfg, slug)
 
 	repo := repoFor(cfg)
-	dir := cfg.DirFor(slug)
-	branch := cfg.BranchFor(slug)
+	managed, err := repo.Managed()
+	if err != nil {
+		return err
+	}
+	// Resolved against the worktrees that exist, rather than deriving a path from
+	// the slug and letting git object: a typo would otherwise surface as "is not a
+	// working tree" about a path the user never typed.
+	target, err := resolveSlug(env, repo, managed, slug)
+	if err != nil {
+		return err
+	}
+	slug, dir, branch := target.Slug, target.Dir, target.Branch
 
 	if !force {
 		// Refresh origin/<base> before judging. A just-squash-merged branch has
@@ -225,24 +270,39 @@ func cmdRm(env *Env, args []string) error {
 	// Note the caller's location before deleting anything, so we can tell whether
 	// their shell is about to be standing in a directory that is gone.
 	wd, wdErr := os.Getwd()
+	// And which window is open on the worktree, asked while the worktree still
+	// exists. This is usually not the caller's own window: `treemux rm eng-1` is
+	// run from the base window, and the one left pointing at a deleted directory
+	// is the window named after the stream.
+	staleWindow := tmux.OpenWindows()[dir]
 
 	if err := repo.RemoveWorktree(dir); err != nil {
 		return err
 	}
 	// Best-effort from here: the worktree is already gone, so a failure to delete
 	// the branch or prune refs is worth reporting but not fatal.
-	if err := repo.DeleteBranch(branch); err != nil {
-		env.warnf("could not delete branch %s: %v", branch, err)
+	//
+	// A worktree on a detached HEAD has no branch to delete, which is not an error;
+	// git reports one only for worktrees created outside treemux.
+	if branch != "" {
+		if err := repo.DeleteBranch(branch); err != nil {
+			env.warnf("could not delete branch %s: %v", branch, err)
+		}
 	}
 	_ = repo.FetchPrune("origin")
-	env.progressf("removed worktree %s and branch %s", dir, branch)
+	if branch == "" {
+		env.progressf("removed worktree %s, which was on no branch", dir)
+	} else {
+		env.progressf("removed worktree %s and branch %s", dir, branch)
+	}
 	fmt.Fprintln(env.Stdout, dir)
 
-	if wdErr != nil || !insideDir(wd, dir) {
-		return nil
+	// Two separate leftovers, and the caller usually has only one of them: a shell
+	// standing in the deleted directory, and a window open on it.
+	if wdErr == nil && insideDir(wd, dir) {
+		escapeDeletedDir(env, cfg.MainDir, dir)
 	}
-	escapeDeletedDir(env, cfg.MainDir, dir)
-	offerWindowClose(env, yes)
+	offerWindowClose(env, staleWindow, yes)
 	return nil
 }
 
@@ -255,39 +315,44 @@ func escapeDeletedDir(env *Env, mainDir, goneDir string) {
 	}
 }
 
-// offerWindowClose offers to close the tmux window the removed worktree was being
-// worked in, since it now points at nothing. assumeYes closes without asking.
-func offerWindowClose(env *Env, assumeYes bool) {
-	pane := tmux.Pane()
-	if !tmux.Inside() || pane == "" {
+// offerWindowClose offers to close a tmux window whose worktree has been removed,
+// since it now points at a directory that does not exist. assumeYes closes
+// without asking, and an empty window means there was none open.
+//
+// The window is identified from the worktree's path rather than from the caller's
+// own pane, because a teardown is normally run from somewhere else: closing "the
+// window I am in" left the window named after the stream behind, still sitting in
+// the deleted directory.
+func offerWindowClose(env *Env, window string, assumeYes bool) {
+	if !tmux.Inside() || window == "" {
 		return
 	}
-	window, err := tmux.WindowIDOf(pane)
-	if err != nil {
-		return
-	}
+	name := tmux.WindowName(window)
+
 	if assumeYes {
-		_ = tmux.KillWindow(pane)
+		_ = tmux.KillWindow(window)
+		env.progressf("closed its tmux window (%s)", name)
 		return
 	}
 
 	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
 	if err != nil {
 		// Nobody to ask — treemux was run by a script or an agent. Say what to
-		// run rather than closing a window unasked.
-		env.progressf("this window (%s) now points at a deleted directory; close it with: tmux kill-window -t %s",
-			window, pane)
+		// run rather than closing a window unasked, since something may still be
+		// running in it.
+		env.progressf("its tmux window (%s) now points at a deleted directory; close it with: tmux kill-window -t %s",
+			name, window)
 		return
 	}
 	defer tty.Close()
 
-	fmt.Fprintf(tty, "close this tmux window (%s)? [y/N] ", window)
+	fmt.Fprintf(tty, "close its tmux window (%s)? [y/N] ", name)
 	answer, err := bufio.NewReader(tty).ReadString('\n')
 	if err != nil {
 		return
 	}
 	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(answer)), "y") {
-		_ = tmux.KillWindow(pane)
+		_ = tmux.KillWindow(window)
 	}
 }
 
@@ -378,8 +443,10 @@ func cmdPrune(env *Env, args []string) error {
 	}
 
 	// Where the caller is standing matters here for the same reason it does in
-	// rm: prune can delete the very directory their shell sits in.
+	// rm: prune can delete the very directory their shell sits in. Open windows
+	// are looked up for the same reason too, and while the worktrees still exist.
 	wd, wdErr := os.Getwd()
+	windows := tmux.OpenWindows()
 	stranded := ""
 
 	for _, wt := range targets {
@@ -400,6 +467,12 @@ func cmdPrune(env *Env, args []string) error {
 
 	if stranded != "" {
 		escapeDeletedDir(env, cfg.MainDir, stranded)
+	}
+	// Asked per worktree, and never assumed: --yes answered "remove these
+	// worktrees", which is not the same as "close my windows" — one of them may
+	// have a session still running in it.
+	for _, wt := range targets {
+		offerWindowClose(env, windows[wt.Dir], false)
 	}
 	return nil
 }
@@ -433,33 +506,9 @@ func cmdResume(env *Env, args []string) error {
 	// window is already open on the chosen worktree.
 	windows := tmux.OpenWindows()
 
-	var target git.Worktree
-	switch {
-	case slug != "":
-		found := false
-		for _, wt := range managed {
-			if wt.Slug == slug {
-				target, found = wt, true
-				break
-			}
-		}
-		if !found {
-			return fmt.Errorf("no worktree %q for %s", slug, repo.Name())
-		}
-	case len(managed) == 1:
-		target = managed[0]
-	default:
-		infos := make([]git.Info, 0, len(managed))
-		for _, wt := range managed {
-			infos = append(infos, repo.Inspect(wt, cfg.BaseBranch))
-		}
-		header, rows := worktreeTable(infos, windows).Lines(ui.ColorEnabled(env.Stderr))
-		idx, err := ui.Pick(env.Stderr, header, rows)
-		if err != nil {
-			env.progressf("cancelled")
-			return ErrSilent
-		}
-		target = managed[idx]
+	target, err := chooseWorktree(env, cfg, repo, managed, windows, slug)
+	if err != nil {
+		return err
 	}
 
 	if !tmux.Inside() {
@@ -472,6 +521,81 @@ func cmdResume(env *Env, args []string) error {
 		return tmux.SelectWindow(existing)
 	}
 	return tmux.NewWindow(target.Dir, cfg.WindowName(target.Slug, ""), cfg.ResumeCommand)
+}
+
+// chooseWorktree picks the worktree a command should act on: the one named, the
+// only one there is, or one the user selects from a menu.
+//
+// The menu is the `ls` table with a number beside each row, so the thing being
+// chosen from is the listing the user already reads, showing the status and
+// divergence that make the choice — not a bare list of names.
+func chooseWorktree(env *Env, cfg *config.Config, repo git.Repo, managed []git.Worktree, windows map[string]string, slug string) (git.Worktree, error) {
+	switch {
+	case slug != "":
+		return resolveSlug(env, repo, managed, slug)
+	case len(managed) == 1:
+		// Nothing to choose between: prompting would be a keystroke that has only
+		// one possible answer.
+		return managed[0], nil
+	}
+
+	infos := make([]git.Info, 0, len(managed))
+	for _, wt := range managed {
+		infos = append(infos, repo.Inspect(wt, cfg.BaseBranch))
+	}
+	// The menu is a prompt, not an answer, so it goes to stderr: stdout still
+	// carries only the path the caller may be capturing.
+	header, rows := worktreeTable(infos, windows).Lines(ui.ColorEnabled(env.Stderr))
+	idx, err := ui.Pick(env.Stderr, header, rows)
+	if err != nil {
+		env.progressf("cancelled")
+		return git.Worktree{}, ErrSilent
+	}
+	return managed[idx], nil
+}
+
+// ---- cd --------------------------------------------------------------------
+
+// cmdCd moves the calling shell into a worktree.
+//
+// treemux cannot change its parent's directory, so this leans on the same
+// eval-file protocol `rm` uses to escape a deleted directory: the shell wrapper
+// sources what treemux appends. Without the integration the path on stdout is
+// still the answer, so `cd "$(treemux cd foo)"` works unaided.
+func cmdCd(env *Env, args []string) error {
+	positional, err := parseArgs("cd", args, nil, 1)
+	if err != nil {
+		return err
+	}
+	cfg, err := resolveConfig("")
+	if err != nil {
+		return err
+	}
+	slug := at(positional, 0)
+	if slug != "" {
+		slug = stripPrefix(env, cfg, slug)
+	}
+
+	repo := repoFor(cfg)
+	managed, err := repo.Managed()
+	if err != nil {
+		return err
+	}
+	if len(managed) == 0 {
+		return fmt.Errorf("no worktrees for %s — create one with \"treemux new <slug>\"", repo.Name())
+	}
+
+	target, err := chooseWorktree(env, cfg, repo, managed, tmux.OpenWindows(), slug)
+	if err != nil {
+		return err
+	}
+
+	fmt.Fprintln(env.Stdout, target.Dir)
+	emitEval(env, "cd "+shellQuote(target.Dir))
+	if env.EvalFile == "" {
+		env.progressf("no shell integration loaded — run: cd %s", target.Dir)
+	}
+	return nil
 }
 
 // ---- base ------------------------------------------------------------------

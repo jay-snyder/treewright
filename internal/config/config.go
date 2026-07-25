@@ -42,6 +42,11 @@ type Config struct {
 	// user passes to `treemux ls <name>`. Not read from the file itself.
 	Name string `toml:"-"`
 
+	// explicit holds the keys the file actually set, so that reporting a
+	// configuration can distinguish a value that was chosen from one that was
+	// merely defaulted — including when the two happen to coincide.
+	explicit map[string]bool `toml:"-"`
+
 	// MainDir is the repository's main checkout. Required. Managed worktrees
 	// are its siblings, named "<MainDir>-<slug>".
 	MainDir string `toml:"main_dir"`
@@ -123,6 +128,11 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("%s: unknown setting(s): %s", filepath.Base(path), strings.Join(keys, ", "))
 	}
 
+	c.explicit = make(map[string]bool, len(md.Keys()))
+	for _, k := range md.Keys() {
+		c.explicit[k.String()] = true
+	}
+
 	c.Name = strings.TrimSuffix(filepath.Base(path), ".toml")
 	if strings.TrimSpace(c.MainDir) == "" {
 		return nil, fmt.Errorf("%s: main_dir is required", filepath.Base(path))
@@ -199,6 +209,13 @@ func Resolve(name, repoMainDir string) (*Config, error) {
 }
 
 // ---- derived values --------------------------------------------------------
+
+// Path returns the file this config was read from.
+func (c *Config) Path() string { return filepath.Join(Dir(), c.Name+".toml") }
+
+// Explicit reports whether the file set a key itself, as opposed to leaving it
+// to its default. Keys are the TOML spellings, e.g. "base_branch".
+func (c *Config) Explicit(key string) bool { return c.explicit[key] }
 
 // BranchFor returns the branch name a slug maps to.
 func (c *Config) BranchFor(slug string) string { return c.BranchPrefix + slug }

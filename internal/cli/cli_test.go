@@ -160,6 +160,66 @@ func TestLsStatuses(t *testing.T) {
 	}
 }
 
+// TestLsMarksTheCurrentWorktree covers orientation: standing in one of several
+// checkouts of the same repo, nothing else in the listing says which one is yours.
+func TestLsMarksTheCurrentWorktree(t *testing.T) {
+	f := newFixture(t, "")
+	f.mustRun("new", "alpha")
+	f.mustRun("new", "beta")
+
+	t.Run("marked from inside a worktree", func(t *testing.T) {
+		t.Chdir(f.DirFor("beta"))
+
+		var marked, unmarked int
+		for _, line := range strings.Split(f.mustRun("ls"), "\n") {
+			switch {
+			case strings.HasPrefix(line, "*") && strings.Contains(line, "beta"):
+				marked++
+			case strings.Contains(line, "alpha"):
+				unmarked++
+				if strings.HasPrefix(line, "*") {
+					t.Errorf("alpha is marked as current: %q", line)
+				}
+			}
+		}
+		if marked != 1 || unmarked != 1 {
+			t.Errorf("marked %d rows and left %d unmarked, want one of each:\n%s", marked, unmarked, f.mustRun("ls"))
+		}
+	})
+
+	t.Run("no marker column from the main checkout", func(t *testing.T) {
+		// A column that is blank on every row would be a permanent indent paid for
+		// a case that is not occurring.
+		for _, line := range strings.Split(f.mustRun("ls"), "\n") {
+			if strings.HasPrefix(line, " ") || strings.HasPrefix(line, "*") {
+				t.Errorf("line is indented for an unused marker column: %q", line)
+			}
+		}
+	})
+}
+
+// TestLsShowsWhatIsAtStake pins the counts onto the two statuses that block a
+// removal, since those are the numbers rm refuses over.
+func TestLsShowsWhatIsAtStake(t *testing.T) {
+	f := newFixture(t, "")
+
+	f.mustRun("new", "messy")
+	f.Write(f.DirFor("messy"), "a.txt", "seed\nedited\n")
+	f.Write(f.DirFor("messy"), "extra.txt", "new file\n")
+
+	f.mustRun("new", "local")
+	f.Commit(f.DirFor("local"), "one")
+	f.Commit(f.DirFor("local"), "two")
+
+	out := f.mustRun("ls")
+	if !strings.Contains(out, "dirty (2)") {
+		t.Errorf("output = %q, want the count of uncommitted files", out)
+	}
+	if !strings.Contains(out, "unpushed (2)") {
+		t.Errorf("output = %q, want the count of unpushed commits", out)
+	}
+}
+
 // ---- new -------------------------------------------------------------------
 
 func TestNewCreatesWorktreeAndBranch(t *testing.T) {
@@ -611,7 +671,7 @@ func TestRejectsExtraArguments(t *testing.T) {
 		{"resume", "a", "b"},
 		{"base", "proj", "extra"},
 		{"new", "a", "b", "c"},
-		{"init", "zsh", "extra"},
+		{"shell-init", "zsh", "extra"},
 	} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
 			r := f.exec(args...)

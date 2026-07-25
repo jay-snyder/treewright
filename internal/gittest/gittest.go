@@ -46,7 +46,11 @@ func New(t *testing.T) *Repo {
 		MainDir: filepath.Join(root, "repo"),
 	}
 
-	r.Git(root, "init", "--quiet", "--bare", r.Origin)
+	// The bare repo's default branch is set explicitly so that its HEAD names the
+	// branch that actually gets pushed. Left to init.defaultBranch it may say
+	// "master", which a clone then records as origin/HEAD — a ref pointing at a
+	// branch that does not exist, and a state worth reproducing only deliberately.
+	r.Git(root, "init", "--quiet", "--bare", "-b", "main", r.Origin)
 	r.Git(root, "init", "--quiet", "-b", "main", r.MainDir)
 	// Identity is set locally, and signing forced off, so a developer's global
 	// git config cannot make these tests fail or hang.

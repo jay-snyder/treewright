@@ -48,8 +48,14 @@ release:
     Then add the shell integration to your shell's startup file:
 
     ```sh
-    eval "$(treemux init zsh)"     # or bash
-    treemux init fish | source
+    eval "$(treemux shell-init zsh)"     # or bash
+    treemux shell-init fish | source
+    ```
+
+    And register a repository from inside it:
+
+    ```sh
+    treemux setup
     ```
 
 # Publishes a Homebrew cask to a separate tap repository.
@@ -81,5 +87,7 @@ homebrew_casks:
           end
     caveats: |
       Add the shell integration to your shell's startup file:
-        eval "$(treemux init zsh)"     # or bash
-        treemux init fish | source
+        eval "$(treemux shell-init zsh)"     # or bash
+        treemux shell-init fish | source
+
+      Then register a repository by running "treemux setup" inside it.

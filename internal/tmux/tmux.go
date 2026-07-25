@@ -14,9 +14,6 @@ import (
 // telling the user what to run by hand.
 func Inside() bool { return os.Getenv("TMUX") != "" }
 
-// Pane is the pane treemux was invoked from, or "" when not under tmux.
-func Pane() string { return os.Getenv("TMUX_PANE") }
-
 func run(args ...string) (string, error) {
 	cmd := exec.Command("tmux", args...)
 	var stdout, stderr bytes.Buffer
@@ -95,9 +92,17 @@ func SelectWindow(id string) error {
 	return err
 }
 
-// WindowIDOf resolves a target (usually a pane id) to its window id.
-func WindowIDOf(target string) (string, error) {
-	return run("display-message", "-p", "-t", target, "#{window_id}")
+// WindowName reports a window's name, for naming it in a prompt: being asked to
+// close "ENG-1646" is answerable, where being asked to close "@3" is not.
+//
+// Falls back to the id when tmux cannot answer, so a caller always has something
+// to print.
+func WindowName(id string) string {
+	name, err := run("display-message", "-p", "-t", id, "#{window_name}")
+	if err != nil || name == "" {
+		return id
+	}
+	return name
 }
 
 // KillWindow closes the window containing target.

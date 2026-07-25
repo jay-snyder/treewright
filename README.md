@@ -27,6 +27,16 @@ flowchart TD
 ## Install
 
 ```sh
+brew install jay-snyder/tap/treemux
+```
+
+The cask installs `git` and `tmux` alongside it, and clears the quarantine flag
+macOS would otherwise set on an unsigned download.
+
+It is macOS-only, so on Linux use Go, or one of the tarballs attached to a
+[release](https://github.com/jay-snyder/treemux/releases):
+
+```sh
 go install github.com/jay-snyder/treemux@latest
 ```
 
@@ -44,20 +54,49 @@ your shell's working directory on its own. A small wrapper function closes that
 gap, and also wires up tab completion. Add one line to your shell's startup file:
 
 ```sh
-eval "$(treemux init zsh)"     # ~/.zshrc
-eval "$(treemux init bash)"    # ~/.bashrc
-treemux init fish | source     # ~/.config/fish/config.fish
+eval "$(treemux shell-init zsh)"     # ~/.zshrc
+eval "$(treemux shell-init bash)"    # ~/.bashrc
+treemux shell-init fish | source     # ~/.config/fish/config.fish
 ```
 
-Everything works without the integration except one thing: after `treemux rm`
-deletes the worktree you were standing in, your shell would be left in a
-directory that no longer exists. With the integration it moves you to the main
-checkout automatically; without it, treemux prints the `cd` for you to run.
+Two things need it. `treemux cd` moves your shell into a worktree, and after
+`treemux rm` deletes the worktree you were standing in, your shell would
+otherwise be left in a directory that no longer exists — with the integration it
+moves you to the main checkout automatically. Everything else works either way;
+without it, treemux prints the `cd` for you to run.
+
+## Get started
+
+Inside the repository you want to work on:
+
+```sh
+treemux setup      # writes a config for this repo, guessing what it can
+treemux doctor     # checks tmux, the shell integration, and every config
+```
+
+`setup` detects the main checkout, reads the base branch from `origin/HEAD`,
+derives a branch prefix from your git email, and proposes any gitignored `.env`
+files worth carrying into new worktrees. It reports every guess and writes them
+as commented TOML — the file is the record, so anything wrong is one edit away.
+Use `--dry-run` to see it without writing it.
+
+From there the loop is four commands:
+
+```sh
+treemux new eng-142-white-screen   # worktree, branch, and a window running your agent
+treemux ls                         # where every stream stands
+treemux cd eng-142                 # jump between them
+treemux rm eng-142                 # when the PR merges
+```
 
 ## Configure
 
 One TOML file per repository, in
 `${TREEMUX_CONFIG_DIR:-${XDG_CONFIG_HOME:-~/.config}/treemux/repos}/<name>.toml`.
+`treemux setup` writes one; the rest of this section is what it contains, and
+`treemux config` prints what is in force for the repo you are standing in,
+defaults included.
+
 The file's name is what you pass to `treemux ls <name>`.
 
 ```toml
@@ -97,14 +136,43 @@ config, or the name you pass.
 | Command | What it does |
 |---|---|
 | `treemux new <slug> [window-name]` | Create a worktree and branch off the latest `origin/<base_branch>`, carry configured files in, and open a tmux window in it. |
-| `treemux rm [-f] [-y] <slug>` | Tear down the worktree, branch, and stale remote ref. Refuses when work would be lost, unless `--force`. |
-| `treemux ls [--json] [repo]` | List worktrees with status, divergence, and whether a tmux window is open in each. Changes no working tree, branch, or ref. |
-| `treemux prune [-y] [repo]` | Remove every merged, clean worktree. Lists them without `--yes`. |
 | `treemux resume [slug]` | Reopen a window on an existing worktree. Menu when the slug is omitted. |
+| `treemux cd [slug]` | Move your shell into a worktree. Menu when the slug is omitted. |
 | `treemux base [repo]` | Open a window on the main checkout. |
-| `treemux init <shell>` | Print the shell integration for zsh, bash, or fish. |
+| `treemux ls [--json] [repo]` | List worktrees with status, divergence, and whether a tmux window is open in each. Changes no working tree, branch, or ref. |
+| `treemux rm [-f] [-y] <slug>` | Tear down the worktree, branch, and stale remote ref, and offer to close its tmux window. Refuses when work would be lost, unless `--force`. |
+| `treemux prune [-y] [repo]` | Remove every merged, clean worktree. Lists them without `--yes`. |
+| `treemux setup [-n] [name]` | Write a config for the repository you are standing in, detecting what it can. |
+| `treemux config [repo]` | Print the settings in force, defaults included, and the file they came from. |
+| `treemux doctor` | Check the installation and every registered config. Exits non-zero on a failure. |
+| `treemux shell-init <shell>` | Print the shell integration for zsh, bash, or fish. |
 
 Run `treemux help <command>` for detail on any one of them.
+
+A few commands answer to a second name, for when the first one is not what comes
+to mind: `create` for `new`, `remove` and `delete` for `rm`, `list` and `status`
+for `ls`, `main` and `home` for `base`, `reopen` for `resume`. Help lists only the
+canonical name, so there is one spelling to learn and another that forgives you.
+A name that is close to a command but not one gets pointed at the nearest match.
+
+### Naming a worktree
+
+`rm`, `resume` and `cd` take an unambiguous prefix of a slug, because a slug
+carries both a ticket key and a description while people refer to that work by the
+key alone:
+
+```
+$ treemux cd eng-1646
+eng-1646 matches worktree eng-1646-app-landing-page-redesign
+```
+
+The expansion is always reported rather than applied silently — `rm` is on that
+list. An exact slug wins over any prefix, so a slug that is a prefix of another
+stays reachable by its own name, and an ambiguous prefix is an error listing the
+candidates rather than a guess.
+
+`new` reuses a branch that already exists rather than recreating it, which is also
+how you get a worktree onto a colleague's pull request after fetching it.
 
 ### Output contract
 
@@ -113,10 +181,13 @@ stdout carries the answer and nothing else, so any command can be piped:
 | Command | stdout |
 |---|---|
 | `new` | the new worktree's path — `cd "$(treemux new eng-1)"` works |
+| `cd` | the chosen worktree's path, so `cd "$(treemux cd eng-1)"` works unaided |
 | `rm` | the removed worktree's path |
 | `prune` | the paths it removed, or would remove |
 | `ls` | the table, or a JSON array with `--json` |
-| `init`, `help`, `version` | the script or text you asked for |
+| `setup` | the config file's path, or the config itself with `--dry-run` |
+| `config`, `doctor` | the report you asked for |
+| `shell-init`, `help`, `version` | the script or text you asked for |
 
 Progress, warnings, prompts, and errors go to stderr, prefixed `warning:` or
 `error:` when something is wrong and unprefixed when it is just narration. So
@@ -127,16 +198,20 @@ redirected or when `NO_COLOR` is set. `--json` reports `ahead` and `behind` as
 `null` rather than `0` when the branch cannot be compared to its base.
 
 Exit codes: `0` success, `1` the command ran and failed, `2` it was invoked wrong.
+`doctor` exits `1` when a check fails, so it can gate a setup script.
 
 A branch always forks from `origin/<base_branch>`. There is deliberately no flag
 to base one on anything else — the point is that every stream starts from the
 same known-current place. When origin is unreachable, `new` says so and forks
 from the local base branch instead.
 
-A slug may not contain `/`. It becomes a directory name, and a nested one would
-leave a stray parent behind when the worktree is removed. If you pass a slug that
-already starts with your `branch_prefix`, treemux strips it and says so, rather
-than producing `alice/alice/proj-142`.
+A slug becomes both a directory name and a branch name, so it may not contain `/`
+— a nested one would leave a stray parent behind when the worktree is removed —
+and it is checked up front against the rest of git's branch-naming rules, so a
+slug with a space in it is one sentence rather than several lines of git's advice
+about ref formats. If you pass a slug that already starts with your
+`branch_prefix`, treemux strips it and says so, rather than producing
+`alice/alice/proj-142`.
 
 ### Statuses
 
@@ -144,10 +219,19 @@ than producing `alice/alice/proj-142`.
 
 | Status | Color | Meaning |
 |---|---|---|
-| `dirty` | yellow | Uncommitted changes. Outranks everything, because it is the most easily lost. |
+| `dirty (n)` | yellow | `n` uncommitted files. Outranks everything, because it is the most easily lost. |
 | `merged` | green | The work has landed in `origin/<base_branch>`. Safe to remove; `prune` reaps these. |
-| `unpushed` | red | Commits exist only in this worktree. `rm` refuses without `--force`. |
+| `unpushed (n)` | red | `n` commits exist only in this worktree. `rm` refuses without `--force`. |
 | `active` | cyan | Pushed but not merged — an open pull request. `prune` never touches these. |
+
+The counts are the numbers `rm` refuses over, so a listing says how much a
+`--force` would discard. The worktree you are standing in is marked with an
+asterisk, and that column appears only when one of the rows is in fact where you
+are.
+
+`ls` does not fetch — it changes no ref — so a branch that landed since your last
+fetch still reads as `active`. `rm` and `prune` both fetch before they judge, and
+so can disagree with a stale listing; they are the ones to trust.
 
 **Squash merges are recognized.** When a forge squash-merges a PR, the branch's
 own commits never land upstream — they are collapsed into one new commit and the
@@ -171,6 +255,18 @@ so a branch that merged moments ago is recognized as merged rather than tripping
 the guard on a stale ref. `prune` only ever targets worktrees that are both
 merged and clean.
 
+A destructive command never acts on a name it had to guess at: a slug prefix must
+match exactly one worktree, the expansion is printed, and anything ambiguous or
+unknown is an error naming the alternatives. `setup` will not overwrite an existing
+config, or add a second one for a repository already registered.
+
+Removing a worktree leaves its tmux window pointing at a directory that is gone,
+so `rm` offers to close it — the window named after the stream, identified from the
+worktree's own path rather than from wherever you ran the command. `prune` asks per
+worktree it removed. Neither closes a window without asking unless you pass `--yes`
+to `rm`, because a window may still have a session running in it; with nobody to
+prompt, both print the `tmux kill-window` to run instead.
+
 ## Development
 
 ```sh
@@ -191,5 +287,5 @@ Layout:
 | `internal/config` | TOML loading and which config applies. |
 | `internal/cli` | Subcommands, output formatting, and the eval-file protocol. |
 | `internal/tmux` | The handful of tmux commands treemux drives. |
-| `internal/ui` | The interactive picker. |
+| `internal/ui` | The interactive picker and the table. |
 | `internal/shellinit` | The zsh, bash, and fish integration snippets. |

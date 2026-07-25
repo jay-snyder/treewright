@@ -44,11 +44,49 @@ func statusColor(s git.Status) ui.Color {
 	}
 }
 
-// worktreeTable builds the table shown by `ls` and used as the `resume` menu, so
-// the menu is a picker over the same rows the user already knows.
+// statusText spells out a status, carrying the count of what is at stake when
+// there is one.
+//
+// The counts are already gathered, and they are the numbers the removal guards
+// refuse over: "dirty (3)" says how much a --force would discard, where "dirty"
+// alone leaves the reader to go and look.
+func statusText(info git.Info) string {
+	switch info.Status {
+	case git.StatusDirty:
+		return fmt.Sprintf("dirty (%d)", info.DirtyFiles)
+	case git.StatusUnpushed:
+		return fmt.Sprintf("unpushed (%d)", info.Unpushed)
+	default:
+		return string(info.Status)
+	}
+}
+
+// worktreeTable builds the table shown by `ls` and used as the `resume` and `cd`
+// menus, so a menu is a picker over the same rows the user already knows.
+//
+// The worktree the caller is standing in gets a leading asterisk, and the column
+// holding it appears only when one of the rows is in fact the current directory:
+// a marker column that is blank on every row would be a permanent indent paid
+// for a case that is not occurring.
 func worktreeTable(infos []git.Info, windows map[string]string) ui.Table {
-	table := ui.Table{Headers: []string{"SLUG", "STATUS", "AHEAD/BEHIND", "WINDOW"}}
-	for _, info := range infos {
+	cwd, err := os.Getwd()
+	here := -1
+	if err == nil {
+		for i, info := range infos {
+			if insideDir(cwd, info.Dir) {
+				here = i
+				break
+			}
+		}
+	}
+
+	headers := []string{"SLUG", "STATUS", "AHEAD/BEHIND", "WINDOW"}
+	if here >= 0 {
+		headers = append([]string{""}, headers...)
+	}
+
+	table := ui.Table{Headers: headers}
+	for i, info := range infos {
 		divergence := "?" // an unavailable comparison is unknown, not zero
 		if info.Compared {
 			divergence = fmt.Sprintf("+%d/-%d", info.Ahead, info.Behind)
@@ -57,12 +95,20 @@ func worktreeTable(infos []git.Info, windows map[string]string) ui.Table {
 		if windows[info.Dir] != "" {
 			window = "open"
 		}
-		table.Add(
+		cells := []ui.Cell{
 			ui.Text(info.Slug),
-			ui.Colored(string(info.Status), statusColor(info.Status)),
+			ui.Colored(statusText(info), statusColor(info.Status)),
 			ui.Text(divergence),
 			ui.Text(window),
-		)
+		}
+		if here >= 0 {
+			marker := " "
+			if i == here {
+				marker = "*"
+			}
+			cells = append([]ui.Cell{ui.Text(marker)}, cells...)
+		}
+		table.Add(cells...)
 	}
 	return table
 }
@@ -159,4 +205,47 @@ func stripPrefix(env *Env, cfg *config.Config, slug string) string {
 			cfg.BranchPrefix, stripped)
 	}
 	return stripped
+}
+
+// slugsOf lists worktree slugs, for naming the alternatives in an error.
+func slugsOf(worktrees []git.Worktree) string {
+	slugs := make([]string, 0, len(worktrees))
+	for _, wt := range worktrees {
+		slugs = append(slugs, wt.Slug)
+	}
+	return strings.Join(slugs, ", ")
+}
+
+// resolveSlug turns what the user typed into the worktree they meant.
+//
+// An exact slug always wins. Failing that an unambiguous prefix is accepted,
+// because a slug carries both a ticket key and a description —
+// "eng-1646-app-landing-page-redesign" — while people refer to that work as
+// "eng-1646". The expansion is reported rather than applied silently, since the
+// caller may be about to delete what it resolved to.
+//
+// An ambiguous prefix is an error listing the candidates: guessing among them
+// would eventually guess wrong on a command that destroys something.
+func resolveSlug(env *Env, repo git.Repo, managed []git.Worktree, want string) (git.Worktree, error) {
+	var prefixed []git.Worktree
+	for _, wt := range managed {
+		if wt.Slug == want {
+			return wt, nil
+		}
+		if strings.HasPrefix(wt.Slug, want) {
+			prefixed = append(prefixed, wt)
+		}
+	}
+
+	switch len(prefixed) {
+	case 1:
+		env.progressf("%s matches worktree %s", want, prefixed[0].Slug)
+		return prefixed[0], nil
+	case 0:
+		return git.Worktree{}, fmt.Errorf("no worktree %q for %s (have: %s)",
+			want, repo.Name(), slugsOf(managed))
+	default:
+		return git.Worktree{}, fmt.Errorf("%q matches %d worktrees (%s) — name one exactly",
+			want, len(prefixed), slugsOf(prefixed))
+	}
 }
