@@ -141,6 +141,30 @@ same one.
 does. Inside tmux nothing needs it: treemux reaches the server it is running under
 through `$TMUX`.
 
+### Terminal and tab titles
+
+Attaching with `tmux attach -t <session>` tends to leave the terminal and tab
+titled with that command line rather than the session. tmux is not the one writing
+it: `set-titles` is off by default, so tmux never sets a title at all, and whatever
+the shell wrote before it started — under kitty, iTerm2 or any terminal with shell
+integration, the command being run — stays there until the next prompt, which
+inside tmux never comes.
+
+Turning it on, in `tmux.conf`, gives the session name instead:
+
+```tmux
+set -g set-titles on
+set -g set-titles-string "#S"
+```
+
+`"#S: #W"` adds the window, which for treemux is the stream name — the repository
+and the worktree rather than the repository alone.
+
+treemux leaves this to you rather than setting it per session. Session options are
+set with `set-option -t`, whose target does not accept tmux's exact-match `=name`
+form, so treemux would be back to the prefix matching the rest of this section
+avoids — and setting it server-wide would overwrite a title format you chose.
+
 ## Configure
 
 One TOML file per repository, in
