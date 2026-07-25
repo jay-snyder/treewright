@@ -1,0 +1,358 @@
+package config
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+// registry points config lookups at a temp directory and writes the given
+// files into it. The map key is the config name, the value its TOML body.
+func registry(t *testing.T, files map[string]string) string {
+	t.Helper()
+	dir := t.TempDir()
+	t.Setenv("TREEMUX_CONFIG_DIR", dir)
+	for name, body := range files {
+		path := filepath.Join(dir, name+".toml")
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatalf("write %s: %v", path, err)
+		}
+	}
+	return dir
+}
+
+// ---- loading ---------------------------------------------------------------
+
+func TestLoadAppliesDefaults(t *testing.T) {
+	dir := registry(t, map[string]string{
+		"minimal": `main_dir = "/tmp/repo"`,
+	})
+
+	c, err := Load(filepath.Join(dir, "minimal.toml"))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if c.Name != "minimal" {
+		t.Errorf("Name = %q, want %q", c.Name, "minimal")
+	}
+	if c.BaseBranch != DefaultBaseBranch {
+		t.Errorf("BaseBranch = %q, want %q", c.BaseBranch, DefaultBaseBranch)
+	}
+	if c.Command != DefaultCommand {
+		t.Errorf("Command = %q, want %q", c.Command, DefaultCommand)
+	}
+	if c.ResumeCommand != DefaultResumeCommand {
+		t.Errorf("ResumeCommand = %q, want %q", c.ResumeCommand, DefaultResumeCommand)
+	}
+	if c.TicketPattern != DefaultTicketPattern {
+		t.Errorf("TicketPattern = %q, want the default", c.TicketPattern)
+	}
+	// An empty branch prefix is a legitimate setting, not a missing one.
+	if c.BranchPrefix != "" {
+		t.Errorf("BranchPrefix = %q, want empty", c.BranchPrefix)
+	}
+}
+
+func TestLoadReadsEveryField(t *testing.T) {
+	dir := registry(t, map[string]string{
+		"full": `
+main_dir       = "/tmp/repo"
+base_branch    = "staging"
+branch_prefix  = "alice/"
+carry_files    = ["apps/api/.env", "aws/config"]
+command        = "codex"
+resume_command = "codex resume"
+post_create    = "pnpm install"
+ticket_pattern = '(?i)^(proj-[0-9]+)'
+`,
+	})
+
+	c, err := Load(filepath.Join(dir, "full.toml"))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if c.BaseBranch != "staging" || c.BranchPrefix != "alice/" || c.Command != "codex" || c.PostCreate != "pnpm install" {
+		t.Errorf("scalar fields wrong: %+v", c)
+	}
+	if c.ResumeCommand != "codex resume" {
+		t.Errorf("ResumeCommand = %q, want %q", c.ResumeCommand, "codex resume")
+	}
+	if got := strings.Join(c.CarryFiles, ","); got != "apps/api/.env,aws/config" {
+		t.Errorf("CarryFiles = %q", got)
+	}
+}
+
+func TestLoadRejectsBadConfigs(t *testing.T) {
+	tests := []struct {
+		name    string
+		body    string
+		wantErr string
+	}{
+		{
+			// A misspelled key that silently does nothing is the worst outcome
+			// here: the setting appears to have no effect, with nothing to see.
+			name:    "unknown key",
+			body:    "main_dir = \"/tmp/repo\"\nbase-branch = \"staging\"\n",
+			wantErr: "unknown setting",
+		},
+		{
+			name:    "missing main_dir",
+			body:    `base_branch = "main"`,
+			wantErr: "main_dir is required",
+		},
+		{
+			name:    "blank main_dir",
+			body:    `main_dir = "   "`,
+			wantErr: "main_dir is required",
+		},
+		{
+			name:    "invalid ticket pattern",
+			body:    "main_dir = \"/tmp/repo\"\nticket_pattern = \"([unclosed\"\n",
+			wantErr: "not a valid regexp",
+		},
+		{
+			name:    "malformed toml",
+			body:    "main_dir = = \"/tmp/repo\"",
+			wantErr: "",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := registry(t, map[string]string{"c": tc.body})
+			_, err := Load(filepath.Join(dir, "c.toml"))
+			if err == nil {
+				t.Fatal("want an error, got nil")
+			}
+			if tc.wantErr != "" && !strings.Contains(err.Error(), tc.wantErr) {
+				t.Errorf("error = %q, want it to mention %q", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestLoadExpandsHomeAndEnv(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("no home directory")
+	}
+	dir := registry(t, map[string]string{
+		"tilde":  `main_dir = "~/code/repo"`,
+		"envvar": `main_dir = "$HOME/code/repo"`,
+	})
+	// canonical is applied to every loaded main_dir, so the expectation goes
+	// through it too rather than assuming the home directory has no symlinks.
+	want := canonical(filepath.Join(home, "code", "repo"))
+
+	for _, name := range []string{"tilde", "envvar"} {
+		c, err := Load(filepath.Join(dir, name+".toml"))
+		if err != nil {
+			t.Fatalf("Load %s: %v", name, err)
+		}
+		if c.MainDir != want {
+			t.Errorf("%s: MainDir = %q, want %q", name, c.MainDir, want)
+		}
+	}
+}
+
+// TestLoadResolvesSymlinkedMainDir is a regression test: git reports resolved
+// paths for every worktree, so a main_dir left unresolved matched nothing and
+// the repo's worktrees became invisible to ls, prune, resume, and completion.
+func TestLoadResolvesSymlinkedMainDir(t *testing.T) {
+	root := t.TempDir()
+	real := filepath.Join(root, "real", "repo")
+	if err := os.MkdirAll(real, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(root, "real"), filepath.Join(root, "link")); err != nil {
+		t.Fatal(err)
+	}
+	viaLink := filepath.Join(root, "link", "repo")
+
+	dir := registry(t, map[string]string{"sym": `main_dir = "` + viaLink + `"`})
+	c, err := Load(filepath.Join(dir, "sym.toml"))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	want, err := filepath.EvalSymlinks(real)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.MainDir != want {
+		t.Errorf("MainDir = %q, want the resolved %q", c.MainDir, want)
+	}
+}
+
+// ---- resolution ------------------------------------------------------------
+
+func TestResolveSelectionOrder(t *testing.T) {
+	// Two repos so that "match the repo I am standing in" is a real choice and
+	// the not-in-a-repo case is genuinely ambiguous.
+	registry(t, map[string]string{
+		"alpha": `main_dir = "/tmp/alpha"`,
+		"beta":  `main_dir = "/tmp/beta"`,
+	})
+
+	t.Run("explicit name wins over the current repo", func(t *testing.T) {
+		c, err := Resolve("beta", "/tmp/alpha")
+		if err != nil {
+			t.Fatalf("Resolve: %v", err)
+		}
+		if c.Name != "beta" {
+			t.Errorf("Name = %q, want beta", c.Name)
+		}
+	})
+
+	t.Run("matches the current repo", func(t *testing.T) {
+		c, err := Resolve("", "/tmp/beta")
+		if err != nil {
+			t.Fatalf("Resolve: %v", err)
+		}
+		if c.Name != "beta" {
+			t.Errorf("Name = %q, want beta", c.Name)
+		}
+	})
+
+	t.Run("unregistered repo errors", func(t *testing.T) {
+		_, err := Resolve("", "/tmp/unknown")
+		if err == nil {
+			t.Fatal("want an error for an unregistered repo")
+		}
+		// The message must list the choices, or the user has no next move.
+		if !strings.Contains(err.Error(), "alpha") || !strings.Contains(err.Error(), "beta") {
+			t.Errorf("error = %q, want it to list the available configs", err)
+		}
+	})
+
+	t.Run("unknown name errors", func(t *testing.T) {
+		if _, err := Resolve("nope", ""); err == nil {
+			t.Fatal("want an error for an unknown config name")
+		}
+	})
+
+	t.Run("ambiguous outside a repo errors", func(t *testing.T) {
+		if _, err := Resolve("", ""); err == nil {
+			t.Fatal("want an error when outside a repo with several configs")
+		}
+	})
+}
+
+func TestResolveFallsBackToSoleConfig(t *testing.T) {
+	registry(t, map[string]string{"only": `main_dir = "/tmp/only"`})
+
+	// Outside any repo, a single registered config is unambiguous.
+	c, err := Resolve("", "")
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if c.Name != "only" {
+		t.Errorf("Name = %q, want only", c.Name)
+	}
+}
+
+func TestResolveIgnoresBrokenSiblingConfigs(t *testing.T) {
+	registry(t, map[string]string{
+		"good":   `main_dir = "/tmp/good"`,
+		"broken": `this is not toml`,
+	})
+
+	// A broken config for some other repo must not prevent work on this one.
+	c, err := Resolve("", "/tmp/good")
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if c.Name != "good" {
+		t.Errorf("Name = %q, want good", c.Name)
+	}
+}
+
+func TestResolveErrorsOnEmptyRegistry(t *testing.T) {
+	registry(t, nil)
+	if _, err := Resolve("", ""); err == nil {
+		t.Fatal("want an error when the registry is empty")
+	}
+}
+
+func TestNamesIsSorted(t *testing.T) {
+	registry(t, map[string]string{
+		"zeta":  `main_dir = "/tmp/z"`,
+		"alpha": `main_dir = "/tmp/a"`,
+		"mid":   `main_dir = "/tmp/m"`,
+	})
+	names, err := Names()
+	if err != nil {
+		t.Fatalf("Names: %v", err)
+	}
+	if got := strings.Join(names, ","); got != "alpha,mid,zeta" {
+		t.Errorf("Names = %q, want sorted", got)
+	}
+}
+
+// ---- derived values --------------------------------------------------------
+
+func TestStripPrefix(t *testing.T) {
+	// Guards the recurring "alice/alice/foo" doubling: a slug that already carries
+	// the configured prefix must have exactly one leading copy removed.
+	tests := []struct {
+		name        string
+		prefix      string
+		slug        string
+		want        string
+		wantStopped bool
+	}{
+		{"strips leading prefix", "x/", "x/foo", "foo", true},
+		{"no prefix present", "x/", "foo", "foo", false},
+		{"empty prefix is a no-op", "", "x/foo", "x/foo", false},
+		{"strips only one copy", "x/", "x/x/foo", "x/foo", true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			c := &Config{BranchPrefix: tc.prefix}
+			got, stripped := c.StripPrefix(tc.slug)
+			if got != tc.want || stripped != tc.wantStopped {
+				t.Errorf("StripPrefix(%q) = (%q, %v), want (%q, %v)",
+					tc.slug, got, stripped, tc.want, tc.wantStopped)
+			}
+		})
+	}
+}
+
+func TestWindowName(t *testing.T) {
+	tests := []struct {
+		name     string
+		pattern  string
+		slug     string
+		override string
+		want     string
+	}{
+		{"ticket key", DefaultTicketPattern, "proj-142-fix", "", "PROJ-142"},
+		{"long slug truncates", DefaultTicketPattern, "refactor-payments", "", "REFACTOR-P..."},
+		{"short slug as-is", DefaultTicketPattern, "hotfix", "", "HOTFIX"},
+		{"override wins", DefaultTicketPattern, "proj-1", "billing", "BILLING"},
+		{"exactly ten chars is not truncated", DefaultTicketPattern, "abcdefghij", "", "ABCDEFGHIJ"},
+		// The default pattern accepts any issue-key scheme, which means any
+		// letters-dash-digits prefix reads as a ticket. A repo that wants
+		// stricter matching pins its own pattern, as below.
+		{"generalized default matches any key", DefaultTicketPattern, "fix-2-bugs", "", "FIX-2"},
+		{"pinned pattern ignores other keys", `(?i)^(proj-[0-9]+)`, "fix-2-bugs", "", "FIX-2-BUGS"},
+		{"pinned pattern matches its own", `(?i)^(proj-[0-9]+)`, "proj-142-fix", "", "PROJ-142"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			c := &Config{TicketPattern: tc.pattern}
+			if got := c.WindowName(tc.slug, tc.override); got != tc.want {
+				t.Errorf("WindowName(%q, %q) = %q, want %q", tc.slug, tc.override, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestBranchAndDirFor(t *testing.T) {
+	c := &Config{MainDir: "/home/u/code/myrepo", BranchPrefix: "alice/"}
+	if got, want := c.BranchFor("proj-1"), "alice/proj-1"; got != want {
+		t.Errorf("BranchFor = %q, want %q", got, want)
+	}
+	if got, want := c.DirFor("proj-1"), "/home/u/code/myrepo-proj-1"; got != want {
+		t.Errorf("DirFor = %q, want %q", got, want)
+	}
+}

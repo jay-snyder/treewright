@@ -1,0 +1,7 @@
+# Compiled binary from `go build` in the repo root.
+/treemux
+
+# GoReleaser build output.
+/dist/
+
+.DS_Store

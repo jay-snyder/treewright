@@ -1,0 +1,88 @@
+# GoReleaser builds every artifact a release needs from one tag push.
+# Validate changes locally with: goreleaser check
+version: 2
+
+project_name: treemux
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - env:
+      # No cgo, so each binary is fully static and runs on any machine of its
+      # architecture without a matching libc.
+      - CGO_ENABLED=0
+    goos: [darwin, linux]
+    goarch: [amd64, arm64]
+    ldflags:
+      # Stamps `treemux --version`; main.version is "dev" for plain `go build`.
+      - -s -w -X main.version={{ .Version }}
+
+archives:
+  - formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README.md
+      - LICENSE
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+
+release:
+  footer: |
+    ## Install
+
+    ```sh
+    brew install jay-snyder/tap/treemux
+    ```
+
+    Then add the shell integration to your shell's startup file:
+
+    ```sh
+    eval "$(treemux init zsh)"     # or bash
+    treemux init fish | source
+    ```
+
+# Publishes a Homebrew cask to a separate tap repository.
+#
+# A cask rather than a formula because GoReleaser deprecated `brews`: Homebrew
+# now wants pre-built binaries distributed as casks. The tradeoff is that casks
+# are macOS-only, so Linux users install with `go install` or the tarballs above.
+#
+# Requires two things that are not set up yet:
+#   1. github.com/jay-snyder/homebrew-tap must exist, and
+#   2. a HOMEBREW_TAP_GITHUB_TOKEN secret with write access to it — the release
+#      job's default GITHUB_TOKEN cannot push to another repository.
+homebrew_casks:
+  - repository:
+      owner: jay-snyder
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    homepage: https://github.com/jay-snyder/treemux
+    description: Isolated git worktree + tmux + agent sessions for parallel work
+    license: MIT
+    binaries: [treemux]
+    dependencies:
+      - formula: git
+      - formula: tmux
+    hooks:
+      post:
+        # The released binaries are not code-signed, so macOS would refuse to
+        # run them until the download's quarantine flag is cleared.
+        install: |
+          if system_command("/usr/bin/xattr", args: ["-h"]).exit_status == 0
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/treemux"]
+          end
+    caveats: |
+      Add the shell integration to your shell's startup file:
+        eval "$(treemux init zsh)"     # or bash
+        treemux init fish | source

@@ -1,0 +1,917 @@
+package cli
+
+import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/jay-snyder/treemux/internal/gittest"
+)
+
+// fixture is a scratch repository plus a config registry pointing at it, so the
+// subcommands can be driven end to end.
+type fixture struct {
+	*gittest.Repo
+	t        *testing.T
+	registry string
+}
+
+func newFixture(t *testing.T, extraConfig string) *fixture {
+	t.Helper()
+
+	repo := gittest.New(t)
+	f := &fixture{Repo: repo, t: t, registry: filepath.Join(repo.Root, "conf")}
+	if err := os.MkdirAll(f.registry, 0o755); err != nil {
+		t.Fatalf("mkdir registry: %v", err)
+	}
+	f.setConfig("main_dir = '" + repo.MainDir + "'\n" + extraConfig)
+
+	t.Setenv("TREEMUX_CONFIG_DIR", f.registry)
+	// Unset so every command takes its "not in tmux" branch and the test run
+	// opens no windows, and so no inherited eval file is written to.
+	t.Setenv("TMUX", "")
+	t.Setenv("TMUX_PANE", "")
+	t.Setenv("TREEMUX_EVAL_FILE", "")
+	t.Chdir(repo.MainDir)
+	return f
+}
+
+// setConfig writes the sole config, named "proj". base_branch and branch_prefix
+// are always included so callers only supply what they are varying.
+func (f *fixture) setConfig(body string) {
+	f.t.Helper()
+	full := "base_branch = 'main'\nbranch_prefix = '" + gittest.BranchPrefix + "'\n" + body
+	if err := os.WriteFile(filepath.Join(f.registry, "proj.toml"), []byte(full), 0o644); err != nil {
+		f.t.Fatalf("write config: %v", err)
+	}
+}
+
+// result is one invocation's output, kept per stream so tests can assert on the
+// stdout/stderr split rather than only on the merged text.
+type result struct {
+	stdout string
+	stderr string
+	err    error
+}
+
+// both is the two streams concatenated, for assertions that do not care which
+// one carried the message.
+func (r result) both() string { return r.stdout + r.stderr }
+
+// exec invokes treemux with separate stdout and stderr.
+func (f *fixture) exec(args ...string) result {
+	f.t.Helper()
+	var out, errOut bytes.Buffer
+	err := Run(Env{Args: args, Version: "test", Stdout: &out, Stderr: &errOut})
+	return result{stdout: out.String(), stderr: errOut.String(), err: err}
+}
+
+// run invokes treemux and returns its combined output plus the error.
+func (f *fixture) run(args ...string) (string, error) {
+	f.t.Helper()
+	r := f.exec(args...)
+	return r.both(), r.err
+}
+
+func (f *fixture) mustRun(args ...string) string {
+	f.t.Helper()
+	out, err := f.run(args...)
+	if err != nil {
+		f.t.Fatalf("treemux %s: %v\n%s", strings.Join(args, " "), err, out)
+	}
+	return out
+}
+
+// runWithEvalFile invokes treemux with the shell integration's eval file wired
+// up, and returns whatever treemux asked the calling shell to run.
+func (f *fixture) runWithEvalFile(args ...string) (shellCommands string, output string) {
+	f.t.Helper()
+	path := filepath.Join(f.Root, "evalfile")
+	_ = os.Remove(path)
+
+	var out bytes.Buffer
+	if err := Run(Env{Args: args, Stdout: &out, Stderr: &out, EvalFile: path}); err != nil {
+		f.t.Fatalf("treemux %s: %v\n%s", strings.Join(args, " "), err, out.String())
+	}
+	written, err := os.ReadFile(path)
+	if err != nil {
+		return "", out.String() // nothing written is a valid outcome
+	}
+	return string(written), out.String()
+}
+
+// statusOf reads one slug's status out of the `ls` table.
+func (f *fixture) statusOf(slug string) string {
+	f.t.Helper()
+	for _, line := range strings.Split(f.mustRun("ls"), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) >= 2 && fields[0] == slug {
+			return fields[1]
+		}
+	}
+	return ""
+}
+
+// ---- ls --------------------------------------------------------------------
+
+func TestLsWithNoWorktrees(t *testing.T) {
+	f := newFixture(t, "")
+
+	out := f.mustRun("ls")
+	if !strings.Contains(out, "no worktrees for repo") {
+		t.Errorf("output = %q, want a no-worktrees message", out)
+	}
+	if strings.Contains(out, "SLUG") {
+		t.Errorf("a table header was printed with no rows:\n%s", out)
+	}
+}
+
+func TestLsStatuses(t *testing.T) {
+	f := newFixture(t, "")
+
+	f.mustRun("new", "atbase")
+
+	f.mustRun("new", "localonly")
+	f.Commit(f.DirFor("localonly"), "local")
+
+	f.mustRun("new", "act")
+	f.Commit(f.DirFor("act"), "pushed")
+	f.Push(f.DirFor("act"), f.BranchFor("act"))
+
+	f.mustRun("new", "dirty")
+	f.Write(f.DirFor("dirty"), "a.txt", "seed\nuncommitted\n")
+
+	tests := []struct{ slug, want string }{
+		{"atbase", "merged"},
+		{"localonly", "unpushed"},
+		{"act", "active"},
+		{"dirty", "dirty"},
+	}
+	for _, tc := range tests {
+		if got := f.statusOf(tc.slug); got != tc.want {
+			t.Errorf("status of %s = %q, want %q", tc.slug, got, tc.want)
+		}
+	}
+}
+
+// ---- new -------------------------------------------------------------------
+
+func TestNewCreatesWorktreeAndBranch(t *testing.T) {
+	f := newFixture(t, "")
+
+	out := f.mustRun("new", "feature")
+	if !strings.Contains(out, "creating branch x/feature off origin/main") {
+		t.Errorf("output = %q, want the fork point reported", out)
+	}
+	if !f.Exists("feature") {
+		t.Fatalf("worktree %s was not created", f.DirFor("feature"))
+	}
+	if got := f.Git(f.DirFor("feature"), "branch", "--show-current"); got != "x/feature" {
+		t.Errorf("branch = %q, want x/feature", got)
+	}
+}
+
+func TestNewStripsAnAlreadyPrefixedSlug(t *testing.T) {
+	f := newFixture(t, "")
+
+	// `new x/pfx` under prefix "x/" must not produce branch x/x/pfx or a
+	// worktree at repo-x/pfx.
+	out := f.mustRun("new", "x/pfx")
+	if !strings.Contains(out, `stripped the "x/" prefix`) {
+		t.Errorf("output = %q, want the correction reported", out)
+	}
+	if !f.Exists("pfx") {
+		t.Error("worktree repo-pfx was not created")
+	}
+	if got := f.Git(f.DirFor("pfx"), "branch", "--show-current"); got != "x/pfx" {
+		t.Errorf("branch = %q, want x/pfx", got)
+	}
+}
+
+func TestNewRejectsSlugWithPathSeparator(t *testing.T) {
+	f := newFixture(t, "")
+
+	// repo-a/b would nest the worktree inside a "repo-a" directory that rm
+	// leaves behind empty, so the slug is refused outright.
+	out, err := f.run("new", "a/b")
+	if err == nil {
+		t.Fatal("want an error for a slug containing a separator")
+	}
+	if !errors.Is(err, ErrUsage) {
+		t.Errorf("err = %v, want ErrUsage (exit 2)", err)
+	}
+	if !strings.Contains(out, "a/b") {
+		t.Errorf("output = %q, want the slug named", out)
+	}
+	if _, statErr := os.Stat(f.MainDir + "-a"); statErr == nil {
+		t.Errorf("a stray %s-a directory was created\n%s", f.MainDir, out)
+	}
+}
+
+func TestNewCarriesConfiguredFiles(t *testing.T) {
+	f := newFixture(t, "carry_files = ['.env', 'nested/creds.txt']\n")
+	f.Write(f.MainDir, ".env", "SECRET=1\n")
+	f.Write(f.MainDir, "nested/creds.txt", "token\n")
+
+	f.mustRun("new", "carried")
+
+	if got, err := os.ReadFile(filepath.Join(f.DirFor("carried"), ".env")); err != nil || string(got) != "SECRET=1\n" {
+		t.Errorf(".env not carried: %v %q", err, got)
+	}
+	// A carried file in a subdirectory needs that directory created first.
+	if got, err := os.ReadFile(filepath.Join(f.DirFor("carried"), "nested", "creds.txt")); err != nil || string(got) != "token\n" {
+		t.Errorf("nested/creds.txt not carried: %v %q", err, got)
+	}
+}
+
+func TestNewWarnsAboutMissingCarryFiles(t *testing.T) {
+	f := newFixture(t, "carry_files = ['.env']\n")
+
+	// Nothing created .env, so the config is stale and the user should hear it
+	// rather than find out when the app fails to boot.
+	out := f.mustRun("new", "nofiles")
+	if !strings.Contains(out, "carry_files") || !strings.Contains(out, "not found") {
+		t.Errorf("output = %q, want a warning about the missing carry file", out)
+	}
+}
+
+func TestNewRequiresASlug(t *testing.T) {
+	f := newFixture(t, "")
+	if _, err := f.run("new"); err == nil {
+		t.Error("want an error when no slug is given")
+	}
+}
+
+func TestNewRunsPostCreate(t *testing.T) {
+	f := newFixture(t, "post_create = 'echo ran > post-create-marker'\n")
+
+	out := f.mustRun("new", "hooked")
+	if !strings.Contains(out, "post_create") {
+		t.Errorf("output = %q, want the hook reported", out)
+	}
+	// The hook is deliberately not waited on, so poll for its effect rather than
+	// assuming it has already finished.
+	marker := filepath.Join(f.DirFor("hooked"), "post-create-marker")
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(marker); err == nil {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Errorf("post_create never produced %s", marker)
+}
+
+// ---- rm --------------------------------------------------------------------
+
+func TestRmGuards(t *testing.T) {
+	f := newFixture(t, "")
+
+	f.mustRun("new", "localonly")
+	f.Commit(f.DirFor("localonly"), "local")
+
+	f.mustRun("new", "dirty")
+	f.Write(f.DirFor("dirty"), "a.txt", "seed\nuncommitted\n")
+
+	f.mustRun("new", "pushed")
+	f.Commit(f.DirFor("pushed"), "pushed")
+	f.Push(f.DirFor("pushed"), f.BranchFor("pushed"))
+
+	t.Run("blocks a local-only commit", func(t *testing.T) {
+		out, err := f.run("rm", "localonly")
+		if err == nil {
+			t.Error("want a refusal")
+		}
+		if !strings.Contains(out, "not on origin") {
+			t.Errorf("output = %q, want the reason named", out)
+		}
+		if !f.Exists("localonly") {
+			t.Error("worktree was removed despite the refusal")
+		}
+	})
+
+	t.Run("blocks uncommitted changes", func(t *testing.T) {
+		out, err := f.run("rm", "dirty")
+		if err == nil {
+			t.Error("want a refusal")
+		}
+		if !strings.Contains(out, "uncommitted file") {
+			t.Errorf("output = %q, want the reason named", out)
+		}
+		if !f.Exists("dirty") {
+			t.Error("worktree was removed despite the refusal")
+		}
+	})
+
+	t.Run("allows pushed and clean", func(t *testing.T) {
+		if _, err := f.run("rm", "pushed"); err != nil {
+			t.Errorf("unexpected refusal: %v", err)
+		}
+		if f.Exists("pushed") {
+			t.Error("worktree was not removed")
+		}
+	})
+
+	t.Run("force overrides a refusal", func(t *testing.T) {
+		if _, err := f.run("rm", "--force", "localonly"); err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		if f.Exists("localonly") {
+			t.Error("worktree was not removed")
+		}
+	})
+
+	t.Run("flags are accepted after the slug", func(t *testing.T) {
+		// Go's flag package would read this -f as a positional argument.
+		if _, err := f.run("rm", "dirty", "-f"); err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		if f.Exists("dirty") {
+			t.Error("worktree was not removed")
+		}
+	})
+}
+
+func TestRmAllowsSquashMergedWithoutForce(t *testing.T) {
+	f := newFixture(t, "")
+	f.mustRun("new", "squashed")
+	dir, branch := f.DirFor("squashed"), f.BranchFor("squashed")
+
+	f.Write(dir, "a.txt", "seed\nchange 1\n")
+	f.Git(dir, "commit", "--quiet", "-am", "work 1")
+	f.Write(dir, "a.txt", "seed\nchange 1\nchange 2\n")
+	f.Git(dir, "commit", "--quiet", "-am", "work 2")
+	f.Push(dir, branch)
+	f.SquashMerge(branch, "squashed work (#1)")
+
+	if got := f.statusOf("squashed"); got != "merged" {
+		t.Errorf("status = %q, want merged", got)
+	}
+	if _, err := f.run("rm", "squashed"); err != nil {
+		t.Errorf("squash-merged worktree needed --force: %v", err)
+	}
+	if f.Exists("squashed") {
+		t.Error("worktree was not removed")
+	}
+}
+
+func TestRmEmitsCdWhenStandingInTheRemovedWorktree(t *testing.T) {
+	f := newFixture(t, "")
+	f.mustRun("new", "here")
+	t.Chdir(f.DirFor("here")) // the shell is inside the directory about to go
+
+	commands, _ := f.runWithEvalFile("rm", "--force", "here")
+
+	want := "cd '" + f.MainDir + "'"
+	if !strings.Contains(commands, want) {
+		t.Errorf("shell commands = %q, want %q", commands, want)
+	}
+}
+
+func TestRmDoesNotEmitCdFromElsewhere(t *testing.T) {
+	f := newFixture(t, "")
+	f.mustRun("new", "there")
+
+	// cwd is the main checkout, so the caller's directory stays valid and must
+	// be left alone.
+	commands, _ := f.runWithEvalFile("rm", "--force", "there")
+	if commands != "" {
+		t.Errorf("shell commands = %q, want none", commands)
+	}
+}
+
+// ---- prune -----------------------------------------------------------------
+
+func TestPrune(t *testing.T) {
+	f := newFixture(t, "")
+
+	f.mustRun("new", "merged1") // tip at origin/main
+	f.mustRun("new", "act")
+	f.Commit(f.DirFor("act"), "pushed")
+	f.Push(f.DirFor("act"), f.BranchFor("act"))
+	f.mustRun("new", "dirty")
+	f.Write(f.DirFor("dirty"), "a.txt", "seed\nuncommitted\n")
+
+	t.Run("dry run lists but removes nothing", func(t *testing.T) {
+		r := f.exec("prune")
+		if !strings.Contains(r.stdout, f.DirFor("merged1")) {
+			t.Errorf("stdout = %q, want the merged worktree path", r.stdout)
+		}
+		// Open and dirty work must not be offered up for deletion.
+		if strings.Contains(r.stdout, f.DirFor("act")) || strings.Contains(r.stdout, f.DirFor("dirty")) {
+			t.Errorf("stdout = %q, want open and dirty work left out", r.stdout)
+		}
+		if !f.Exists("merged1") {
+			t.Error("dry run removed a worktree")
+		}
+	})
+
+	t.Run("-y removes only merged and clean", func(t *testing.T) {
+		f.mustRun("prune", "-y")
+		if f.Exists("merged1") {
+			t.Error("merged worktree was not removed")
+		}
+		if !f.Exists("act") {
+			t.Error("an open pull request's worktree was removed")
+		}
+		if !f.Exists("dirty") {
+			t.Error("a dirty worktree was removed")
+		}
+	})
+}
+
+// TestPruneEmitsCdWhenStandingInAPrunedWorktree covers the gap that rm handled
+// and prune did not: prune can delete the directory the caller is standing in.
+func TestPruneEmitsCdWhenStandingInAPrunedWorktree(t *testing.T) {
+	f := newFixture(t, "")
+	f.mustRun("new", "reaped") // merged and clean, so prune will take it
+	t.Chdir(f.DirFor("reaped"))
+
+	commands, _ := f.runWithEvalFile("prune", "-y")
+
+	want := "cd '" + f.MainDir + "'"
+	if !strings.Contains(commands, want) {
+		t.Errorf("shell commands = %q, want %q", commands, want)
+	}
+	if f.Exists("reaped") {
+		t.Error("worktree was not pruned")
+	}
+}
+
+func TestPruneWithNothingToDo(t *testing.T) {
+	f := newFixture(t, "")
+	out := f.mustRun("prune")
+	if !strings.Contains(out, "nothing to prune") {
+		t.Errorf("output = %q, want a nothing-to-prune message", out)
+	}
+}
+
+// ---- resume ----------------------------------------------------------------
+
+func TestResume(t *testing.T) {
+	f := newFixture(t, "")
+	f.mustRun("new", "alpha")
+	f.mustRun("new", "beta")
+
+	t.Run("explicit slug resolves without a prompt", func(t *testing.T) {
+		out := f.mustRun("resume", "alpha")
+		want := "cd " + f.DirFor("alpha") + " && claude --continue"
+		if !strings.Contains(out, want) {
+			t.Errorf("output = %q, want %q", out, want)
+		}
+	})
+
+	t.Run("prefixed slug is stripped", func(t *testing.T) {
+		out := f.mustRun("resume", "x/alpha")
+		if !strings.Contains(out, f.DirFor("alpha")) {
+			t.Errorf("output = %q, want the alpha worktree", out)
+		}
+	})
+
+	t.Run("unknown slug errors and names it", func(t *testing.T) {
+		out, err := f.run("resume", "nope")
+		if err == nil {
+			t.Fatal("want an error")
+		}
+		if combined := out + err.Error(); !strings.Contains(combined, `"nope"`) {
+			t.Errorf("error = %q, want the bad slug named", combined)
+		}
+	})
+}
+
+func TestResumeUsesConfiguredCommand(t *testing.T) {
+	f := newFixture(t, "command = 'codex'\nresume_command = 'codex resume'\n")
+	f.mustRun("new", "solo")
+
+	// A lone worktree is chosen without a menu, and the configured command is
+	// what gets reported — nothing hardcodes any particular agent.
+	out := f.mustRun("resume")
+	if !strings.Contains(out, "codex resume") {
+		t.Errorf("output = %q, want the configured resume_command", out)
+	}
+}
+
+func TestResumeWithNoWorktrees(t *testing.T) {
+	f := newFixture(t, "")
+
+	out, err := f.run("resume")
+	if err == nil {
+		t.Fatal("want an error when there is nothing to resume")
+	}
+	// An empty target path must never reach a command line.
+	if strings.Contains(out, "cd  ") {
+		t.Errorf("output = %q, want no empty-path command", out)
+	}
+}
+
+// ---- base and configuration ------------------------------------------------
+
+func TestBaseWarnsWhenOffTheBaseBranch(t *testing.T) {
+	f := newFixture(t, "command = 'true'\n")
+	f.Git(f.MainDir, "checkout", "--quiet", "-b", "wandered")
+
+	out := f.mustRun("base")
+	if !strings.Contains(out, "not main") {
+		t.Errorf("output = %q, want a drift warning", out)
+	}
+}
+
+func TestConfigSelection(t *testing.T) {
+	f := newFixture(t, "")
+
+	t.Run("explicit repo name works from outside any repo", func(t *testing.T) {
+		t.Chdir(f.Root) // not a git repo
+		if _, err := f.run("ls", "proj"); err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("unknown repo name errors", func(t *testing.T) {
+		if _, err := f.run("ls", "nope"); err == nil {
+			t.Error("want an error for an unknown config name")
+		}
+	})
+}
+
+// TestWorktreesAreVisibleThroughASymlinkedMainDir is the end-to-end regression
+// for a config whose main_dir reaches the repo through a symlink: `new` used to
+// succeed while `ls` reported nothing, because git reports resolved paths.
+func TestWorktreesAreVisibleThroughASymlinkedMainDir(t *testing.T) {
+	f := newFixture(t, "")
+	viaLink := f.Symlink()
+	if viaLink == f.MainDir {
+		t.Fatal("symlinked path is identical to the real one; test proves nothing")
+	}
+	f.setConfig("main_dir = '" + viaLink + "'\n")
+
+	f.mustRun("new", "viasym")
+
+	out := f.mustRun("ls")
+	if !strings.Contains(out, "viasym") {
+		t.Errorf("ls output = %q, want the worktree listed", out)
+	}
+	if got := f.mustRun("__complete", "slugs"); !strings.Contains(got, "viasym") {
+		t.Errorf("completion = %q, want the worktree listed", got)
+	}
+}
+
+// ---- dispatch --------------------------------------------------------------
+
+func TestDispatch(t *testing.T) {
+	f := newFixture(t, "")
+
+	t.Run("bare treemux is a usage error", func(t *testing.T) {
+		out, err := f.run()
+		if err == nil {
+			t.Error("want a non-zero exit")
+		}
+		if !strings.Contains(out, "new <slug>") {
+			t.Errorf("output = %q, want the command overview", out)
+		}
+	})
+
+	t.Run("help exits zero", func(t *testing.T) {
+		out, err := f.run("--help")
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		if !strings.Contains(out, "resume [slug]") {
+			t.Errorf("output = %q, want the command overview", out)
+		}
+	})
+
+	t.Run("unknown command errors", func(t *testing.T) {
+		if _, err := f.run("bogus"); err == nil {
+			t.Error("want an error")
+		}
+	})
+
+	t.Run("unknown flag errors", func(t *testing.T) {
+		if _, err := f.run("ls", "--nope"); err == nil {
+			t.Error("want an error")
+		}
+	})
+}
+
+// TestRejectsExtraArguments guards against silently discarding an argument,
+// which would make a typo — a slug with a stray space, say — look accepted.
+func TestRejectsExtraArguments(t *testing.T) {
+	f := newFixture(t, "")
+
+	for _, args := range [][]string{
+		{"ls", "proj", "extra"},
+		{"prune", "proj", "extra"},
+		{"rm", "a", "b"},
+		{"resume", "a", "b"},
+		{"base", "proj", "extra"},
+		{"new", "a", "b", "c"},
+		{"init", "zsh", "extra"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			r := f.exec(args...)
+			if r.err == nil {
+				t.Fatalf("want an error, got output %q", r.stdout)
+			}
+			if !errors.Is(r.err, ErrUsage) {
+				t.Errorf("err = %v, want ErrUsage (exit 2)", r.err)
+			}
+			if !strings.Contains(r.stderr, "unexpected argument") {
+				t.Errorf("stderr = %q, want it to name the unexpected argument", r.stderr)
+			}
+		})
+	}
+}
+
+func TestCompleteIsQuietAndUseful(t *testing.T) {
+	f := newFixture(t, "")
+	f.mustRun("new", "alpha")
+	f.mustRun("new", "beta")
+
+	if got := f.mustRun("__complete", "slugs"); got != "alpha\nbeta\n" {
+		t.Errorf("slugs = %q, want alpha and beta", got)
+	}
+	if got := f.mustRun("__complete", "repos"); got != "proj\n" {
+		t.Errorf("repos = %q, want proj", got)
+	}
+	if got := f.mustRun("__complete", "shells"); got != "bash\nfish\nzsh\n" {
+		t.Errorf("shells = %q", got)
+	}
+
+	// Completion runs while the user is mid-keystroke: an unresolvable request
+	// must print nothing rather than a diagnostic into their prompt.
+	t.Chdir(f.Root)
+	t.Setenv("TREEMUX_CONFIG_DIR", filepath.Join(f.Root, "empty"))
+	out, err := f.run("__complete", "slugs")
+	if err != nil || out != "" {
+		t.Errorf("completion with no config = (%q, %v), want silence", out, err)
+	}
+}
+
+// ---- output conventions ----------------------------------------------------
+
+// TestStdoutCarriesOnlyTheAnswer pins the rule the whole CLI is organized
+// around: stdout is pipeable data, stderr is narration. Progress and warnings
+// mixed into stdout would corrupt any consumer.
+func TestStdoutCarriesOnlyTheAnswer(t *testing.T) {
+	f := newFixture(t, "carry_files = ['.env']\n") // missing, so `new` also warns
+
+	t.Run("new emits the worktree path and nothing else", func(t *testing.T) {
+		r := f.exec("new", "feature")
+		if r.err != nil {
+			t.Fatalf("new: %v\n%s", r.err, r.both())
+		}
+		if got, want := r.stdout, f.DirFor("feature")+"\n"; got != want {
+			t.Errorf("stdout = %q, want exactly %q", got, want)
+		}
+		// The narration and the warning both belong on the other stream.
+		if !strings.Contains(r.stderr, "creating branch") {
+			t.Errorf("stderr = %q, want the progress line", r.stderr)
+		}
+		if !strings.Contains(r.stderr, "warning: carry_files") {
+			t.Errorf("stderr = %q, want the carry_files warning", r.stderr)
+		}
+	})
+
+	t.Run("ls emits the table and nothing else", func(t *testing.T) {
+		r := f.exec("ls")
+		if r.err != nil {
+			t.Fatalf("ls: %v", r.err)
+		}
+		if !strings.Contains(r.stdout, "SLUG") || !strings.Contains(r.stdout, "feature") {
+			t.Errorf("stdout = %q, want the table", r.stdout)
+		}
+		if r.stderr != "" {
+			t.Errorf("stderr = %q, want nothing", r.stderr)
+		}
+	})
+
+	t.Run("an empty listing leaves stdout empty", func(t *testing.T) {
+		f2 := newFixture(t, "")
+		r := f2.exec("ls")
+		if r.stdout != "" {
+			t.Errorf("stdout = %q, want nothing for a consumer to read", r.stdout)
+		}
+		if !strings.Contains(r.stderr, "no worktrees") {
+			t.Errorf("stderr = %q, want the explanation", r.stderr)
+		}
+	})
+}
+
+func TestLsJSON(t *testing.T) {
+	f := newFixture(t, "")
+	f.mustRun("new", "alpha")
+	f.Commit(f.DirFor("alpha"), "local work")
+
+	r := f.exec("ls", "--json")
+	if r.err != nil {
+		t.Fatalf("ls --json: %v\n%s", r.err, r.both())
+	}
+	if r.stderr != "" {
+		t.Errorf("stderr = %q, want nothing alongside machine output", r.stderr)
+	}
+
+	var rows []struct {
+		Slug     string `json:"slug"`
+		Dir      string `json:"dir"`
+		Branch   string `json:"branch"`
+		Status   string `json:"status"`
+		Ahead    *int   `json:"ahead"`
+		Behind   *int   `json:"behind"`
+		Unpushed int    `json:"unpushed"`
+		Window   string `json:"window"`
+	}
+	if err := json.Unmarshal([]byte(r.stdout), &rows); err != nil {
+		t.Fatalf("output is not valid JSON: %v\n%s", err, r.stdout)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("got %d rows, want 1: %s", len(rows), r.stdout)
+	}
+	got := rows[0]
+	if got.Slug != "alpha" || got.Branch != "x/alpha" || got.Status != "unpushed" || got.Unpushed != 1 {
+		t.Errorf("row = %+v", got)
+	}
+	if got.Dir != f.DirFor("alpha") {
+		t.Errorf("dir = %q, want %q", got.Dir, f.DirFor("alpha"))
+	}
+	if got.Ahead == nil || *got.Ahead != 1 {
+		t.Errorf("ahead = %v, want 1", got.Ahead)
+	}
+	if got.Window != "" {
+		t.Errorf("window = %q, want empty outside tmux", got.Window)
+	}
+}
+
+func TestLsJSONIsAnEmptyArrayWithNoWorktrees(t *testing.T) {
+	f := newFixture(t, "")
+
+	// A caller parsing this needs valid JSON whether or not there is anything to
+	// report, so the empty case cannot be a prose message.
+	r := f.exec("ls", "--json")
+	if r.err != nil {
+		t.Fatalf("ls --json: %v", r.err)
+	}
+	var rows []map[string]any
+	if err := json.Unmarshal([]byte(r.stdout), &rows); err != nil {
+		t.Fatalf("output is not valid JSON: %v\n%q", err, r.stdout)
+	}
+	if len(rows) != 0 {
+		t.Errorf("got %d rows, want none", len(rows))
+	}
+}
+
+func TestLsOutputIsPlainWhenNotATerminal(t *testing.T) {
+	f := newFixture(t, "")
+	f.mustRun("new", "alpha")
+
+	// Buffers are not terminals, so no escape sequence may reach them — this is
+	// what keeps color out of pipes, files, and this test suite's assertions.
+	r := f.exec("ls")
+	if strings.Contains(r.stdout, "\x1b") {
+		t.Errorf("stdout carries escape sequences: %q", r.stdout)
+	}
+}
+
+func TestHelpGoesToStdoutAndUsageErrorsToStderr(t *testing.T) {
+	f := newFixture(t, "")
+
+	t.Run("help asked for is the answer", func(t *testing.T) {
+		r := f.exec("help")
+		if r.err != nil {
+			t.Errorf("err = %v, want nil (exit 0)", r.err)
+		}
+		if !strings.Contains(r.stdout, "usage: treemux") {
+			t.Errorf("stdout = %q, want the overview", r.stdout)
+		}
+		if r.stderr != "" {
+			t.Errorf("stderr = %q, want nothing", r.stderr)
+		}
+	})
+
+	t.Run("per-command help exists for every command", func(t *testing.T) {
+		for _, c := range commands {
+			if c.hidden {
+				continue
+			}
+			r := f.exec("help", c.name)
+			if r.err != nil {
+				t.Errorf("help %s: %v", c.name, r.err)
+			}
+			if !strings.Contains(r.stdout, "usage: treemux "+c.name) {
+				t.Errorf("help %s: stdout = %q", c.name, r.stdout)
+			}
+			// -h and --help must reach the same place as `help <command>`.
+			for _, flag := range []string{"-h", "--help"} {
+				if got := f.exec(c.name, flag); got.stdout != r.stdout {
+					t.Errorf("%s %s printed something different from help %s", c.name, flag, c.name)
+				}
+			}
+		}
+	})
+
+	t.Run("being invoked wrongly is not the answer", func(t *testing.T) {
+		r := f.exec()
+		if !errors.Is(r.err, ErrUsage) {
+			t.Errorf("err = %v, want ErrUsage (exit 2)", r.err)
+		}
+		if r.stdout != "" {
+			t.Errorf("stdout = %q, want nothing", r.stdout)
+		}
+		if !strings.Contains(r.stderr, "usage: treemux") {
+			t.Errorf("stderr = %q, want the overview", r.stderr)
+		}
+	})
+}
+
+// TestMessagesShareOneVoice guards the conventions from drifting back apart: a
+// new message that invents its own prefix, or ends in a period, will fail here.
+func TestMessagesShareOneVoice(t *testing.T) {
+	f := newFixture(t, "carry_files = ['.env']\n")
+	f.mustRun("new", "alpha")
+	f.Commit(f.DirFor("alpha"), "local work")
+
+	var lines []string
+	for _, args := range [][]string{
+		{"new", "beta"}, {"ls"}, {"prune"}, {"rm", "alpha"}, {"resume", "nope"},
+	} {
+		r := f.exec(args...)
+		lines = append(lines, strings.Split(strings.TrimRight(r.stderr, "\n"), "\n")...)
+	}
+
+	for _, line := range lines {
+		if line == "" {
+			continue
+		}
+		if strings.HasPrefix(line, "treemux:") || strings.HasPrefix(line, "note:") {
+			t.Errorf("message uses a retired prefix: %q", line)
+		}
+		if strings.HasSuffix(line, ".") {
+			t.Errorf("message ends in a period, unlike the rest: %q", line)
+		}
+		if strings.Contains(line, "->") {
+			t.Errorf("message uses ASCII -> where the rest use an em dash: %q", line)
+		}
+		if trimmed := strings.TrimLeft(line, " "); trimmed != "" {
+			if first := trimmed[0]; first >= 'A' && first <= 'Z' {
+				t.Errorf("message starts with a capital, unlike the rest: %q", line)
+			}
+		}
+	}
+}
+
+// TestHelpTextIsCleanlyIndented guards a hazard of keeping help prose in Go raw
+// string literals: the text is column-sensitive, and any reindentation of the
+// surrounding code silently becomes stray whitespace in what the user reads.
+func TestHelpTextIsCleanlyIndented(t *testing.T) {
+	for _, c := range commands {
+		for label, text := range map[string]string{"summary": c.summary, "long": c.long} {
+			if strings.Contains(text, "\t") {
+				t.Errorf("%s %s contains a tab", c.name, label)
+			}
+			for _, line := range strings.Split(text, "\n") {
+				if line != strings.TrimRight(line, " \t") {
+					t.Errorf("%s %s has a line with trailing whitespace: %q", c.name, label, line)
+				}
+			}
+		}
+		if strings.HasSuffix(c.summary, ".") {
+			t.Errorf("%s summary ends in a period, unlike the others: %q", c.name, c.summary)
+		}
+	}
+}
+
+// TestEveryFlagIsDocumented keeps help and behavior from drifting: a flag the
+// parser accepts but help omits is undiscoverable, and one help lists but the
+// parser rejects is a lie.
+func TestEveryFlagIsDocumented(t *testing.T) {
+	f := newFixture(t, "")
+
+	for _, c := range commands {
+		if c.hidden {
+			continue
+		}
+		for _, doc := range c.flags {
+			for _, name := range strings.Split(doc.names, ",") {
+				name = strings.TrimSpace(name)
+
+				// The parser must accept it: an unknown flag is a usage error,
+				// and anything else means it is wired up.
+				r := f.exec(c.name, name, "--definitely-not-a-flag")
+				if strings.Contains(r.stderr, "unknown flag "+strconv.Quote(name)) {
+					t.Errorf("%s: help documents %s but the parser rejects it", c.name, name)
+				}
+
+				// And completion must offer it.
+				candidates := f.mustRun("__complete", "flags", c.name)
+				if !strings.Contains(candidates, name+"\n") {
+					t.Errorf("%s: completion omits %s (offered: %q)", c.name, name, candidates)
+				}
+			}
+		}
+	}
+}
