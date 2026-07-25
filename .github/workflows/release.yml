@@ -27,8 +27,4 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Publishing the Homebrew cask pushes to a *different* repository
-          # (jay-snyder/homebrew-tap), which the default GITHUB_TOKEN cannot do.
-          # Until this secret exists, remove the homebrew_casks section from
-          # .goreleaser.yaml or the release step will fail.
           HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}

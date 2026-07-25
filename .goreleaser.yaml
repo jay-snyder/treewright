@@ -54,19 +54,16 @@ release:
 
 # Publishes a Homebrew cask to a separate tap repository.
 #
-# A cask rather than a formula because GoReleaser deprecated `brews`: Homebrew
-# now wants pre-built binaries distributed as casks. The tradeoff is that casks
-# are macOS-only, so Linux users install with `go install` or the tarballs above.
-#
-# Requires two things that are not set up yet:
-#   1. github.com/jay-snyder/homebrew-tap must exist, and
-#   2. a HOMEBREW_TAP_GITHUB_TOKEN secret with write access to it — the release
-#      job's default GITHUB_TOKEN cannot push to another repository.
+# A cask, not a formula: GoReleaser deprecated `brews`. Casks are macOS-only, so
+# Linux installs come from `go install` or the tarballs above.
 homebrew_casks:
   - repository:
       owner: jay-snyder
       name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    commit_author:
+      name: Jay Snyder
+      email: github@catch.fail
     homepage: https://github.com/jay-snyder/treemux
     description: Isolated git worktree + tmux + agent sessions for parallel work
     license: MIT
