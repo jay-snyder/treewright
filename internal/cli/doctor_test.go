@@ -25,7 +25,7 @@ func findings(t *testing.T, f *fixture) []finding {
 	t.Helper()
 	r := f.exec("doctor")
 	var found []finding
-	for _, line := range strings.Split(strings.TrimRight(r.stdout, "\n"), "\n") {
+	for line := range strings.SplitSeq(strings.TrimRight(r.stdout, "\n"), "\n") {
 		level, detail, ok := strings.Cut(strings.TrimSpace(line), " ")
 		if !ok {
 			continue

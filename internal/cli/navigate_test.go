@@ -15,7 +15,7 @@ func TestCdMovesTheCallingShell(t *testing.T) {
 	f := newFixture(t, "")
 	f.mustRun("new", "feature")
 
-	commands, _ := f.runWithEvalFile("cd", "feature")
+	commands := f.runWithEvalFile("cd", "feature")
 	want := "cd '" + f.DirFor("feature") + "'"
 	if strings.TrimSpace(commands) != want {
 		t.Errorf("shell was asked to run %q, want %q", commands, want)
@@ -331,7 +331,7 @@ func TestAliasesStayOutOfHelp(t *testing.T) {
 
 	for _, c := range commands {
 		for _, alias := range c.aliases {
-			for _, line := range strings.Split(overview, "\n") {
+			for line := range strings.SplitSeq(overview, "\n") {
 				if strings.HasPrefix(strings.TrimSpace(line), alias+" ") {
 					t.Errorf("help lists the alias %q as though it were a command", alias)
 				}

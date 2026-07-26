@@ -22,6 +22,7 @@ import (
 // subcommands can be driven end to end.
 type fixture struct {
 	*gittest.Repo
+
 	t        *testing.T
 	registry string
 }
@@ -119,6 +120,7 @@ func waitForContent(t *testing.T, path, want, what string) {
 // window has already closed is not there to answer the question.
 func privateTmuxServer(t *testing.T) {
 	t.Helper()
+	//nolint:usetesting // t.TempDir gives a path too long for a unix socket on macOS
 	dir, err := os.MkdirTemp("/tmp", "tmx")
 	if err != nil {
 		t.Fatalf("make a tmux socket directory: %v", err)
@@ -207,7 +209,7 @@ func (f *fixture) mustRun(args ...string) string {
 
 // runWithEvalFile invokes treewright with the shell integration's eval file wired
 // up, and returns whatever treewright asked the calling shell to run.
-func (f *fixture) runWithEvalFile(args ...string) (shellCommands string, output string) {
+func (f *fixture) runWithEvalFile(args ...string) (shellCommands string) {
 	f.t.Helper()
 	path := filepath.Join(f.Root, "evalfile")
 	_ = os.Remove(path)
@@ -218,15 +220,15 @@ func (f *fixture) runWithEvalFile(args ...string) (shellCommands string, output 
 	}
 	written, err := os.ReadFile(path)
 	if err != nil {
-		return "", out.String() // nothing written is a valid outcome
+		return "" // nothing written is a valid outcome
 	}
-	return string(written), out.String()
+	return string(written)
 }
 
 // statusOf reads one slug's status out of the `ls` table.
 func (f *fixture) statusOf(slug string) string {
 	f.t.Helper()
-	for _, line := range strings.Split(f.mustRun("ls"), "\n") {
+	for line := range strings.SplitSeq(f.mustRun("ls"), "\n") {
 		fields := strings.Fields(line)
 		if len(fields) >= 2 && fields[0] == slug {
 			return fields[1]
@@ -288,7 +290,7 @@ func TestLsMarksTheCurrentWorktree(t *testing.T) {
 		t.Chdir(f.DirFor("beta"))
 
 		var marked, unmarked int
-		for _, line := range strings.Split(f.mustRun("ls"), "\n") {
+		for line := range strings.SplitSeq(f.mustRun("ls"), "\n") {
 			switch {
 			case strings.HasPrefix(line, "*") && strings.Contains(line, "beta"):
 				marked++
@@ -308,7 +310,7 @@ func TestLsMarksTheCurrentWorktree(t *testing.T) {
 		// The base checkout heads the listing, so standing in it is standing in a
 		// row — and the marker belongs on that row rather than on nothing.
 		var marked string
-		for _, line := range strings.Split(f.mustRun("ls"), "\n") {
+		for line := range strings.SplitSeq(f.mustRun("ls"), "\n") {
 			if strings.HasPrefix(line, "*") {
 				marked = line
 			}
@@ -326,7 +328,7 @@ func TestLsMarksTheCurrentWorktree(t *testing.T) {
 		// a case that is not occurring — which is now only the case when the
 		// caller is standing in none of the checkouts at all.
 		t.Chdir(t.TempDir())
-		for _, line := range strings.Split(f.mustRun("ls", "proj"), "\n") {
+		for line := range strings.SplitSeq(f.mustRun("ls", "proj"), "\n") {
 			if strings.HasPrefix(line, " ") || strings.HasPrefix(line, "*") {
 				t.Errorf("line is indented for an unused marker column: %q", line)
 			}
@@ -759,7 +761,7 @@ func TestRmEmitsCdWhenStandingInTheRemovedWorktree(t *testing.T) {
 	f.mustRun("new", "here")
 	t.Chdir(f.DirFor("here")) // the shell is inside the directory about to go
 
-	commands, _ := f.runWithEvalFile("rm", "--force", "here")
+	commands := f.runWithEvalFile("rm", "--force", "here")
 
 	want := "cd '" + f.MainDir + "'"
 	if !strings.Contains(commands, want) {
@@ -773,7 +775,7 @@ func TestRmDoesNotEmitCdFromElsewhere(t *testing.T) {
 
 	// cwd is the main checkout, so the caller's directory stays valid and must
 	// be left alone.
-	commands, _ := f.runWithEvalFile("rm", "--force", "there")
+	commands := f.runWithEvalFile("rm", "--force", "there")
 	if commands != "" {
 		t.Errorf("shell commands = %q, want none", commands)
 	}
@@ -826,7 +828,7 @@ func TestPruneEmitsCdWhenStandingInAPrunedWorktree(t *testing.T) {
 	f.mustRun("new", "reaped") // merged and clean, so prune will take it
 	t.Chdir(f.DirFor("reaped"))
 
-	commands, _ := f.runWithEvalFile("prune", "-y")
+	commands := f.runWithEvalFile("prune", "-y")
 
 	want := "cd '" + f.MainDir + "'"
 	if !strings.Contains(commands, want) {
@@ -1412,7 +1414,7 @@ func TestHelpTextIsCleanlyIndented(t *testing.T) {
 			if strings.Contains(text, "\t") {
 				t.Errorf("%s %s contains a tab", c.name, label)
 			}
-			for _, line := range strings.Split(text, "\n") {
+			for line := range strings.SplitSeq(text, "\n") {
 				if line != strings.TrimRight(line, " \t") {
 					t.Errorf("%s %s has a line with trailing whitespace: %q", c.name, label, line)
 				}
@@ -1435,7 +1437,7 @@ func TestEveryFlagIsDocumented(t *testing.T) {
 			continue
 		}
 		for _, doc := range c.flags {
-			for _, name := range strings.Split(doc.names, ",") {
+			for name := range strings.SplitSeq(doc.names, ",") {
 				name = strings.TrimSpace(name)
 
 				// The parser must accept it: an unknown flag is a usage error,

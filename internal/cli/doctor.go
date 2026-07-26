@@ -60,7 +60,7 @@ type report struct {
 	failed bool
 }
 
-func (r *report) add(l level, format string, args ...any) {
+func (r *report) addf(l level, format string, args ...any) {
 	r.rows = append(r.rows, [2]string{l.label(), fmt.Sprintf(format, args...)})
 	r.levels = append(r.levels, l)
 	if l == levelFail {
@@ -111,28 +111,28 @@ func cmdDoctor(env *Env, args []string) error {
 func checkTmux(r *report) {
 	path, err := exec.LookPath("tmux")
 	if err != nil {
-		r.add(levelFail, "tmux is not on PATH — new, resume and base cannot open windows")
+		r.addf(levelFail, "tmux is not on PATH — new, resume and base cannot open windows")
 		return
 	}
-	r.add(levelOK, "tmux at %s", path)
+	r.addf(levelOK, "tmux at %s", path)
 	// Worth stating whenever it is set, because it redirects every tmux command
 	// treewright runs at a different server, and a window that opened "nowhere" is
 	// otherwise a mystery.
 	if label := os.Getenv("TREEWRIGHT_TMUX_LABEL"); label != "" {
-		r.add(levelOK, "driving the tmux server %q, from TREEWRIGHT_TMUX_LABEL", label)
+		r.addf(levelOK, "driving the tmux server %q, from TREEWRIGHT_TMUX_LABEL", label)
 	}
 
 	switch session := tmux.CurrentSession(); {
 	case session != "":
-		r.add(levelOK, "attached to tmux session %s", session)
+		r.addf(levelOK, "attached to tmux session %s", session)
 	case tmux.Inside():
 		// $TMUX is set but the server behind it did not answer, which is what a
 		// stale environment inherited from a dead session looks like.
-		r.add(levelWarn, "$TMUX is set but its server does not answer — windows may open on another server")
+		r.addf(levelWarn, "$TMUX is set but its server does not answer — windows may open on another server")
 	default:
 		// Not a fault: treewright is often run from a plain shell, and windows are
 		// still opened, in the repository's own session, to attach to afterwards.
-		r.add(levelWarn, "not inside tmux — windows are created detached, and treewright says how to attach")
+		r.addf(levelWarn, "not inside tmux — windows are created detached, and treewright says how to attach")
 	}
 }
 
@@ -160,9 +160,9 @@ func checkTmuxIntegration(r *report) {
 		// The server stopped between the two questions. Nothing worth saying.
 		return
 	case bound:
-		r.add(levelOK, "tmux integration loaded")
+		r.addf(levelOK, "tmux integration loaded")
 	default:
-		r.add(levelWarn, "tmux integration not loaded — add run-shell 'treewright tmux-init --apply' to your tmux.conf, or no key reaches treewright from a window running an agent")
+		r.addf(levelWarn, "tmux integration not loaded — add run-shell 'treewright tmux-init --apply' to your tmux.conf, or no key reaches treewright from a window running an agent")
 	}
 }
 
@@ -183,10 +183,10 @@ func checkSessions(r *report, names []string) {
 		session := sessionFor(cfg)
 		owners[session] = append(owners[session], name)
 		if tmux.HasSession(session) {
-			r.add(levelOK, "%s: tmux session %s is running", name, session)
+			r.addf(levelOK, "%s: tmux session %s is running", name, session)
 			continue
 		}
-		r.add(levelOK, "%s: tmux session %s, created by the first new, resume or base", name, session)
+		r.addf(levelOK, "%s: tmux session %s, created by the first new, resume or base", name, session)
 	}
 
 	// Sorted, so that a report read twice reads the same way.
@@ -198,7 +198,7 @@ func checkSessions(r *report, names []string) {
 	}
 	sort.Strings(shared)
 	for _, session := range shared {
-		r.add(levelWarn, "configs %s share tmux session %s — their windows will mix",
+		r.addf(levelWarn, "configs %s share tmux session %s — their windows will mix",
 			strings.Join(owners[session], ", "), session)
 	}
 }
@@ -209,17 +209,17 @@ func checkSessions(r *report, names []string) {
 // evidence available.
 func checkShellIntegration(env *Env, r *report) {
 	if env.EvalFile != "" {
-		r.add(levelOK, "shell integration loaded")
+		r.addf(levelOK, "shell integration loaded")
 		return
 	}
 	shell := filepath.Base(os.Getenv("SHELL"))
 	switch shell {
 	case "zsh", "bash":
-		r.add(levelWarn, "shell integration not loaded — add eval \"$(treewright shell-init %s)\" to your startup file, or cd and rm cannot move your shell", shell)
+		r.addf(levelWarn, "shell integration not loaded — add eval \"$(treewright shell-init %s)\" to your startup file, or cd and rm cannot move your shell", shell)
 	case "fish":
-		r.add(levelWarn, "shell integration not loaded — add treewright shell-init fish | source to your config, or cd and rm cannot move your shell")
+		r.addf(levelWarn, "shell integration not loaded — add treewright shell-init fish | source to your config, or cd and rm cannot move your shell")
 	default:
-		r.add(levelWarn, "shell integration not loaded — see \"%s help shell-init\"; without it cd and rm cannot move your shell", env.Argv0)
+		r.addf(levelWarn, "shell integration not loaded — see \"%s help shell-init\"; without it cd and rm cannot move your shell", env.Argv0)
 	}
 }
 
@@ -228,14 +228,14 @@ func checkRegistry(env *Env, r *report) []string {
 	dir := config.Dir()
 	names, err := config.Names()
 	if err != nil {
-		r.add(levelFail, "cannot read %s: %v", dir, err)
+		r.addf(levelFail, "cannot read %s: %v", dir, err)
 		return nil
 	}
 	if len(names) == 0 {
-		r.add(levelFail, "no configs in %s — run \"%s setup\" inside a repository", dir, env.Argv0)
+		r.addf(levelFail, "no configs in %s — run \"%s setup\" inside a repository", dir, env.Argv0)
 		return nil
 	}
-	r.add(levelOK, "%d config(s) in %s: %s", len(names), dir, strings.Join(names, ", "))
+	r.addf(levelOK, "%d config(s) in %s: %s", len(names), dir, strings.Join(names, ", "))
 
 	// A file left in the registry that treewright does not read is nearly always a
 	// config the user believes is in force — a rename half-done, or a config from
@@ -251,7 +251,7 @@ func checkRegistry(env *Env, r *report) []string {
 		}
 	}
 	if len(strays) > 0 {
-		r.add(levelWarn, "ignored, not a .toml file: %s", strings.Join(strays, ", "))
+		r.addf(levelWarn, "ignored, not a .toml file: %s", strings.Join(strays, ", "))
 	}
 	return names
 }
@@ -259,7 +259,7 @@ func checkRegistry(env *Env, r *report) []string {
 func checkConfig(r *report, name string) {
 	cfg, err := config.Load(filepath.Join(config.Dir(), name+".toml"))
 	if err != nil {
-		r.add(levelFail, "%v", err)
+		r.addf(levelFail, "%v", err)
 		return
 	}
 
@@ -267,29 +267,29 @@ func checkConfig(r *report, name string) {
 	if _, err := os.Stat(cfg.MainDir); err != nil {
 		// The likeliest config fault by far: a repository that was moved or
 		// renamed after being registered.
-		r.add(levelFail, "%s: main_dir %s does not exist", name, cfg.MainDir)
+		r.addf(levelFail, "%s: main_dir %s does not exist", name, cfg.MainDir)
 		return
 	}
 	gitMain, err := repo.MainDir()
 	if err != nil {
-		r.add(levelFail, "%s: main_dir %s is not a git repository", name, cfg.MainDir)
+		r.addf(levelFail, "%s: main_dir %s is not a git repository", name, cfg.MainDir)
 		return
 	}
 	if gitMain != cfg.MainDir {
 		// Worktrees are matched by path prefix against git's own spelling, so a
 		// main_dir that disagrees with it makes every worktree invisible.
-		r.add(levelFail, "%s: main_dir is %s but git calls the same repo %s", name, cfg.MainDir, gitMain)
+		r.addf(levelFail, "%s: main_dir is %s but git calls the same repo %s", name, cfg.MainDir, gitMain)
 		return
 	}
-	r.add(levelOK, "%s: main_dir %s", name, cfg.MainDir)
+	r.addf(levelOK, "%s: main_dir %s", name, cfg.MainDir)
 
 	switch {
 	case !repo.HasRemote("origin"):
-		r.add(levelWarn, "%s: no origin remote — new forks from the local %s instead", name, cfg.BaseBranch)
+		r.addf(levelWarn, "%s: no origin remote — new forks from the local %s instead", name, cfg.BaseBranch)
 	case !repo.RefExists("origin/" + cfg.BaseBranch):
-		r.add(levelWarn, "%s: origin/%s does not resolve — fetch, or fix base_branch", name, cfg.BaseBranch)
+		r.addf(levelWarn, "%s: origin/%s does not resolve — fetch, or fix base_branch", name, cfg.BaseBranch)
 	default:
-		r.add(levelOK, "%s: forks from origin/%s", name, cfg.BaseBranch)
+		r.addf(levelOK, "%s: forks from origin/%s", name, cfg.BaseBranch)
 	}
 
 	for _, rel := range cfg.CarryFiles {
@@ -297,11 +297,11 @@ func checkConfig(r *report, name string) {
 		info, err := os.Stat(src)
 		switch {
 		case err != nil:
-			r.add(levelWarn, "%s: carry_files %s is missing from %s", name, rel, cfg.MainDir)
+			r.addf(levelWarn, "%s: carry_files %s is missing from %s", name, rel, cfg.MainDir)
 		case info.IsDir():
 			// carryFiles copies one file at a time, so a directory is silently
 			// skipped at the point where it would matter.
-			r.add(levelWarn, "%s: carry_files %s is a directory, which is not copied", name, rel)
+			r.addf(levelWarn, "%s: carry_files %s is a directory, which is not copied", name, rel)
 		}
 	}
 
@@ -314,11 +314,11 @@ func checkConfig(r *report, name string) {
 	} {
 		words := strings.Fields(setting.command)
 		if len(words) == 0 {
-			r.add(levelWarn, "%s: %s is blank — the window would open running nothing", name, setting.label)
+			r.addf(levelWarn, "%s: %s is blank — the window would open running nothing", name, setting.label)
 			continue
 		}
 		if _, err := exec.LookPath(words[0]); err != nil {
-			r.add(levelWarn, "%s: %s runs %q, which is not on PATH", name, setting.label, words[0])
+			r.addf(levelWarn, "%s: %s runs %q, which is not on PATH", name, setting.label, words[0])
 		}
 	}
 }
@@ -332,13 +332,13 @@ func checkCurrentRepo(r *report) {
 	}
 	mainDir, err := git.Repo{Dir: wd}.MainDir()
 	if err != nil {
-		r.add(levelWarn, "not inside a git repository — commands here need a [repo] argument")
+		r.addf(levelWarn, "not inside a git repository — commands here need a [repo] argument")
 		return
 	}
 	cfg, err := config.Resolve("", mainDir)
 	if err != nil {
-		r.add(levelWarn, "%v", err)
+		r.addf(levelWarn, "%v", err)
 		return
 	}
-	r.add(levelOK, "here, commands use %q", cfg.Name)
+	r.addf(levelOK, "here, commands use %q", cfg.Name)
 }

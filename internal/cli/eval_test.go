@@ -64,11 +64,30 @@ func TestEmitEvalAppends(t *testing.T) {
 	}
 }
 
+// TestEmitEvalWithoutIntegrationIsANoOp covers the invariant every caller depends
+// on: run straight from a shell with no wrapper loaded, emitEval does nothing.
+//
+// "Nothing" is asserted rather than assumed, in an empty directory the test then
+// reads back. The previous version of this test called emitEval and checked
+// nothing at all, so it passed whatever happened — including the case it was named
+// for, a stray file left behind for someone to wonder about later.
 func TestEmitEvalWithoutIntegrationIsANoOp(t *testing.T) {
-	// Running the binary directly, with no shell wrapper, must not panic or
-	// create stray files — every caller has to work without the integration.
-	env := &Env{EvalFile: ""}
-	emitEval(env, "cd '/nowhere'")
+	dir := t.TempDir()
+	t.Chdir(dir)
+
+	emitEval(&Env{EvalFile: ""}, "cd '/nowhere'")
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read back the working directory: %v", err)
+	}
+	if len(entries) != 0 {
+		names := make([]string, 0, len(entries))
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		t.Errorf("with no eval file configured, emitEval wrote %v", names)
+	}
 }
 
 func TestInsideDir(t *testing.T) {

@@ -24,17 +24,17 @@ import (
 func RequireTool(t *testing.T, name string) {
 	t.Helper()
 	if _, err := exec.LookPath(name); err != nil {
-		Unavailable(t, "%s is not installed", name)
+		Unavailablef(t, "%s is not installed", name)
 	}
 }
 
-// Unavailable reports that this environment cannot run the test — a tool absent,
+// Unavailablef reports that this environment cannot run the test — a tool absent,
 // a server that would not start — and decides whether that is a skip or a
 // failure. Callers say what is wrong; where it is wrong is this package's business.
 //
 // CI is the variable every CI system sets, rather than GITHUB_ACTIONS, so that a
 // suite run anywhere the tools were installed on purpose is held to the same rule.
-func Unavailable(t *testing.T, format string, args ...any) {
+func Unavailablef(t *testing.T, format string, args ...any) {
 	t.Helper()
 	if os.Getenv("CI") == "" {
 		t.Skipf(format, args...)

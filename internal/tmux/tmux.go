@@ -200,6 +200,7 @@ func Windows(prefer string) map[string]Window {
 // window it belongs to, and the worktree that window was opened on.
 type claim struct {
 	Window
+
 	worktree string
 }
 
@@ -268,7 +269,7 @@ func parsePanes(out, prefer string) map[string]Window {
 		best[dir] = c
 	}
 
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		fields := strings.SplitN(line, "\t", 5)
 		if len(fields) != 5 {
 			continue
@@ -604,13 +605,15 @@ func Popup(client, dir, command string, width, height int) error {
 // client to draw on, which a headless test has none of — so the flags are checked
 // here instead, where they can be.
 func popupArgs(client, dir, command string, width, height int) []string {
-	args := []string{"display-popup", "-EE",
+	args := []string{
+		"display-popup", "-EE",
 		"-w", strconv.Itoa(width), "-h", strconv.Itoa(height),
 		// So the command can tell it is running in a popup. It changes what is
 		// worth saying: a popup that stays open because the command failed has
 		// nothing on screen to say how to dismiss it, where a terminal needs no
 		// such advice and would be baffled by it.
-		"-e", PopupEnv + "=1"}
+		"-e", PopupEnv + "=1",
+	}
 	if client != "" {
 		args = append(args, "-c", client)
 	}

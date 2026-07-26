@@ -42,7 +42,7 @@ const gutter = "  "
 // Padding is computed from cell text only, never from the styled string: escape
 // sequences occupy no columns, so measuring them would break alignment exactly
 // when color is on.
-func (t Table) Lines(color bool) (header string, rows []string) {
+func (t *Table) Lines(color bool) (header string, rows []string) {
 	widths := t.widths()
 
 	headerCells := make([]Cell, len(t.Headers))
@@ -59,7 +59,7 @@ func (t Table) Lines(color bool) (header string, rows []string) {
 }
 
 // Render writes the table, header first.
-func (t Table) Render(w io.Writer, color bool) {
+func (t *Table) Render(w io.Writer, color bool) {
 	header, rows := t.Lines(color)
 	fmt.Fprintln(w, header)
 	for _, row := range rows {
@@ -69,19 +69,24 @@ func (t Table) Render(w io.Writer, color bool) {
 
 // widths returns the display width of each column: the widest of its header and
 // its cells, counted in runes rather than bytes so multi-byte text still aligns.
-func (t Table) widths() []int {
-	widths := make([]int, len(t.Headers))
+//
+// The column count is settled before any width is measured, because a row may
+// carry more cells than there are headers — the picker's index column is one — and
+// growing the slice as such a row is met means appending past entries that are
+// already set, which reads as the bug it would be if the order ever changed.
+func (t *Table) widths() []int {
+	columns := len(t.Headers)
+	for _, row := range t.Rows {
+		columns = max(columns, len(row))
+	}
+
+	widths := make([]int, columns)
 	for i, h := range t.Headers {
 		widths[i] = utf8.RuneCountInString(h)
 	}
 	for _, row := range t.Rows {
 		for i, cell := range row {
-			if i >= len(widths) {
-				widths = append(widths, 0)
-			}
-			if n := utf8.RuneCountInString(cell.Text); n > widths[i] {
-				widths[i] = n
-			}
+			widths[i] = max(widths[i], utf8.RuneCountInString(cell.Text))
 		}
 	}
 	return widths

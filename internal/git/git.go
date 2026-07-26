@@ -95,7 +95,7 @@ func (r Repo) Worktrees() ([]Worktree, error) {
 		list []Worktree
 		cur  *Worktree
 	)
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		switch {
 		case strings.HasPrefix(line, "worktree "):
 			list = append(list, Worktree{Dir: strings.TrimPrefix(line, "worktree ")})
@@ -213,7 +213,7 @@ func (r Repo) RemoteBranchNamespaces(remote string) map[string]int {
 		return nil
 	}
 	counts := make(map[string]int)
-	for _, name := range strings.Split(out, "\n") {
+	for name := range strings.SplitSeq(out, "\n") {
 		// "HEAD" is the remote's symbolic ref rather than a branch, and lands here
 		// with no namespace, so it drops out with the unnamespaced branches.
 		if ns, _, found := strings.Cut(name, "/"); found && ns != "" {
@@ -386,6 +386,9 @@ func (r Repo) AheadBehind(branch, base string) (ahead, behind int, ok bool) {
 // Status summarizes how safe a worktree is to throw away.
 type Status string
 
+// The statuses `ls` reports, in the precedence it applies them: dirty outranks
+// everything because it is the most easily lost, then merged, then unpushed, and a
+// branch that is pushed but not merged is active.
 const (
 	StatusDirty    Status = "dirty"    // uncommitted changes present
 	StatusMerged   Status = "merged"   // landed in origin/<base>; safe to remove
@@ -405,6 +408,7 @@ const (
 // worktree, gathered in a single pass.
 type Info struct {
 	Worktree
+
 	Status     Status
 	DirtyFiles int
 	Unpushed   int

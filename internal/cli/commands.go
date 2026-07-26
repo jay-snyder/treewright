@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/jay-snyder/treewright/internal/config"
@@ -670,6 +671,7 @@ func cmdResume(env *Env, args []string) error {
 // that deletes something.
 type choice struct {
 	git.Worktree
+
 	Base bool
 }
 
@@ -708,10 +710,8 @@ func chooseWorktree(env *Env, cfg *config.Config, repo git.Repo, managed []git.W
 	base := baseChoice(cfg)
 
 	if slug != "" {
-		for _, name := range baseNames(cfg, base) {
-			if slug == name {
-				return base, nil
-			}
+		if slices.Contains(baseNames(cfg, base), slug) {
+			return base, nil
 		}
 		wt, err := resolveSlug(env, repo, managed, slug)
 		return choice{Worktree: wt}, err

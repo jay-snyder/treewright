@@ -91,11 +91,11 @@ func TestTableCountsRunesNotBytes(t *testing.T) {
 
 // runeOffsetOf returns how many runes precede the first occurrence of sub.
 func runeOffsetOf(line, sub string) int {
-	i := strings.Index(line, sub)
-	if i < 0 {
+	before, _, found := strings.Cut(line, sub)
+	if !found {
 		return -1
 	}
-	return utf8.RuneCountInString(line[:i])
+	return utf8.RuneCountInString(before)
 }
 
 func TestRenderWritesHeaderThenRows(t *testing.T) {

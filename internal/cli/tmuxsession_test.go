@@ -47,7 +47,7 @@ func activeWindowIn(t *testing.T, session string) string {
 	if err != nil {
 		t.Fatalf("read the active window of %s: %v\n%s", session, err, out)
 	}
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		if name := strings.TrimSpace(line); name != "" {
 			return name
 		}
@@ -97,7 +97,7 @@ func TestNewOpensItsWindowInTheRepoSession(t *testing.T) {
 	// identifies it later however its shell wanders and wherever it is dragged to.
 	// Checked here because this is the call that creates the session, the other of
 	// the two paths a window is opened by.
-	if got, want := windowStamp(t, "proj", "ENG-142", "@treewright_worktree"), f.DirFor("eng-142-white-screen"); got != want {
+	if got, want := windowStamp(t, "ENG-142", "@treewright_worktree"), f.DirFor("eng-142-white-screen"); got != want {
 		t.Errorf("window ENG-142 records worktree %q, want %q", got, want)
 	}
 }
@@ -119,7 +119,7 @@ func TestNewRecordsTheWorktreeOnItsWindow(t *testing.T) {
 		"@treewright_branch":   f.BranchFor("eng-142-white-screen"),
 	}
 	for option, value := range want {
-		if got := windowStamp(t, "proj", "ENG-142", option); got != value {
+		if got := windowStamp(t, "ENG-142", option); got != value {
 			t.Errorf("window ENG-142 has %s = %q, want %q", option, got, value)
 		}
 	}
@@ -135,14 +135,14 @@ func TestTheBaseWindowRecordsNoWorktree(t *testing.T) {
 
 	f.mustRun("base")
 
-	if got, want := windowStamp(t, "proj", "MAIN", "@treewright_worktree"), f.MainDir; got != want {
+	if got, want := windowStamp(t, "MAIN", "@treewright_worktree"), f.MainDir; got != want {
 		t.Errorf("base window records worktree %q, want the main checkout %q", got, want)
 	}
-	if got := windowStamp(t, "proj", "MAIN", "@treewright_repo"); got != "proj" {
+	if got := windowStamp(t, "MAIN", "@treewright_repo"); got != "proj" {
 		t.Errorf("base window records repo %q, want proj", got)
 	}
 	for _, option := range []string{"@treewright_slug", "@treewright_branch"} {
-		if got := windowStamp(t, "proj", "MAIN", option); got != "" {
+		if got := windowStamp(t, "MAIN", option); got != "" {
 			t.Errorf("base window has %s = %q, want it left unset", option, got)
 		}
 	}

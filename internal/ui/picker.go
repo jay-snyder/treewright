@@ -124,6 +124,11 @@ func pick(w io.Writer, header string, items []string, nextKey func() (byte, erro
 			case decideCancel:
 				fmt.Fprint(w, "\r\n")
 				return 0, ErrCancelled
+			case decideWait:
+				// A further digit could still make a larger valid index, so the
+				// buffer stands and the next keypress decides. Spelled out rather
+				// than left to fall through the switch, because "do nothing" is a
+				// third answer here and not the absence of one.
 			}
 
 		case key == keyBackspace || key == keyCtrlH:

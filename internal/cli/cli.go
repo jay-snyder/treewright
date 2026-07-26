@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/jay-snyder/treewright/internal/config"
@@ -100,6 +101,12 @@ type command struct {
 	run     func(*Env, []string) error
 }
 
+// argRepo is how an optional repo name is spelled in a usage line. Named once
+// because it appears in three commands' specs and in the help those render: the
+// commands that take a repo all take it the same way, and a fourth added later
+// should read the same as the three.
+const argRepo = "[repo]"
+
 // commands is ordered as it should read in help: first the four that get you
 // into a worktree, then inspection, then teardown, then installation.
 //
@@ -181,7 +188,7 @@ shell for you.`,
 		{
 			name:    "base",
 			aliases: []string{"main", "home"},
-			args:    "[repo]",
+			args:    argRepo,
 			summary: "open a window on the main checkout",
 			long: `Opens the persistent base window in the main checkout, for launching
 worktrees and asking general questions rather than for feature work. Warns when
@@ -199,7 +206,7 @@ command, for a general-purpose window, where resume runs resume_command.`,
 		},
 		{
 			name:    "attach",
-			args:    "[repo]",
+			args:    argRepo,
 			summary: "attach this terminal to a repository's tmux session",
 			long: `Puts you in the session holding a repository's windows, on whichever
 window was current there when you left — which is what makes this different from
@@ -245,7 +252,7 @@ the tmux server's, wherever that was started. A binding passes
 		{
 			name:    "ls",
 			aliases: []string{"list", "status"},
-			args:    "[--json] [repo]",
+			args:    "[--json] " + argRepo,
 			summary: "list worktrees with their status",
 			long: `Prints one row per worktree: slug, status, divergence from
 origin/<base_branch>, and the tmux window open in it, by name. A window that is
@@ -293,7 +300,7 @@ not whichever one you happened to run this from.`,
 		},
 		{
 			name:    "prune",
-			args:    "[-y] [repo]",
+			args:    "[-y] " + argRepo,
 			summary: "remove every merged, clean worktree",
 			long: `Lists the worktrees whose branch has landed in origin/<base_branch> and
 whose tree is clean. Nothing is removed until --yes is given.
@@ -330,7 +337,7 @@ commands that take a [repo].`,
 		},
 		{
 			name:    "config",
-			args:    "[repo]",
+			args:    argRepo,
 			summary: "print the settings in force, defaults included",
 			long: `Prints the configuration this repository is actually running under:
 every setting with its value, defaults filled in, paths expanded, and the file it
@@ -420,10 +427,8 @@ func lookup(name string) *command {
 		if c.name == name {
 			return c
 		}
-		for _, alias := range c.aliases {
-			if alias == name {
-				return c
-			}
+		if slices.Contains(c.aliases, name) {
+			return c
 		}
 	}
 	return nil

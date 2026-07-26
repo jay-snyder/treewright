@@ -124,7 +124,7 @@ func windowCell(w tmux.Window, session string) string {
 // holding it appears only when one of the rows is in fact the current directory:
 // a marker column that is blank on every row would be a permanent indent paid
 // for a case that is not occurring.
-func worktreeTable(infos []git.Info, windows map[string]tmux.Window, session string) ui.Table {
+func worktreeTable(infos []git.Info, windows map[string]tmux.Window, session string) *ui.Table {
 	cwd, err := os.Getwd()
 	here := -1
 	if err == nil {
@@ -162,7 +162,7 @@ func worktreeTable(infos []git.Info, windows map[string]tmux.Window, session str
 		}
 		table.Add(cells...)
 	}
-	return table
+	return &table
 }
 
 // popupSize estimates the popup a picker over these worktrees needs, in the

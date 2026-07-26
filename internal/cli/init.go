@@ -95,11 +95,11 @@ func cmdComplete(env *Env, args []string) error {
 	case "slugs", "targets":
 		cfg, err := resolveConfig("")
 		if err != nil {
-			return nil
+			return nil //nolint:nilerr // completion never fails; it offers nothing
 		}
 		managed, err := repoFor(cfg).Managed()
 		if err != nil {
-			return nil
+			return nil //nolint:nilerr // completion never fails; it offers nothing
 		}
 		if at(args, 0) == "targets" {
 			// Just the one spelling, though resume and cd also answer to the base
@@ -118,7 +118,7 @@ func cmdComplete(env *Env, args []string) error {
 	case "prefixes":
 		cfg, err := resolveConfig("")
 		if err != nil {
-			return nil
+			return nil //nolint:nilerr // completion never fails; it offers nothing
 		}
 		// A single prefix is not a choice, and offering it would put a word the user
 		// never has to type in front of every new slug.
@@ -135,7 +135,7 @@ func cmdComplete(env *Env, args []string) error {
 	case "repos":
 		names, err := config.Names()
 		if err != nil {
-			return nil
+			return nil //nolint:nilerr // completion never fails; it offers nothing
 		}
 		for _, name := range names {
 			fmt.Fprintln(env.Stdout, name)
@@ -152,7 +152,7 @@ func cmdComplete(env *Env, args []string) error {
 			return nil
 		}
 		for _, f := range cmd.flags {
-			for _, name := range strings.Split(f.names, ",") {
+			for name := range strings.SplitSeq(f.names, ",") {
 				fmt.Fprintln(env.Stdout, strings.TrimSpace(name))
 			}
 		}

@@ -24,6 +24,7 @@ func server(t *testing.T) func(args ...string) (string, error) {
 	testenv.RequireTool(t, "tmux")
 	// Under /tmp rather than t.TempDir(), because a unix socket path is limited to
 	// little over a hundred characters and a macOS temp path approaches that alone.
+	//nolint:usetesting // t.TempDir gives a path too long for a unix socket on macOS
 	dir, err := os.MkdirTemp("/tmp", "tmx")
 	if err != nil {
 		t.Fatalf("make a tmux socket directory: %v", err)
@@ -47,7 +48,7 @@ func server(t *testing.T) func(args ...string) (string, error) {
 	// would see the suite fail. The socket is private; the configuration has to be
 	// too.
 	if out, err := tmux("-f", "/dev/null", "new-session", "-d", "-s", "probe", "-c", "/tmp", "sleep 300"); err != nil {
-		testenv.Unavailable(t, "cannot start a tmux server here: %v\n%s", err, out)
+		testenv.Unavailablef(t, "cannot start a tmux server here: %v\n%s", err, out)
 	}
 	return tmux
 }
@@ -127,7 +128,7 @@ func TestBindingsDoNotOverwriteTmuxsOwn(t *testing.T) {
 
 	// Every key tmux described before must still be described the same way. A
 	// binding treewright added is a new line, not a changed one.
-	for _, line := range strings.Split(before, "\n") {
+	for line := range strings.SplitSeq(before, "\n") {
 		if strings.TrimSpace(line) == "" {
 			continue
 		}

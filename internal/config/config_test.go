@@ -252,7 +252,7 @@ func TestLoadRejectsBadConfigs(t *testing.T) {
 func TestLoadExpandsHomeAndEnv(t *testing.T) {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		testenv.Unavailable(t, "no home directory: %v", err)
+		testenv.Unavailablef(t, "no home directory: %v", err)
 	}
 	dir := registry(t, map[string]string{
 		"tilde":  `main_dir = "~/code/repo"`,

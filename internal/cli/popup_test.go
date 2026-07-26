@@ -36,10 +36,14 @@ func TestPopupSizeCoversTheTable(t *testing.T) {
 			infos: []git.Info{
 				// A long slug, the longest status, and a window in another session,
 				// which is the widest that column is spelled.
-				{Worktree: git.Worktree{Slug: "eng-1675-cold-start-checklist-boost", Dir: "/wt/a"},
-					Status: git.StatusUnpushed, Unpushed: 123, Compared: true, Ahead: 999, Behind: 999},
-				{Worktree: git.Worktree{Slug: "eng-1557-migrate-api-eb-to-ecs", Dir: "/wt/b"},
-					Status: git.StatusDirty, DirtyFiles: 42, Compared: true},
+				{
+					Worktree: git.Worktree{Slug: "eng-1675-cold-start-checklist-boost", Dir: "/wt/a"},
+					Status:   git.StatusUnpushed, Unpushed: 123, Compared: true, Ahead: 999, Behind: 999,
+				},
+				{
+					Worktree: git.Worktree{Slug: "eng-1557-migrate-api-eb-to-ecs", Dir: "/wt/b"},
+					Status:   git.StatusDirty, DirtyFiles: 42, Compared: true,
+				},
 			},
 			window: tmux.Window{ID: "@1", Session: "another-session", Name: "ENG-1675"},
 		},
@@ -51,7 +55,7 @@ func TestPopupSizeCoversTheTable(t *testing.T) {
 			name: "ten of them, so the index column grows a digit",
 			infos: func() []git.Info {
 				var out []git.Info
-				for i := 0; i < 10; i++ {
+				for i := range 10 {
 					out = append(out, git.Info{Worktree: git.Worktree{Slug: "eng-100" + string(rune('0'+i)), Dir: "/wt/x"}, Status: git.StatusActive, Compared: true})
 				}
 				return out

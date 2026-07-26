@@ -175,6 +175,7 @@ func detectedPrefixes(repo git.Repo) []branchPrefix {
 
 	type candidate struct {
 		branchPrefix
+
 		rank int
 	}
 	found := make([]candidate, 0, len(counts))

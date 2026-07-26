@@ -142,7 +142,7 @@ func (r *Repo) SquashMerge(branch, message string) {
 // an operation did or did not write to it.
 func (r *Repo) LooseObjects() int {
 	r.t.Helper()
-	for _, line := range strings.Split(r.Git(r.MainDir, "count-objects", "-v"), "\n") {
+	for line := range strings.SplitSeq(r.Git(r.MainDir, "count-objects", "-v"), "\n") {
 		if v, ok := strings.CutPrefix(line, "count:"); ok {
 			n, err := strconv.Atoi(strings.TrimSpace(v))
 			if err != nil {

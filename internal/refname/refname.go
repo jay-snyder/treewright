@@ -94,7 +94,7 @@ func CheckPrefix(prefix string) error {
 	// The trailing "" that a prefix ending in "/" splits into is skipped rather than
 	// treated as an empty component: that is the ordinary shape of a prefix, and a
 	// genuinely empty component means "//", which is caught above.
-	for _, part := range strings.Split(prefix, "/") {
+	for part := range strings.SplitSeq(prefix, "/") {
 		switch {
 		case part == "":
 			continue

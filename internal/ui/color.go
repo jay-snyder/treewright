@@ -10,6 +10,8 @@ import (
 // Color is a display attribute for one piece of text.
 type Color uint8
 
+// The attributes treewright uses. Plain is the zero value, so a Cell that names no
+// color renders as the terminal's own foreground rather than as a chosen one.
 const (
 	Plain Color = iota
 	Green

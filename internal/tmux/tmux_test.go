@@ -369,6 +369,7 @@ func TestPopupArgs(t *testing.T) {
 // this also pins the other half — that tmux's own refusals are still reported.
 func TestPopupIgnoresTheInnerCommandsExitStatus(t *testing.T) {
 	testenv.RequireTool(t, "tmux")
+	//nolint:usetesting // t.TempDir gives a path too long for a unix socket on macOS
 	dir, err := os.MkdirTemp("/tmp", "tmx")
 	if err != nil {
 		t.Fatalf("make a tmux socket directory: %v", err)
@@ -383,7 +384,7 @@ func TestPopupIgnoresTheInnerCommandsExitStatus(t *testing.T) {
 	})
 	if out, err := exec.Command("tmux", "-L", label, "-f", "/dev/null",
 		"new-session", "-d", "-s", "probe", "-c", "/tmp", "sleep 300").CombinedOutput(); err != nil {
-		testenv.Unavailable(t, "cannot start a tmux server here: %v\n%s", err, out)
+		testenv.Unavailablef(t, "cannot start a tmux server here: %v\n%s", err, out)
 	}
 
 	// No client is attached, so tmux declines to draw — and says why, which is

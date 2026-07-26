@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -76,7 +77,7 @@ func TestScriptsParse(t *testing.T) {
 		t.Run(shell, func(t *testing.T) {
 			bin, err := exec.LookPath(shell)
 			if err != nil {
-				testenv.Unavailable(t, "%s is not installed", shell)
+				testenv.Unavailablef(t, "%s is not installed", shell)
 			}
 			script, err := Script(shell)
 			if err != nil {
@@ -86,7 +87,10 @@ func TestScriptsParse(t *testing.T) {
 			if err := os.WriteFile(path, []byte(script), 0o644); err != nil {
 				t.Fatalf("write: %v", err)
 			}
-			args := append(checkers[shell], path)
+			// Concatenated rather than appended to: appending to a slice read out of
+			// a map writes into that map's backing array whenever it has the capacity
+			// to spare, which would leave the table holding this subtest's path.
+			args := append(slices.Clone(checkers[shell]), path)
 			if out, err := exec.Command(bin, args...).CombinedOutput(); err != nil {
 				t.Errorf("%s rejected the emitted script: %v\n%s", shell, err, out)
 			}
@@ -157,7 +161,7 @@ func TestShortNameReachesTheBinary(t *testing.T) {
 		t.Run(shell, func(t *testing.T) {
 			bin, err := exec.LookPath(shell)
 			if err != nil {
-				testenv.Unavailable(t, "%s is not installed", shell)
+				testenv.Unavailablef(t, "%s is not installed", shell)
 			}
 			script, err := Script(shell)
 			if err != nil {
@@ -197,7 +201,7 @@ func TestWrapperSurvivesAnRmAlias(t *testing.T) {
 		t.Run(shell, func(t *testing.T) {
 			bin, err := exec.LookPath(shell)
 			if err != nil {
-				testenv.Unavailable(t, "%s is not installed", shell)
+				testenv.Unavailablef(t, "%s is not installed", shell)
 			}
 			script, err := Script(shell)
 			if err != nil {

@@ -28,7 +28,18 @@ gofmt -l .                 # must print nothing — CI fails on any output
 # against. Not a module dependency: it would put dozens of indirect requirements
 # in go.sum for a project whose whole build is two.
 go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2 run ./...
+go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2 fmt ./...  # applies gofumpt + goimports
 ```
+
+The lint config is meant to be read before it is edited. Style is enforced rather
+than exempted — staticcheck's `ST` checks (stylecheck, which golangci-lint disables
+by default), revive, godot, gofumpt, funcorder's constructor rule — and the linters
+left out are listed in `.golangci.yaml` with the reason, each grounded in Go's own
+guidance rather than in this repo's habits. Three exemptions exist, all narrow and
+all written where they apply: `//nolint:nilerr` on completion's four
+returns, `//nolint:usetesting` on the three tmux socket directories, and errcheck's
+standard exclusion of the `fmt.Fprint` family. `nolintlint` requires every one of
+them to name its linter and say why, so a bare `//nolint` will not pass.
 
 CI (`.github/workflows/ci.yaml`) runs all of it on ubuntu and macOS, plus
 golangci-lint and a coverage floor of 80% (the suite sits near 87%; the number is

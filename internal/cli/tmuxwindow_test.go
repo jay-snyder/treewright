@@ -43,7 +43,7 @@ func startSession(t *testing.T, session, window, dir string) {
 	t.Helper()
 	requireTmux(t)
 	if out, err := tmuxctl(t, "-f", "/dev/null", "new-session", "-d", "-s", session, "-n", window, "-c", dir, "sleep 300"); err != nil {
-		testenv.Unavailable(t, "cannot start a tmux server here: %v\n%s", err, out)
+		testenv.Unavailablef(t, "cannot start a tmux server here: %v\n%s", err, out)
 	}
 }
 
@@ -54,7 +54,7 @@ func startShellSession(t *testing.T, session, window, dir string) {
 	t.Helper()
 	requireTmux(t)
 	if out, err := tmuxctl(t, "-f", "/dev/null", "new-session", "-d", "-s", session, "-n", window, "-c", dir, "/bin/sh"); err != nil {
-		testenv.Unavailable(t, "cannot start a tmux server here: %v\n%s", err, out)
+		testenv.Unavailablef(t, "cannot start a tmux server here: %v\n%s", err, out)
 	}
 }
 
@@ -87,9 +87,11 @@ func walkInto(t *testing.T, session, window, dir string) {
 // fails, where a format renders it as the empty string. The format is also how
 // treewright reads the stamp back itself, and how a user's status line would, so
 // this asks the question the way it is really asked.
-func windowStamp(t *testing.T, session, window, option string) string {
+func windowStamp(t *testing.T, window, option string) string {
 	t.Helper()
-	out, err := tmuxctl(t, "display-message", "-p", "-t", windowIDNamed(t, session, window), "#{"+option+"}")
+	// Session "proj" because every fixture registers exactly one config, under that
+	// name: a parameter for it would be a choice no caller has.
+	out, err := tmuxctl(t, "display-message", "-p", "-t", windowIDNamed(t, "proj", window), "#{"+option+"}")
 	if err != nil {
 		t.Fatalf("read %s on window %s: %v\n%s", option, window, err, out)
 	}
@@ -131,7 +133,7 @@ func windowIDNamed(t *testing.T, session, name string) string {
 	if err != nil {
 		t.Fatalf("list the windows of %s: %v\n%s", session, err, out)
 	}
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		if found, id, ok := strings.Cut(line, "\t"); ok && found == name {
 			return id
 		}
@@ -163,7 +165,7 @@ func panesOn(t *testing.T, dir string) int {
 		return 0
 	}
 	count := 0
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		if strings.TrimSpace(line) == dir {
 			count++
 		}

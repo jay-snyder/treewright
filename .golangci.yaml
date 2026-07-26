@@ -1,46 +1,167 @@
 version: "2"
 
-# The linters here are the ones that catch mistakes, not the ones that have
-# opinions about style: this codebase's style is argued for in prose above each
-# function, and a linter that disagreed with it would be wrong. gofmt is the whole
-# of the formatting rule, and CI enforces it separately as well, so a contributor
-# who has not installed golangci-lint still cannot land unformatted code.
+# The rule for what goes in here: a linter earns its place by catching mistakes,
+# and an exemption is written at the site that needs it rather than switched off
+# across the repo. Two things worth knowing before editing this file — the code was
+# changed to satisfy these linters rather than the reverse, and where an exemption
+# really is warranted it is a `//nolint` carrying its reason, which nolintlint then
+# requires to be both specific and explained.
+#
+# Style is enforced, not exempted. The ST checks — stylecheck, which is Go Code
+# Review Comments and Effective Go made executable — are switched on below, along
+# with revive, godot, gofumpt, funcorder and the rest.
+#
+# What is left out is left out on Go's own authority rather than on this codebase's
+# preference, and the reason is recorded here so the choice is not mistaken for an
+# oversight:
+#
+#   varnamelen   Contradicts Go Code Review Comments, which asks for short names in
+#                short scopes and reserves long ones for distant declarations.
+#   lll          Go has no line-length rule; gofmt sets none, and the standard
+#                library does not keep one.
+#   noinlineerr  Forbids `if err := f(); err != nil`, which is the idiom Effective
+#                Go itself writes.
+#   nonamedreturns Named results are a documented feature the standard library uses
+#                to name what a function returns; two functions here do the same.
+#   wsl, nlreturn Whitespace preferences that no Go standard states, and which
+#                disagree with each other on the same lines.
+#   godox        Flags the word "bug" in prose, of which a comment-heavy codebase
+#                has plenty. There are no TODOs to find.
+#   dupl,        Metrics rather than rules. The long functions here are long because
+#   cyclop,      they are documented, and splitting one to satisfy a counter moves
+#   funlen,      the reader between two places to read one thing.
+#   gocognit
+#   exhaustruct, Every struct literal here omits fields on purpose — Spec, Env and
+#   mnd, prealloc Config all have optional halves — the "magic numbers" are popup
+#                dimensions and column widths that read better inline, and a
+#                capacity guess is not worth a line of test clarity.
+#   gochecknoglobals The command table and the sentinel errors are package-level by
+#                design, which is the ordinary shape for both.
+#   paralleltest Incompatible with the suite as designed: these tests use t.Setenv
+#                and t.Chdir, which t.Parallel forbids.
+#   testpackage  The tests deliberately reach unexported behavior; an external test
+#                package would mean exporting things for the tests' benefit.
+#   wrapcheck,   Both legislate error style beyond what Go states. Errors here are
+#   err113       sentences written for the person who has to act on them, sometimes
+#                wrapping and sometimes deliberately not; errorlint already catches
+#                the case that loses information.
+#   depguard     Needs a dependency policy to enforce. The module has two direct
+#                requirements, and go.mod is the policy.
+#   gosec        Its premise is untrusted input crossing a privilege boundary.
+#                treewright runs the commands the user configured, on their own
+#                machine, against their own repositories: every finding is G204
+#                (subprocess with variable arguments) or G304 (file path from a
+#                variable), which between them describe what this program is for.
+#                Enabling it would mean excluding its four commonest rules, and a
+#                security linter with its teeth pulled is worse than none — it
+#                reports a clean run that checked nothing.
 linters:
   enable:
-    # Beyond the default set (errcheck, govet, ineffassign, staticcheck, unused):
+    # --- correctness, beyond the default errcheck/govet/ineffassign/staticcheck/unused
+    - asasalint # a []any passed to a variadic ...any nests instead of spreading
+    - durationcheck # multiplying two durations, which is never what was meant
     - errorlint # %v where %w was meant loses the wrapped error
-    - misspell # this repo is mostly prose; a typo in it is the likeliest defect
+    - forcetypeassert # an unchecked type assertion panics rather than reporting
+    - gocritic # a broad diagnostic set; caught an append aliasing a map's slice
+    - makezero # append to a slice made with a length, which appends past the zeroes
+    - nilerr # returning nil when err is not nil — deliberate in one place, marked there
+    - nilnil # returning (nil, nil) where the caller has to check one of them
+    - reassign # assigning to another package's variable
+    - recvcheck # both pointer and value receivers on one type, where one silently copies
+    - unparam # a parameter or result nothing uses, usually a leftover
+    - wastedassign # a value assigned, then overwritten before it is read
+
+    # --- API and idiom
+    - exhaustive # a switch over a set of constants that misses one
+    - intrange # Go 1.22's `for range n` over the three-clause loop
+    - modernize # the standard library's own successors: slices.Contains, strings.SplitSeq
     - predeclared # a variable named len or copy reads as the builtin it shadows
+    - revive # golint's successor: exported names want doc comments
     - unconvert # a conversion that does nothing is usually a leftover
-    - usetesting # t.TempDir and t.Setenv over hand-rolled equivalents
+    - usestdlibvars # the standard library's named constants over the string literals
+    - usetesting # t.TempDir, t.Chdir, t.Setenv over hand-rolled equivalents
+
+    # --- style, on top of the ST checks turned on under staticcheck below
+    - embeddedstructfieldcheck # an embedded field is separated from the plain ones
+    - errname # sentinel errors are ErrFoo, error types FooError
+    - funcorder # a type's exported methods come before its unexported ones
+    - godot # a declaration's comment is a sentence, and ends like one
+    - goconst # the same string literal three times wants a name
+    - goprintffuncname # a printf wrapper is named with an f, as warnf and progressf are
+    - misspell # this repo is mostly prose; a typo in it is the likeliest defect
+    - nolintlint # every exemption must name its linter and say why
+    - tagliatelle # struct tags follow one convention per encoding
     - whitespace # a stray blank line at the top or bottom of a block
 
   settings:
+    staticcheck:
+      # golangci-lint ships with the ST checks — stylecheck, which is Go Code
+      # Review Comments and Effective Go made executable — switched off by default:
+      # ST1000, ST1003, ST1016 and ST1020-22 are all excluded unless asked for.
+      # Those are precisely the style rules worth enforcing, so ask for all of them.
+      checks:
+        - all
+
     errcheck:
-      # A deliberate ignore is written `_ =` throughout — every best-effort tmux
-      # call is one — and errcheck accepts that, so what is left to configure is
-      # the handful of calls where there is no error to handle in the first place.
       check-type-assertions: true
+      # Not an accommodation but a convention: errcheck's own documentation names
+      # both of these as the usual exclusions.
       exclude-functions:
         # Writing the answer to a stream treewright does not own. There is nowhere
-        # to report a failed write to except the stream that just failed.
+        # to report a failed write to except the stream that just failed, and
+        # `_, _ =` in front of every print is noise no Go project writes.
         - fmt.Fprint
         - fmt.Fprintf
         - fmt.Fprintln
         # Closing a file already read, or already flushed by a checked Close on the
-        # success path. The Closes that can lose data — copyFile's destination,
-        # tmux.Source's temp file — are returned rather than dropped.
+        # success path. The two Closes that could lose data — copyFile's destination
+        # and tmux.Source's temp file — are returned, not dropped.
         - (*os.File).Close
 
-    usetesting:
-      # os.MkdirTemp stays: the tmux tests need a socket path short enough for a
-      # unix socket, and t.TempDir's is not on macOS. The reason is written above
-      # each call, and a linter cannot see it.
-      os-mkdir-temp: false
+    exhaustive:
+      # A switch that handles the rest in a default is exhaustive. Without this the
+      # linter asks for a case per constant even where one line already covers them,
+      # which is why nearly every project that runs it sets this.
+      default-signifies-exhaustive: true
+
+    funcorder:
+      # The constructor rule stays on — NewFoo belongs beside type Foo, and everyone
+      # writes it that way. "All unexported methods after all exported ones" does
+      # not: the standard library interleaves them freely (net/http's server.go, os's
+      # file.go), Google's Go style guide asks for logical grouping instead, and
+      # obeying it here would move git.Repo's two-line run wrappers five hundred
+      # lines away from the runEnvIn they wrap, out of the section that explains them.
+      struct-method: false
+
+    goconst:
+      # Test data is repetitive on purpose: a fixture that says "eng-1" reads better
+      # than one that says testSlug, and naming every literal in a table-driven test
+      # moves the case away from the assertion about it.
+      ignore-tests: true
+
+    tagliatelle:
+      # snake_case, not tagliatelle's camelCase default, because the JSON keys are a
+      # published contract — `tw ls --json` feeds jq in other people's scripts, and
+      # design-notes.md names window_id and window_session as the fields to read.
+      # The rule is here to keep the next key consistent with those.
+      case:
+        rules:
+          json: snake
+          toml: snake
+
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+      allow-unused: false
 
 formatters:
   enable:
-    - gofmt
+    # gofumpt rather than gofmt: a strict superset, so nothing it accepts would be
+    # unformatted by gofmt's rules either, and its extra rules are the ones a
+    # reviewer would otherwise ask for by hand. CI also runs bare `gofmt -l` as a
+    # step of its own, so a contributor without golangci-lint still cannot land
+    # unformatted code.
+    - gofumpt
     - goimports
   settings:
     goimports:

@@ -314,7 +314,7 @@ func TestCarryCandidates(t *testing.T) {
 
 func TestCarryCandidatesIsCapped(t *testing.T) {
 	var many []string
-	for i := 0; i < 30; i++ {
+	for i := range 30 {
 		many = append(many, ".env."+string(rune('a'+i)))
 	}
 	// A repo with dozens of env files would otherwise produce a config nobody
@@ -338,7 +338,7 @@ func TestConfigDistinguishesDefaultsFromChoices(t *testing.T) {
 	}
 
 	byKey := map[string]string{}
-	for _, line := range strings.Split(r.stdout, "\n") {
+	for line := range strings.SplitSeq(r.stdout, "\n") {
 		if fields := strings.Fields(line); len(fields) >= 2 {
 			byKey[fields[0]] = strings.TrimSpace(strings.TrimPrefix(line, fields[0]))
 		}
