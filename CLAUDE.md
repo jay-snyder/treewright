@@ -42,9 +42,36 @@ standard exclusion of the `fmt.Fprint` family. `nolintlint` requires every one o
 them to name its linter and say why, so a bare `//nolint` will not pass.
 
 CI (`.github/workflows/ci.yaml`) runs all of it on ubuntu and macOS, plus
-golangci-lint and a coverage floor of 80% (the suite sits near 87%; the number is
-a ratchet against a collapse, not a target). Every YAML file in the repo is
-`.yaml`, including the workflows.
+golangci-lint and a coverage floor of 85% per platform (the suite measures 86.4%
+on each, so the margin is about a point and a half). It runs on pushes to `main`
+and on every push to a pull request. Every YAML file in the repo is `.yaml`,
+including the workflows.
+
+**Work reaches `main` through a pull request.** A repository ruleset on the default
+branch requires one, takes squash merges only, refuses force pushes and deletion,
+and holds the merge until `lint`, `release-config`, and `test` on both platforms
+have passed. Nobody bypasses it — there are no bypass actors, so a direct push to
+`main` is rejected whoever makes it.
+
+**The required checks are matched by job name**, so **renaming a job, or dropping
+one from the matrix, leaves the rule waiting on a check that never arrives and a
+pull request that can never merge**. Nothing fails at the moment of the rename; it
+surfaces later, on a pull request that has done nothing wrong. Change `ci.yaml` and
+the ruleset together:
+
+```sh
+# what merging currently waits for
+gh api repos/jay-snyder/treewright/rulesets/19776162 \
+  --jq '.rules[] | select(.type == "required_status_checks")
+        | .parameters.required_status_checks[].context'
+
+# what the last run actually reported, which is what those must match
+gh run list --limit 1 --json databaseId --jq '.[0].databaseId' \
+  | xargs -I{} gh run view {} --json jobs --jq '.jobs[].name'
+```
+
+`strict_required_status_checks_policy` is on, so a branch also has to be up to date
+with `main` before it can merge.
 
 Tests drive `git`, `tmux`, and each shell the shims target. Missing one is a skip
 locally and a **failure under `CI`** — see `internal/testenv`, and note that this

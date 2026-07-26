@@ -3,7 +3,12 @@ name: CI
 on:
   push:
     branches: [main]
+  # Every push to a pull request, not just its opening: pull_request defaults to
+  # opened, reopened and synchronize, and synchronize is what fires when a branch
+  # under review gains a commit. Named here because "does CI re-run when I push a
+  # fix to the PR?" is a question the default answers silently.
   pull_request:
+    types: [opened, reopened, synchronize]
 
 permissions:
   contents: read
@@ -101,10 +106,11 @@ jobs:
             echo "|---|---|"
             cat coverage.rows
           } | tee -a "$GITHUB_STEP_SUMMARY"
-          # A floor, not a target. It sits below where the suite actually is (86.9%
-          # when this was written) so that ordinary movement does not fail a build,
-          # while a change that guts the tests still cannot land quietly.
-          floor=80
+          # Checked on both platforms, so both have to clear it. The suite measured
+          # 86.4% on each when this was set, which leaves about a point and a half
+          # of room: enough that ordinary movement does not fail a build, tight
+          # enough that a body of new code arriving untested cannot land quietly.
+          floor=85
           if [ "${total%.*}" -lt "$floor" ]; then
             echo "coverage $total% is below the $floor% floor"
             exit 1
