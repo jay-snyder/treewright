@@ -141,8 +141,8 @@ func validateSlug(slug string) error {
 	return nil
 }
 
-// carryFiles copies the gitignored files a fresh checkout lacks but the app
-// needs — .env files, local credentials, editor settings.
+// carryFiles copies in the files git ignores and the app needs: .env files,
+// local credentials, editor settings. A new worktree starts without them.
 func carryFiles(env *Env, cfg *config.Config, dir string) {
 	for _, rel := range cfg.CarryFiles {
 		src := filepath.Join(cfg.MainDir, rel)

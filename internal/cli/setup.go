@@ -114,10 +114,10 @@ func validateConfigName(name string) error {
 }
 
 // branchPrefixFor derives a branch namespace from a git email, so that branches
-// are attributable on a shared remote: "jay.snyder@example.com" gives "jay/".
+// are attributable on a shared remote: "john.doe@example.com" gives "john/".
 //
 // The first dotted or plussed component is used rather than the whole local part,
-// because "jay.snyder/eng-1" reads as a path with a surname in it while "jay/" is
+// because "john.doe/eng-1" reads as a path with a surname in it while "john/" is
 // what people actually name their branches. It is a guess in a file the user can
 // edit, and setup says what it chose.
 func branchPrefixFor(email string) string {
@@ -138,8 +138,8 @@ func branchPrefixFor(email string) string {
 	return b.String() + "/"
 }
 
-// carryCandidates picks, out of everything git is ignoring, the files a fresh
-// worktree most likely cannot run without.
+// carryCandidates picks, out of everything git is ignoring, the files the app
+// is most likely to need in a new worktree.
 //
 // Only env files are proposed. They are the case where a missing file breaks the
 // app immediately and confusingly, and they are recognizable by name — unlike
@@ -201,8 +201,8 @@ func renderConfig(name, mainDir, baseBranch, prefix string, carry []string) stri
 		fmt.Fprintf(&b, "branch_prefix = %s\n\n", tomlString(prefix))
 	}
 
-	fmt.Fprintf(&b, "# Gitignored files a fresh checkout lacks but the app needs. Paths are\n")
-	fmt.Fprintf(&b, "# relative to main_dir, and are copied into every new worktree.\n")
+	fmt.Fprintf(&b, "# Files git ignores, like your .env. A new worktree starts without them,\n")
+	fmt.Fprintf(&b, "# so treewright copies them in. Paths are relative to main_dir.\n")
 	if len(carry) == 0 {
 		fmt.Fprintf(&b, "# Nothing was detected; add what your app needs, e.g.:\n")
 		fmt.Fprintf(&b, "# carry_files = [\".env.local\", \"apps/api/.env\"]\n\n")

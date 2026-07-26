@@ -58,8 +58,8 @@ type Config struct {
 	BranchPrefix string `toml:"branch_prefix"`
 
 	// CarryFiles are paths, relative to MainDir, copied into each new worktree.
-	// They are the gitignored files a fresh checkout lacks but the app needs —
-	// .env files, local credentials, editor settings.
+	// Git ignores these files, so a new worktree starts without them, and the
+	// app needs them: .env files, local credentials, editor settings.
 	CarryFiles []string `toml:"carry_files"`
 
 	// Command is what to launch in the new tmux window. Defaults to "claude".

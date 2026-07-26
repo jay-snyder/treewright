@@ -178,7 +178,7 @@ func TestSetupRejectsUnusableNames(t *testing.T) {
 
 func TestBranchPrefixFor(t *testing.T) {
 	tests := []struct{ email, want string }{
-		{"jay.snyder@example.com", "jay/"},
+		{"john.doe@example.com", "john/"},
 		{"alice@example.com", "alice/"},
 		{"alice+work@example.com", "alice/"},
 		{"Alice.Smith@Example.COM", "alice/"},
