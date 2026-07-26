@@ -85,6 +85,13 @@ func TestNewOpensItsWindowInTheRepoSession(t *testing.T) {
 	if got := panesOn(t, f.DirFor("eng-142-white-screen")); got != 1 {
 		t.Errorf("%d panes in the new worktree, want 1", got)
 	}
+	// The window also records the worktree it was opened on, which is what
+	// identifies it later however its shell wanders and wherever it is dragged to.
+	// Checked here because this is the call that creates the session, the other of
+	// the two paths a window is opened by.
+	if got, want := worktreeStampOn(t, "proj", "ENG-142"), f.DirFor("eng-142-white-screen"); got != want {
+		t.Errorf("window ENG-142 records worktree %q, want %q", got, want)
+	}
 }
 
 // TestNewJoinsTheSessionAlreadyRunning is the other half: a second stream is a
@@ -260,6 +267,44 @@ func TestLsReportsTheOpenWindow(t *testing.T) {
 		if !strings.HasPrefix(row.WindowID, "@") {
 			t.Errorf("window_id = %q, want a tmux window id", row.WindowID)
 		}
+	}
+}
+
+// TestTheStreamsWindowIsFoundHoweverWindowsAreArranged covers the reported bug
+// end to end. Two windows stand in one worktree — the stream's own, and a base
+// window whose shell followed a `treemux cd` into it — and which one treemux
+// named used to depend on where they sat, because the pane listing walks windows
+// in index order. Rearranging them renamed the window in `ls` and sent `resume`
+// somewhere else.
+func TestTheStreamsWindowIsFoundHoweverWindowsAreArranged(t *testing.T) {
+	requireTmux(t)
+	f := newFixture(t, "command = 'sleep 300'\nresume_command = 'sleep 300'\n")
+
+	wt := twoWindowsInOneWorktree(t, f)
+
+	var rows []struct {
+		Slug   string `json:"slug"`
+		Window string `json:"window"`
+	}
+	j := f.exec("ls", "--json")
+	if err := json.Unmarshal([]byte(j.stdout), &rows); err != nil {
+		t.Fatalf("output is not valid JSON: %v\n%s", err, j.stdout)
+	}
+	for _, row := range rows {
+		if row.Slug == "eng-1" && row.Window != "ENG-1" {
+			t.Errorf("window for eng-1 = %q, want the stream's own window ENG-1", row.Window)
+		}
+	}
+
+	if r := f.exec("resume", "eng-1"); r.err != nil {
+		t.Fatalf("resume: %v\n%s", r.err, r.both())
+	}
+	if got := activeWindowIn(t, "proj"); got != "ENG-1" {
+		t.Errorf("active window in session proj = %q, want ENG-1 rather than the window visiting it", got)
+	}
+	// Two panes stand in the worktree, and resuming must not make a third.
+	if got := panesOn(t, wt); got != 2 {
+		t.Errorf("%d panes in the worktree, want 2 — a duplicate window was opened", got)
 	}
 }
 

@@ -1,11 +1,24 @@
 package tmux
 
-import "testing"
+import (
+	"maps"
+	"slices"
+	"strings"
+	"testing"
+)
 
 // pane renders one line of the listing parsePanes reads, so the tests below say
-// what they mean rather than spelling out tab positions.
+// what they mean rather than spelling out tab positions. The window carries no
+// worktree stamp: it is one treemux did not open, or one open since before
+// treemux stamped them.
 func pane(id, session, name, dir string) string {
-	return id + "\t" + session + "\t" + name + "\t" + dir
+	return stamped(id, session, name, "", dir)
+}
+
+// stamped renders a pane whose window treemux opened on worktree — which is not
+// necessarily where the pane is standing now, since a shell can walk anywhere.
+func stamped(id, session, name, worktree, dir string) string {
+	return strings.Join([]string{id, session, name, worktree, dir}, "\t")
 }
 
 func TestParsePanes(t *testing.T) {
@@ -55,20 +68,31 @@ func TestParsePanes(t *testing.T) {
 			},
 		},
 		{
-			// Two panes in one directory must resolve to a stable answer, so
-			// repeated calls do not switch between windows.
-			name:   "duplicate directories keep the first window",
-			out:    pane("@1", "s", "FIRST", "/shared") + "\n" + pane("@2", "s", "SECOND", "/shared"),
+			// Two unstamped panes in one directory resolve to the older window,
+			// listed second here on purpose: the listing's own order follows window
+			// position, which the user rearranges, so it cannot be what decides.
+			name:   "duplicate directories keep the older window",
+			out:    pane("@2", "s", "SECOND", "/shared") + "\n" + pane("@1", "s", "FIRST", "/shared"),
 			prefer: "s",
 			want: map[string]Window{
 				"/shared": {ID: "@1", Session: "s", Name: "FIRST"},
 			},
 		},
 		{
+			// And ids are compared as numbers: a session that has opened ten windows
+			// would otherwise call "@10" older than "@9".
+			name:   "window ids order by creation, not as text",
+			out:    pane("@9", "s", "NINTH", "/shared") + "\n" + pane("@10", "s", "TENTH", "/shared"),
+			prefer: "s",
+			want: map[string]Window{
+				"/shared": {ID: "@9", Session: "s", Name: "NINTH"},
+			},
+		},
+		{
 			// Unless one of them is in the repository's own session, which is the
 			// window the repository's commands mean — wherever it appears in the
 			// listing.
-			name:   "the preferred session wins over an earlier window",
+			name:   "the preferred session wins over an older window",
 			out:    pane("@1", "elsewhere", "STRAY", "/shared") + "\n" + pane("@2", "myrepo", "MINE", "/shared"),
 			prefer: "myrepo",
 			want: map[string]Window{
@@ -76,11 +100,51 @@ func TestParsePanes(t *testing.T) {
 			},
 		},
 		{
-			name:   "two windows in the preferred session keep the first",
-			out:    pane("@1", "myrepo", "FIRST", "/shared") + "\n" + pane("@2", "myrepo", "SECOND", "/shared"),
+			// The everyday collision: `treemux cd eng-1` leaves the base window's
+			// shell standing in the stream's worktree, so MAIN and ENG-1 both report
+			// the same directory. The window treemux opened there is the stream's,
+			// whichever of them the listing reaches first.
+			name: "the window opened on the worktree wins over one standing in it",
+			out: pane("@1", "myrepo", "MAIN", "/wt/eng-1") + "\n" +
+				stamped("@2", "myrepo", "ENG-1", "/wt/eng-1", "/wt/eng-1"),
 			prefer: "myrepo",
 			want: map[string]Window{
-				"/shared": {ID: "@1", Session: "myrepo", Name: "FIRST"},
+				"/wt/eng-1": {ID: "@2", Session: "myrepo", Name: "ENG-1"},
+			},
+		},
+		{
+			// Even from another session, which is the case `resume` already reports
+			// and switches to rather than duplicating.
+			name: "the window opened on the worktree wins from another session",
+			out: pane("@1", "myrepo", "MAIN", "/wt/eng-1") + "\n" +
+				stamped("@2", "elsewhere", "ENG-1", "/wt/eng-1", "/wt/eng-1"),
+			prefer: "myrepo",
+			want: map[string]Window{
+				"/wt/eng-1": {ID: "@2", Session: "elsewhere", Name: "ENG-1"},
+			},
+		},
+		{
+			// A stream's window is still its own after its shell walks off, so
+			// nothing opens a second window on a worktree that already has one.
+			name:   "a window opened on a worktree answers for it after its pane moves",
+			out:    stamped("@2", "myrepo", "ENG-1", "/wt/eng-1", "/somewhere/else"),
+			prefer: "myrepo",
+			want: map[string]Window{
+				"/wt/eng-1":       {ID: "@2", Session: "myrepo", Name: "ENG-1"},
+				"/somewhere/else": {ID: "@2", Session: "myrepo", Name: "ENG-1"},
+			},
+		},
+		{
+			// The other half of that: a window known to belong to another worktree
+			// loses to one that claims nothing, since closing or switching to the
+			// other stream's window in this one's name is the damaging mistake.
+			name: "a window opened on another worktree loses to an unstamped one",
+			out: stamped("@1", "myrepo", "ENG-2", "/wt/eng-2", "/wt/eng-1") + "\n" +
+				pane("@5", "myrepo", "VISITOR", "/wt/eng-1"),
+			prefer: "myrepo",
+			want: map[string]Window{
+				"/wt/eng-1": {ID: "@5", Session: "myrepo", Name: "VISITOR"},
+				"/wt/eng-2": {ID: "@1", Session: "myrepo", Name: "ENG-2"},
 			},
 		},
 		{
@@ -120,6 +184,56 @@ func TestParsePanes(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestParsePanesIgnoresWindowOrder is the regression test for the bug this
+// preference order was written for: list-panes -a walks windows in index order,
+// so a directory two windows stood in used to resolve to whichever of them was
+// further left in the status line. Rearranging windows — swap-window, or a drag —
+// silently changed which window `ls` named, `resume` switched to, and `rm`
+// offered to close.
+func TestParsePanesIgnoresWindowOrder(t *testing.T) {
+	lines := []string{
+		pane("@1", "proj", "MAIN", "/wt/eng-1"), // the base window, after `treemux cd eng-1`
+		stamped("@2", "proj", "ENG-1", "/wt/eng-1", "/wt/eng-1"),
+		stamped("@3", "proj", "ENG-2", "/wt/eng-2", "/wt/eng-2"),
+		pane("@4", "elsewhere", "HAND-MADE", "/wt/eng-2"),
+	}
+
+	want := parsePanes(strings.Join(lines, "\n"), "proj")
+	if got := want["/wt/eng-1"].Name; got != "ENG-1" {
+		t.Fatalf("window for /wt/eng-1 = %q, want the stream's own window ENG-1", got)
+	}
+
+	// Every arrangement of the same windows has to answer the same way, so this
+	// walks the permutations rather than trusting one reversal.
+	for _, order := range slices.Collect(permutations(lines)) {
+		got := parsePanes(strings.Join(order, "\n"), "proj")
+		if !maps.Equal(got, want) {
+			t.Errorf("rearranged to %v\n got %v\nwant %v", order, got, want)
+		}
+	}
+}
+
+// permutations yields every ordering of a listing, standing in for every way the
+// windows could be arranged.
+func permutations(lines []string) func(func([]string) bool) {
+	return func(yield func([]string) bool) {
+		var walk func(prefix, rest []string) bool
+		walk = func(prefix, rest []string) bool {
+			if len(rest) == 0 {
+				return yield(slices.Clone(prefix))
+			}
+			for i := range rest {
+				remaining := slices.Concat(rest[:i:i], rest[i+1:])
+				if !walk(append(prefix, rest[i]), remaining) {
+					return false
+				}
+			}
+			return true
+		}
+		walk(nil, lines)
 	}
 }
 

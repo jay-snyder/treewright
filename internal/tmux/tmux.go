@@ -14,6 +14,13 @@
 // Window ids ("@3") are unique across the whole server, so a window can be
 // selected or killed by id without naming the session holding it — which is what
 // lets treemux act on a window that turns out to be in the wrong session.
+//
+// Which worktree a window belongs to is recorded on the window itself, as the
+// user option @treemux_worktree, rather than read off the directory its shell
+// happens to be standing in. A pane's directory moves with every cd, and two
+// windows can stand in one directory at once — the base window does exactly that
+// after `treemux cd` — so identity has to come from something the user cannot
+// change by walking around.
 package tmux
 
 import (
@@ -22,6 +29,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 )
 
@@ -108,13 +116,19 @@ func HasSession(session string) bool {
 	return err == nil
 }
 
-// paneFormat lists a pane as window id, session, window name, then path.
+// worktreeOption is the tmux user option carrying the worktree a window was
+// opened on. Windows treemux did not open have none, and read as empty.
+const worktreeOption = "@treemux_worktree"
+
+// paneFormat lists a pane as window id, session, window name, the worktree its
+// window was opened on, then path.
 //
 // The fields are tab-separated and the path comes last, because both a window
 // name and a path may contain spaces: splitting on a space is only unambiguous
-// for the id. Splitting into a fixed four parts leaves any tab in a path — rare,
-// but possible — inside the path where it belongs.
-const paneFormat = "#{window_id}\t#{session_name}\t#{window_name}\t#{pane_current_path}"
+// for the id. Splitting into a fixed five parts leaves any tab in a path — rare,
+// but possible — inside the path where it belongs. The stamped worktree is a path
+// too, which is why stampWorktree declines to write one holding a tab.
+const paneFormat = "#{window_id}\t#{session_name}\t#{window_name}\t#{" + worktreeOption + "}\t#{pane_current_path}"
 
 // Windows maps each pane's working directory to the window holding it, across
 // every session on the server. It is what stops `resume` from opening a second
@@ -128,8 +142,9 @@ const paneFormat = "#{window_id}\t#{session_name}\t#{window_name}\t#{pane_curren
 // Panes outside prefer are included rather than hidden: a window on this repo's
 // worktree that ended up in another session is a thing to report and to switch
 // to, and pretending it does not exist would open a duplicate beside it. Where
-// several panes share a directory, one in prefer wins, and otherwise the earliest
-// does, so repeated calls return the same window for the same directory.
+// several panes share a directory — the base window standing in a stream's
+// worktree after `treemux cd` is the everyday case — claim.beats decides between
+// them.
 func Windows(prefer string) map[string]Window {
 	out, err := run("list-panes", "-a", "-F", paneFormat)
 	if err != nil {
@@ -139,28 +154,103 @@ func Windows(prefer string) map[string]Window {
 	return parsePanes(out, prefer)
 }
 
+// claim is one pane's case for being the window a directory's commands mean: the
+// window it belongs to, and the worktree that window was opened on.
+type claim struct {
+	Window
+	worktree string
+}
+
+// rank scores how strong a claim on dir is. A window treemux opened on this very
+// worktree says so; a window treemux did not open says nothing; and a window
+// opened on a different worktree is positive evidence against — its shell has
+// wandered in here, but it is still the other stream's window, and closing it or
+// switching to it in this one's name would be wrong.
+func (c claim) rank(dir string) int {
+	switch c.worktree {
+	case dir:
+		return 2
+	case "":
+		return 1
+	default:
+		return 0
+	}
+}
+
+// beats reports whether c is a better answer for dir than held.
+//
+// Rank first, then the repository's own session, then the older window. Nothing
+// consults the order of the listing, which is the bug this replaced:
+// list-panes -a walks windows in index order, so two windows standing in one
+// directory resolved to whichever the user had arranged first — a wrong name in
+// `ls`, the wrong window focused by `resume`, and the wrong window offered up for
+// closing by `rm`, all changing under a swap-window.
+func (c claim) beats(held claim, dir, prefer string) bool {
+	if a, b := c.rank(dir), held.rank(dir); a != b {
+		return a > b
+	}
+	if a, b := c.Session == prefer, held.Session == prefer; a != b {
+		return a
+	}
+	return olderWindow(c.ID, held.ID)
+}
+
+// olderWindow compares window ids by creation rather than as text, so "@9" comes
+// before "@10". tmux never spells one otherwise, but an id that does not parse
+// falls back to a string comparison: arbitrary, and stable, which is the property
+// being bought here.
+func olderWindow(a, b string) bool {
+	na, errA := strconv.Atoi(strings.TrimPrefix(a, "@"))
+	nb, errB := strconv.Atoi(strings.TrimPrefix(b, "@"))
+	if errA == nil && errB == nil {
+		return na < nb
+	}
+	return a < b
+}
+
 // parsePanes turns the pane listing into a directory-to-window map. Split out so
-// the field handling and the session preference can be tested without a running
+// the field handling and the preference order can be tested without a running
 // tmux server.
 func parsePanes(out, prefer string) map[string]Window {
 	if out == "" {
 		return nil
 	}
-	windows := make(map[string]Window)
+	best := make(map[string]claim)
+	stake := func(dir string, c claim) {
+		if dir == "" {
+			return
+		}
+		if held, taken := best[dir]; taken && !c.beats(held, dir, prefer) {
+			return
+		}
+		best[dir] = c
+	}
+
 	for _, line := range strings.Split(out, "\n") {
-		fields := strings.SplitN(line, "\t", 4)
-		if len(fields) != 4 {
+		fields := strings.SplitN(line, "\t", 5)
+		if len(fields) != 5 {
 			continue
 		}
-		w := Window{ID: fields[0], Session: fields[1], Name: fields[2]}
-		dir := fields[3]
-		if w.ID == "" || dir == "" {
+		c := claim{
+			Window:   Window{ID: fields[0], Session: fields[1], Name: fields[2]},
+			worktree: fields[3],
+		}
+		if c.ID == "" {
 			continue
 		}
-		if seen, ok := windows[dir]; ok && (seen.Session == prefer || w.Session != prefer) {
-			continue
-		}
-		windows[dir] = w
+		stake(fields[4], c)
+		// A window treemux opened answers for its own worktree wherever its pane
+		// is standing, so cd-ing a pane out of the directory no longer orphans the
+		// stream's window and has a second one opened beside it.
+		stake(c.worktree, c)
+	}
+
+	if len(best) == 0 {
+		return nil
+	}
+	windows := make(map[string]Window, len(best))
+	for dir, c := range best {
+		windows[dir] = c.Window
 	}
 	return windows
 }
@@ -171,14 +261,14 @@ func parsePanes(out, prefer string) map[string]Window {
 // caller may not want to be moved.
 func NewSession(session, dir, name, command string) (Window, error) {
 	args := []string{"new-session", "-d", "-s", session, "-c", dir, "-n", name, "-P", "-F", "#{window_id}"}
-	return newWindow(session, name, args, command)
+	return newWindow(session, dir, name, args, command)
 }
 
 // NewWindow opens a window in an existing session: dir, named name, running
 // command.
 func NewWindow(session, dir, name, command string) (Window, error) {
 	args := []string{"new-window", "-t", exact(session) + ":", "-c", dir, "-n", name, "-P", "-F", "#{window_id}"}
-	return newWindow(session, name, args, command)
+	return newWindow(session, dir, name, args, command)
 }
 
 // newWindow runs a window-creating command and settles the new window's name.
@@ -192,8 +282,9 @@ func NewWindow(session, dir, name, command string) (Window, error) {
 // whatever process is running and the chosen name disappears. It is set on the
 // new window by id: the window is not necessarily current — it is in a session
 // this client may not be attached to — so an untargeted option would land on some
-// other window entirely.
-func newWindow(session, name string, args []string, command string) (Window, error) {
+// other window entirely. The worktree stamp is written the same way, and for the
+// same reason.
+func newWindow(session, dir, name string, args []string, command string) (Window, error) {
 	if strings.TrimSpace(command) != "" {
 		args = append(args, command)
 	}
@@ -204,7 +295,28 @@ func newWindow(session, name string, args []string, command string) (Window, err
 	// Best-effort: tmux switches automatic-rename off by itself when -n names a
 	// window, so this only matters on versions that do not.
 	_, _ = run("set-window-option", "-t", id, "automatic-rename", "off")
+	stampWorktree(id, dir)
 	return Window{ID: id, Session: session, Name: name}, nil
+}
+
+// stampWorktree records on the window which worktree it was opened on.
+//
+// This is what makes the window's identity survive the user: rearranging windows
+// no longer changes which one a worktree resolves to, a pane that cd's elsewhere
+// keeps the window it belongs to, and a second pane that cd's in does not take
+// the stream's window over.
+//
+// Best-effort, like automatic-rename above. A window without the stamp is matched
+// by the directory its pane is standing in, which is what every window was matched
+// by before — so a failure here costs accuracy, not function. A directory holding
+// a tab goes unstamped for that reason too: the option comes back as one
+// tab-separated field of the pane listing, where only the last field, the path,
+// can carry one.
+func stampWorktree(id, dir string) {
+	if dir == "" || strings.ContainsRune(dir, '\t') {
+		return
+	}
+	_, _ = run("set-window-option", "-t", id, worktreeOption, dir)
 }
 
 // CurrentSession names the session the calling client is attached to, or "" when

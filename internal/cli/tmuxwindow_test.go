@@ -3,8 +3,10 @@ package cli
 import (
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 // The tests here drive a real tmux server, because the behavior they cover exists
@@ -36,11 +38,104 @@ func startSession(t *testing.T, session, window, dir string) {
 	}
 }
 
+// startShellSession creates a session whose window runs a shell rather than a
+// command that just sits there, so a test can walk it from one directory to
+// another the way a person does.
+func startShellSession(t *testing.T, session, window, dir string) {
+	t.Helper()
+	requireTmux(t)
+	if out, err := tmuxctl(t, "new-session", "-d", "-s", session, "-n", window, "-c", dir, "/bin/sh"); err != nil {
+		t.Skipf("cannot start a tmux server here: %v\n%s", err, out)
+	}
+}
+
+// walkInto moves a window's shell into dir, which is what `treemux cd` does to
+// the base window — and the everyday way two windows come to stand in one
+// worktree.
+//
+// The wait is for the shell rather than for tmux: the pane reports its new
+// directory once the cd has actually run.
+func walkInto(t *testing.T, session, window, dir string) {
+	t.Helper()
+	id := windowIDNamed(t, session, window)
+	if out, err := tmuxctl(t, "send-keys", "-t", id, "cd "+dir, "Enter"); err != nil {
+		t.Fatalf("send cd to %s: %v\n%s", window, err, out)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if out, err := tmuxctl(t, "display-message", "-p", "-t", id, "#{pane_current_path}"); err == nil && out == dir {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("window %s never moved into %s", window, dir)
+}
+
+// worktreeStampOn reads back the worktree treemux recorded on a window. Windows
+// treemux did not open carry nothing, and answer with an empty string.
+func worktreeStampOn(t *testing.T, session, window string) string {
+	t.Helper()
+	out, err := tmuxctl(t, "show-options", "-w", "-t", windowIDNamed(t, session, window), "-v", "@treemux_worktree")
+	if err != nil {
+		t.Fatalf("read the worktree recorded on %s: %v\n%s", window, err, out)
+	}
+	return out
+}
+
+// twoWindowsInOneWorktree builds the collision the lookup has to survive: the
+// base window, opened first and standing in the stream's worktree after a
+// `treemux cd`, and the stream's own window, opened by treemux afterwards.
+//
+// The visitor is deliberately both the older window and the one arranged first,
+// so neither age nor position can pick the right answer — only what treemux
+// recorded on the window it opened. It returns the worktree they share.
+func twoWindowsInOneWorktree(t *testing.T, f *fixture) string {
+	t.Helper()
+	startShellSession(t, "proj", "MAIN", f.MainDir)
+	if r := f.exec("new", "eng-1"); r.err != nil {
+		t.Fatalf("new: %v\n%s", r.err, r.both())
+	}
+	wt := f.DirFor("eng-1")
+	walkInto(t, "proj", "MAIN", wt)
+	swapWindows(t, "proj", "MAIN", "ENG-1")
+	return wt
+}
+
 // openWindowOn adds a window sitting in dir to a session that already exists.
 func openWindowOn(t *testing.T, session, window, dir string) {
 	t.Helper()
 	if out, err := tmuxctl(t, "new-window", "-d", "-t", "="+session+":", "-n", window, "-c", dir, "sleep 300"); err != nil {
 		t.Fatalf("open a window on %s: %v\n%s", dir, err, out)
+	}
+}
+
+// windowIDNamed finds a window by name in a session, for the commands that take
+// a window rather than a position.
+func windowIDNamed(t *testing.T, session, name string) string {
+	t.Helper()
+	out, err := tmuxctl(t, "list-windows", "-t", "="+session, "-F", "#{window_name}\t#{window_id}")
+	if err != nil {
+		t.Fatalf("list the windows of %s: %v\n%s", session, err, out)
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if found, id, ok := strings.Cut(line, "\t"); ok && found == name {
+			return id
+		}
+	}
+	t.Fatalf("no window named %s in session %s, only:\n%s", name, session, out)
+	return ""
+}
+
+// swapWindows exchanges two windows' positions, standing in for a user
+// rearranging their status line.
+//
+// By id rather than by index, so the swap says which windows it means: the point
+// of the tests using it is that a window's position must not decide anything.
+func swapWindows(t *testing.T, session, a, b string) {
+	t.Helper()
+	if out, err := tmuxctl(t, "swap-window",
+		"-s", windowIDNamed(t, session, a), "-t", windowIDNamed(t, session, b)); err != nil {
+		t.Fatalf("swap %s with %s: %v\n%s", a, b, err, out)
 	}
 }
 
@@ -121,6 +216,39 @@ func TestRmLeavesOtherWindowsAlone(t *testing.T) {
 	// The base window the command was run from must survive too.
 	if got := panesOn(t, f.MainDir); got != 1 {
 		t.Errorf("%d panes in the main checkout, want 1 — the caller's own window was closed", got)
+	}
+}
+
+// TestRmClosesTheStreamsWindowNotAVisitor is the dangerous half of the lookup
+// bug. Two windows stand in the worktree — the stream's own, and a base window
+// whose shell followed a `treemux cd` into it — and the one to close is the
+// stream's. Choosing by position, as this used to, picked whichever was further
+// left, so a rearranged status line had `rm --yes` closing the base window: the
+// window that keeps the session alive, while the genuinely stranded one stayed
+// open on a directory that no longer exists.
+func TestRmClosesTheStreamsWindowNotAVisitor(t *testing.T) {
+	requireTmux(t)
+	f := newFixture(t, "command = 'sleep 300'\n")
+
+	twoWindowsInOneWorktree(t, f)
+
+	if err := os.Chdir(f.MainDir); err != nil {
+		t.Fatal(err)
+	}
+	r := f.exec("rm", "--yes", "eng-1")
+	if r.err != nil {
+		t.Fatalf("rm: %v\n%s", r.err, r.both())
+	}
+
+	if !strings.Contains(r.stderr, "closed its tmux window (ENG-1)") {
+		t.Errorf("stderr = %q, want the stream's own window closed", r.stderr)
+	}
+	got := windowsIn(t, "proj")
+	if slices.Contains(got, "ENG-1") {
+		t.Errorf("windows in session proj = %v, want ENG-1 gone with its worktree", got)
+	}
+	if !slices.Contains(got, "MAIN") {
+		t.Errorf("windows in session proj = %v, want the visiting window left alone", got)
 	}
 }
 
