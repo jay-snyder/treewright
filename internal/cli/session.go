@@ -92,11 +92,12 @@ func openWindow(env *Env, cfg *config.Config, spec tmux.Spec) error {
 // The way out is given as `treewright attach <repo>` rather than as the tmux command
 // it runs, because that spelling stays correct: it names the session exactly, and
 // it reaches the right server when TREEWRIGHT_TMUX_LABEL has aimed treewright at one a
-// bare `tmux attach` would not find.
+// bare `tmux attach` would not find. Spelled with Argv0, so someone who typed tw
+// is answered in the name they use.
 func focusWindow(env *Env, cfg *config.Config, w tmux.Window, command string) error {
 	switch err := tmux.Focus(w); {
 	case errors.Is(err, tmux.ErrNotFollowed):
-		env.warnf("could not switch to session %s — attach with: treewright attach %s", w.Session, cfg.Name)
+		env.warnf("could not switch to session %s — attach with: %s attach %s", w.Session, env.Argv0, cfg.Name)
 	case err != nil:
 		// The window was there a moment ago, so what changed is that it closed:
 		// tmux closes a window as soon as its command exits, and a command that
@@ -104,8 +105,8 @@ func focusWindow(env *Env, cfg *config.Config, w tmux.Window, command string) er
 		// this. Naming the command is what makes that guessable.
 		env.warnf("window %s closed as soon as it opened — did %q exit straight away?", w.Name, command)
 	case !tmux.Inside():
-		env.progressf("window %s is open in tmux session %s — attach with: treewright attach %s",
-			w.Name, w.Session, cfg.Name)
+		env.progressf("window %s is open in tmux session %s — attach with: %s attach %s",
+			w.Name, w.Session, env.Argv0, cfg.Name)
 	}
 	return nil
 }

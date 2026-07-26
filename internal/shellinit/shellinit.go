@@ -117,8 +117,10 @@ _treewright() {
   esac
 }
 # tw calls the treewright *function*, resolved at call time, so the eval-file
-# protocol works identically under either name.
-tw() { treewright "$@" }
+# protocol works identically under either name. That call runs the binary as
+# "command treewright", which erases the name the user typed from argv[0] — so
+# tw reports it in TREEWRIGHT_ARGV0 instead, and help and hints answer as "tw".
+tw() { local -x TREEWRIGHT_ARGV0=tw; treewright "$@" }
 (( $+functions[compdef] )) && compdef _treewright treewright tw
 `
 
@@ -155,8 +157,10 @@ _treewright_completions() {
   COMPREPLY=($(compgen -W "$candidates" -- "$cur"))
 }
 # tw calls the treewright *function*, resolved at call time, so the eval-file
-# protocol works identically under either name.
-tw() { treewright "$@"; }
+# protocol works identically under either name. That call runs the binary as
+# "command treewright", which erases the name the user typed from argv[0] — so
+# tw reports it in TREEWRIGHT_ARGV0 instead, and help and hints answer as "tw".
+tw() { local -x TREEWRIGHT_ARGV0=tw; treewright "$@"; }
 complete -F _treewright_completions treewright tw
 `
 
@@ -209,8 +213,12 @@ complete -c treewright -n '__fish_seen_subcommand_from tmux-init' -l apply -d 'l
 complete -c treewright -n '__fish_seen_subcommand_from tmux-init' -l resume-key -r -d 'prefix key that switches worktrees'
 complete -c treewright -n '__fish_seen_subcommand_from tmux-init' -l new-key -r -d 'prefix key that starts a worktree'
 
-# tw calls the treewright function, and --wraps inherits its completions.
+# tw calls the treewright function, and --wraps inherits its completions. The
+# function runs the binary as "command treewright", which erases the name the
+# user typed from argv[0] — so tw reports it in TREEWRIGHT_ARGV0 instead, and
+# help and hints answer as "tw".
 function tw --wraps treewright
+    set -lx TREEWRIGHT_ARGV0 tw
     treewright $argv
 end
 `

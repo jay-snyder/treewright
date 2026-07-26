@@ -552,8 +552,11 @@ const tagline = "treewright - isolated git worktree, tmux, and agent sessions fo
 
 // The usage lines print argv0 — the name the user actually typed, "treewright"
 // or its installed shorthand "tw" — so that help never scolds a user with a
-// longer name than the one they are using. Prose and copy-pasteable snippets
-// keep the canonical name; only the structural lines follow the invocation.
+// longer name than the one they are using. The same goes for every runtime hint
+// that says a command to type ("attach with: tw attach proj"). What keeps the
+// canonical name is help prose and anything destined for a file — tmux.conf
+// lines, shell startup evals — which programs read and shell functions never
+// reach.
 func writeOverview(w io.Writer, argv0 string) {
 	fmt.Fprintf(w, "%s\n\nusage: %s <command> [arguments]\n\ncommands:\n", tagline, argv0)
 

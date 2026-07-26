@@ -46,8 +46,8 @@ func cmdNew(env *Env, args []string) error {
 	// — and says "already exists" about a path rather than naming the command
 	// that opens what is already there.
 	if _, err := os.Stat(dir); err == nil {
-		return fmt.Errorf("worktree for %s already exists at %s — open it with \"treewright resume %s\"",
-			slug, dir, slug)
+		return fmt.Errorf("worktree for %s already exists at %s — open it with %q",
+			slug, dir, env.Argv0+" resume "+slug)
 	}
 
 	switch {
@@ -812,7 +812,7 @@ func cmdAttach(env *Env, args []string) error {
 
 	session := sessionFor(cfg)
 	if !tmux.HasSession(session) {
-		return fmt.Errorf("no tmux session %s is running — open one with \"treewright base %s\"", session, cfg.Name)
+		return fmt.Errorf("no tmux session %s is running — open one with %q", session, env.Argv0+" base "+cfg.Name)
 	}
 
 	// Inside tmux there is already a client holding this terminal, and attaching a

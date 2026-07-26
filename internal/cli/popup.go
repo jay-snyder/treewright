@@ -69,7 +69,7 @@ func cmdPopup(env *Env, args []string) error {
 		return fmt.Errorf("tmux is not installed, so there is no popup to open")
 	}
 
-	width, height := sizeFor(positional[0])
+	width, height := sizeFor(env, positional[0])
 
 	// The binary by its own path rather than by name: the popup runs through a
 	// shell whose PATH is the tmux server's, which is inherited from whatever
@@ -78,7 +78,13 @@ func cmdPopup(env *Env, args []string) error {
 	if err != nil {
 		self = "treewright"
 	}
-	inner := make([]string, 0, len(positional)+1)
+	inner := make([]string, 0, len(positional)+3)
+	// The invoked name rides along because the popup was just sized to messages
+	// spelled with it, and the inner process — reached by path, so its argv[0]
+	// says nothing — must print them the same width. Through env rather than a
+	// VAR=value prefix, because the popup's command runs under tmux's
+	// default-shell, and fish does not read that prefix as an assignment.
+	inner = append(inner, "/usr/bin/env", "TREEWRIGHT_ARGV0="+shellQuote(env.Argv0))
 	inner = append(inner, shellQuote(self))
 	for _, a := range positional {
 		inner = append(inner, shellQuote(a))
@@ -96,7 +102,7 @@ func cmdPopup(env *Env, args []string) error {
 // Only the pickers have a size worth deriving; everything else prints a few lines
 // of progress whose length nobody can predict, and for those a small fixed popup
 // beats a proportion of the terminal.
-func sizeFor(command string) (width, height int) {
+func sizeFor(env *Env, command string) (width, height int) {
 	const (
 		defaultWidth  = 80
 		defaultHeight = 12
@@ -136,7 +142,7 @@ func sizeFor(command string) (width, height int) {
 		// is a single short row — and a message that outgrew its popup would wrap,
 		// which is precisely what a hand-tuned size exists to stop.
 		const border, hint = 2, 2 // the sentence, and the gap below it
-		width = max(width, utf8.RuneCountInString(noWorktreesMessage(repo.Name()))+border)
+		width = max(width, utf8.RuneCountInString(noWorktreesMessage(env.Argv0, repo.Name()))+border)
 		height += hint
 	}
 	return width, height
@@ -151,7 +157,7 @@ func sizeFor(command string) (width, height int) {
 // sentence rather than as the top of a table. Both callers need the gap and both
 // need it the same, and the popup is sized for it.
 func noWorktreesHint(env *Env, repo string) {
-	env.progressf("%s", noWorktreesMessage(repo))
+	env.progressf("%s", noWorktreesMessage(env.Argv0, repo))
 	fmt.Fprintln(env.Stderr)
 }
 
@@ -164,9 +170,10 @@ func noWorktreesHint(env *Env, repo string) {
 //
 // The key comes first when there is one. Someone reading this is already in tmux,
 // most likely in a popup opened by that very key, and the keystroke is the nearer
-// of the two answers; the command is for the shell they will drop back to.
-func noWorktreesMessage(repo string) string {
-	const command = "treewright new <slug>"
+// of the two answers; the command is for the shell they will drop back to —
+// spelled with argv0, the name they actually type there.
+func noWorktreesMessage(argv0, repo string) string {
+	command := argv0 + " new <slug>"
 	if keys := newWorktreeKeys(); keys != "" {
 		return fmt.Sprintf("no worktrees for %s — start one with %s, or %q", repo, keys, command)
 	}

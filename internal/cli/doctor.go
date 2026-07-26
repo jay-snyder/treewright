@@ -91,7 +91,7 @@ func cmdDoctor(env *Env, args []string) error {
 	checkTmux(&r)
 	checkTmuxIntegration(&r)
 	checkShellIntegration(env, &r)
-	names := checkRegistry(&r)
+	names := checkRegistry(env, &r)
 	for _, name := range names {
 		checkConfig(&r, name)
 	}
@@ -219,12 +219,12 @@ func checkShellIntegration(env *Env, r *report) {
 	case "fish":
 		r.add(levelWarn, "shell integration not loaded — add treewright shell-init fish | source to your config, or cd and rm cannot move your shell")
 	default:
-		r.add(levelWarn, "shell integration not loaded — see \"treewright help shell-init\"; without it cd and rm cannot move your shell")
+		r.add(levelWarn, "shell integration not loaded — see \"%s help shell-init\"; without it cd and rm cannot move your shell", env.Argv0)
 	}
 }
 
 // checkRegistry reports on the config directory and returns the names to inspect.
-func checkRegistry(r *report) []string {
+func checkRegistry(env *Env, r *report) []string {
 	dir := config.Dir()
 	names, err := config.Names()
 	if err != nil {
@@ -232,7 +232,7 @@ func checkRegistry(r *report) []string {
 		return nil
 	}
 	if len(names) == 0 {
-		r.add(levelFail, "no configs in %s — run \"treewright setup\" inside a repository", dir)
+		r.add(levelFail, "no configs in %s — run \"%s setup\" inside a repository", dir, env.Argv0)
 		return nil
 	}
 	r.add(levelOK, "%d config(s) in %s: %s", len(names), dir, strings.Join(names, ", "))

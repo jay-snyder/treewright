@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -159,6 +160,24 @@ func TestNoWorktreesReadsAsAMessage(t *testing.T) {
 	}
 }
 
+// TestHintsSpeakTheInvokedName pins the rule that a hint naming a command to
+// type is spelled with the name the user typed. Someone who reached treewright as
+// tw — through the shell shim, which reports the typed name in TREEWRIGHT_ARGV0 —
+// should never be told to run a longer command than the one they know.
+func TestHintsSpeakTheInvokedName(t *testing.T) {
+	f := newFixture(t, "")
+	_ = f
+
+	var out, errOut bytes.Buffer
+	Run(Env{Args: []string{"resume"}, Argv0: "tw", Stdout: &out, Stderr: &errOut})
+	if !strings.Contains(errOut.String(), `"tw new <slug>"`) {
+		t.Errorf("stderr = %q, want the way out spelled as tw, the name that was typed", errOut.String())
+	}
+	if strings.Contains(errOut.String(), "treewright new") {
+		t.Errorf("stderr = %q, scolds with the long name the user did not type", errOut.String())
+	}
+}
+
 // TestPopupHintOnlyAppearsInAPopup covers the other half of holding a popup open:
 // nothing on screen said how to close it, because Escape is a popup's convention
 // and not a terminal's.
@@ -185,8 +204,9 @@ func TestPopupHintOnlyAppearsInAPopup(t *testing.T) {
 func TestTheEmptyRepoPopupFitsItsMessage(t *testing.T) {
 	f := newFixture(t, "")
 
-	w, h := sizeFor("resume")
-	want := utf8.RuneCountInString(noWorktreesMessage("proj"))
+	env := &Env{Argv0: "treewright"}
+	w, h := sizeFor(env, "resume")
+	want := utf8.RuneCountInString(noWorktreesMessage(env.Argv0, "proj"))
 	if w < want+2 {
 		t.Errorf("width = %d, but the message is %d wide — it would wrap", w, want)
 	}
@@ -210,14 +230,15 @@ func TestPopupSizesOnlyThePickers(t *testing.T) {
 	f := newFixture(t, "")
 	f.mustRun("new", "eng-1")
 
-	sized, _ := sizeFor("resume")
-	fixed, _ := sizeFor("new")
+	env := &Env{Argv0: "treewright"}
+	sized, _ := sizeFor(env, "resume")
+	fixed, _ := sizeFor(env, "new")
 	if sized == fixed {
 		t.Errorf("resume and new both sized %d; resume should follow its worktrees", sized)
 	}
 
 	// An unknown command must not panic its way to a size.
-	if w, h := sizeFor("nonesuch"); w <= 0 || h <= 0 {
+	if w, h := sizeFor(env, "nonesuch"); w <= 0 || h <= 0 {
 		t.Errorf("sizeFor(unknown) = %dx%d, want the fallback", w, h)
 	}
 }

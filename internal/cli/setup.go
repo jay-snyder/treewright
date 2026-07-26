@@ -94,8 +94,8 @@ func cmdSetup(env *Env, args []string) error {
 		return err
 	}
 	fmt.Fprintln(env.Stdout, path)
-	env.progressf("registered %s as %q — check it with \"treewright doctor\", then start work with \"treewright new <slug>\"",
-		filepath.Base(mainDir), name)
+	env.progressf("registered %s as %q — check it with \"%s doctor\", then start work with \"%s new <slug>\"",
+		filepath.Base(mainDir), name, env.Argv0, env.Argv0)
 	return nil
 }
 

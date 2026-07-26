@@ -20,9 +20,17 @@ import (
 var version = "dev"
 
 func main() {
-	// Argv0 is passed through so help output can address the user by the name
-	// they invoked — "tw", usually — rather than always the full one.
-	err := cli.Run(cli.Env{Args: os.Args[1:], Argv0: filepath.Base(os.Args[0]), Version: version})
+	// Argv0 is passed through so help and hints can address the user by the name
+	// they invoked — "tw", usually — rather than always the full one. The shell
+	// integration masks that name: its tw function runs `command treewright`, so
+	// argv[0] says "treewright" whichever name was typed. The wrapper therefore
+	// reports the typed name in TREEWRIGHT_ARGV0, and argv[0] is the fallback for
+	// a binary invoked directly.
+	argv0 := os.Getenv("TREEWRIGHT_ARGV0")
+	if argv0 == "" {
+		argv0 = filepath.Base(os.Args[0])
+	}
+	err := cli.Run(cli.Env{Args: os.Args[1:], Argv0: argv0, Version: version})
 	if err == nil {
 		return
 	}

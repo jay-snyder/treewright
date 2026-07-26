@@ -1,6 +1,7 @@
 package shellinit
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -37,10 +38,13 @@ func TestEveryScriptDefinesTheWrapperAndCompletion(t *testing.T) {
 // wrapper with the same completion in every shell. The strings are per-shell
 // because each shell has its own way of saying "and complete tw like treewright".
 func TestEveryScriptDefinesTheShortName(t *testing.T) {
+	// Each tw announces the typed name in TREEWRIGHT_ARGV0, exported for just this
+	// call, because it runs the binary as "command treewright" — argv[0] alone
+	// would have every hint answer as treewright to someone who typed tw.
 	wants := map[string][]string{
-		"zsh":  {`tw() { treewright "$@" }`, "compdef _treewright treewright tw"},
-		"bash": {`tw() { treewright "$@"; }`, "complete -F _treewright_completions treewright tw"},
-		"fish": {"function tw --wraps treewright", "treewright $argv"},
+		"zsh":  {`tw() { local -x TREEWRIGHT_ARGV0=tw; treewright "$@" }`, "compdef _treewright treewright tw"},
+		"bash": {`tw() { local -x TREEWRIGHT_ARGV0=tw; treewright "$@"; }`, "complete -F _treewright_completions treewright tw"},
+		"fish": {"function tw --wraps treewright", "set -lx TREEWRIGHT_ARGV0 tw", "treewright $argv"},
 	}
 	for _, shell := range Shells() {
 		script, err := Script(shell)
@@ -137,6 +141,55 @@ func TestExternalCommandsResistAliases(t *testing.T) {
 // alias, `rm -f` becomes `rm -i -f`, while the same text inlined into one -c
 // argument is parsed before the alias statement ever runs and expands to nothing.
 // An earlier version of this test inlined it, and so proved nothing.
+// TestShortNameReachesTheBinary proves TREEWRIGHT_ARGV0 travels: the tw wrapper
+// runs the binary as "command treewright", so the variable is the only way the
+// binary can learn which name was typed — and it must be scoped to the one call,
+// or a treewright typed after a tw would answer as tw too.
+func TestShortNameReachesTheBinary(t *testing.T) {
+	programs := map[string]string{
+		"zsh":  "source %s\ntw ls\ntreewright ls\n",
+		"bash": "source %s\ntw ls\ntreewright ls\n",
+		"fish": "source %s\ntw ls\ntreewright ls\n",
+	}
+	for _, shell := range []string{"zsh", "bash", "fish"} {
+		t.Run(shell, func(t *testing.T) {
+			bin, err := exec.LookPath(shell)
+			if err != nil {
+				t.Skipf("%s is not installed", shell)
+			}
+			script, err := Script(shell)
+			if err != nil {
+				t.Fatalf("Script: %v", err)
+			}
+
+			dir := t.TempDir()
+			shim := filepath.Join(dir, "shim")
+			if err := os.WriteFile(shim, []byte(script), 0o644); err != nil {
+				t.Fatalf("write shim: %v", err)
+			}
+			// A stub treewright that reports the name it was told, as main does.
+			stub := filepath.Join(dir, "treewright")
+			if err := os.WriteFile(stub, []byte("#!/bin/sh\necho \"argv0=${TREEWRIGHT_ARGV0:-unset}\"\n"), 0o755); err != nil {
+				t.Fatalf("write stub: %v", err)
+			}
+
+			cmd := exec.Command(bin, "-c", fmt.Sprintf(programs[shell], shim))
+			cmd.Env = append(os.Environ(), "PATH="+dir+string(os.PathListSeparator)+os.Getenv("PATH"), "TMPDIR="+dir)
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("%s could not run the wrappers: %v\n%s", shell, err, out)
+			}
+			if !strings.Contains(string(out), "argv0=tw") {
+				t.Errorf("tw did not tell the binary its name:\n%s", out)
+			}
+			// The second call, as treewright, must not still be wearing tw's name.
+			if !strings.Contains(string(out), "argv0=unset") {
+				t.Errorf("TREEWRIGHT_ARGV0 leaked past the tw call it was set for:\n%s", out)
+			}
+		})
+	}
+}
+
 func TestWrapperSurvivesAnRmAlias(t *testing.T) {
 	for _, shell := range []string{"zsh", "bash"} {
 		t.Run(shell, func(t *testing.T) {
