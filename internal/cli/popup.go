@@ -45,16 +45,24 @@ func PopupHint(w io.Writer) {
 // which is the only way a binding can compute anything: display-popup would have
 // to be handed a literal size.
 //
-// That indirection costs one thing, which --client buys back. A tmux command run
-// from outside tmux has no association with the client that asked for it, so tmux
-// falls back to the most recently active one — and with two terminals attached to
-// two sessions, the popup opens over whichever has been busier. run-shell expands
-// formats in the command it runs, so the binding passes #{client_tty} and the
-// popup lands where the key was pressed.
+// That indirection costs two things, which --client and --dir buy back. Both are
+// recovered the same way: run-shell expands formats in the command it runs, so a
+// binding can pass what tmux knows and the process it spawns does not.
+//
+// --client, because a tmux command run from outside tmux has no association with
+// the client that asked for it, so tmux falls back to the most recently active
+// one — and with two terminals attached to two sessions, the popup opens over
+// whichever has been busier. The binding passes #{client_tty}.
+//
+// --dir, because run-shell does not run in the calling pane's directory. It runs
+// in the tmux server's, which is wherever the server was started, so treewright
+// would resolve the repository — and mark the worktree you are standing in — from
+// a directory that has nothing to do with the window the key was pressed in. The
+// binding passes #{pane_current_path}.
 func cmdPopup(env *Env, args []string) error {
-	var client string
+	var client, dir string
 	positional, err := parseArgs("popup", args, nil,
-		map[string]*string{"-c": &client, "--client": &client}, 3)
+		map[string]*string{"-c": &client, "--client": &client, "-d": &dir, "--dir": &dir}, 3)
 	if err != nil {
 		return err
 	}
@@ -67,6 +75,23 @@ func cmdPopup(env *Env, args []string) error {
 	}
 	if !tmux.Available() {
 		return fmt.Errorf("tmux is not installed, so there is no popup to open")
+	}
+
+	// Moved into before anything asks where we are. Everything below reads the
+	// working directory rather than taking it as an argument — sizeFor resolves
+	// the config to count the worktrees, and the popup itself starts here — so
+	// the one honest way to act on another directory is to stand in it.
+	//
+	// Restored on the way out because Run is called in-process by the tests, and
+	// a command that moved the process and left it there would decide where the
+	// next one thinks it is.
+	if dir != "" {
+		if prev, err := os.Getwd(); err == nil {
+			defer os.Chdir(prev)
+		}
+		if err := os.Chdir(dir); err != nil {
+			return fmt.Errorf("cannot open a popup for %s: %w", dir, err)
+		}
 	}
 
 	width, height := sizeFor(env, positional[0])
@@ -90,11 +115,12 @@ func cmdPopup(env *Env, args []string) error {
 		inner = append(inner, shellQuote(a))
 	}
 
-	// run-shell inherits the calling pane's directory, which is how treewright works
-	// out which repository is meant — so the popup starts where this is standing
-	// rather than wherever the tmux server happens to be.
-	dir, _ := os.Getwd()
-	return tmux.Popup(client, dir, strings.Join(inner, " "), width, height)
+	// Read back rather than reusing the flag, so the popup opens on the directory
+	// this process is actually standing in whichever way it got there: --dir when
+	// a binding passed one, and the caller's own directory when a person typed
+	// this at a prompt.
+	here, _ := os.Getwd()
+	return tmux.Popup(client, here, strings.Join(inner, " "), width, height)
 }
 
 // sizeFor works out the popup a command needs.

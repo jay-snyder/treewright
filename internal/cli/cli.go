@@ -209,7 +209,7 @@ window, and so what brings its session into being.`,
 		},
 		{
 			name:    "popup",
-			args:    "[-c <client>] <command> [arguments]",
+			args:    "[-c <client>] [-d <dir>] <command> [arguments]",
 			summary: "run a treewright command in a tmux popup sized to its output",
 			long: `Opens a tmux popup and runs "treewright <command>" inside it, having
 first worked out how big that popup needs to be.
@@ -224,9 +224,16 @@ terminal most of the popup is empty. This is what the key bindings printed by
 --client names the terminal to draw on. It matters because a tmux command run
 from outside tmux has no association with the client that asked for it, so with
 two terminals attached to two sessions the popup opens over whichever has been
-busier. A binding passes #{client_tty}, which run-shell expands.`,
+busier. A binding passes #{client_tty}, which run-shell expands.
+
+--dir names the directory the popup is for, which decides both the repository
+treewright answers about and the worktree it marks as the one you are in. It is
+needed because run-shell does not run in the calling pane's directory: it runs in
+the tmux server's, wherever that was started. A binding passes
+#{pane_current_path}, expanded the same way.`,
 			flags: []flagDoc{
 				{"-c, --client", "terminal to open the popup on (a tmux client, e.g. #{client_tty})"},
+				{"-d, --dir", "directory the popup is for (a pane's path, e.g. #{pane_current_path})"},
 			},
 			run: cmdPopup,
 		},

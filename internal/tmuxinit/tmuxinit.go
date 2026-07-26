@@ -129,7 +129,7 @@ const header = `# treewright tmux integration. Load it from ~/.tmux.conf with ei
 # An empty key omits its binding: --new-key "" binds only the first.
 `
 
-// Three details in these bindings are load-bearing.
+// Four details in these bindings are load-bearing.
 //
 // They go through `treewright popup` rather than calling display-popup directly,
 // because tmux fixes a popup's size when it creates one and -w and -h take only
@@ -145,6 +145,16 @@ const header = `# treewright tmux integration. Load it from ~/.tmux.conf with ei
 // opens over whichever terminal has been busier. run-shell expands formats in the
 // command it runs, so the binding can say which client it means.
 //
+// #{pane_current_path} buys back the directory, and is easy to think you get for
+// free. run-shell does not run in the calling pane's directory — it runs in the
+// tmux server's, which is wherever the server was started, usually one
+// repository's checkout and never the pane's. Without this the popup answers
+// about that repository from every window on the server, and marks its worktree
+// as the one you are standing in. tmux offers no way to fix it from outside the
+// command: run-shell's own -c takes a directory but does not expand a format into
+// one, so the path has to travel in the command string, where formats are
+// expanded, exactly as the client does.
+//
 // The binding runs `resume` rather than `cd`, because a popup's shell exits with
 // the popup: moving it somewhere is an operation with nowhere to land.
 const reachHeader = `
@@ -154,18 +164,23 @@ const reachHeader = `
 # no shell in it to type into. These open treewright in a popup over whatever is
 # running, and close it again once you have chosen.
 #
-# The popup starts in the current pane's directory, which is how treewright knows
-# which repository you mean.
+# Each binding hands treewright the current pane's directory, which is how it knows
+# which repository you mean. run-shell would otherwise run in the tmux server's
+# directory, and answer about whichever repository that happens to be.
 `
 
 const resumeBinding = `
 # prefix + {{key}} — switch to another worktree.
-bind-key {{key}} run-shell -b 'treewright popup -c "#{client_tty}" resume'
+bind-key {{key}} run-shell -b 'treewright popup -c "#{client_tty}" -d "#{pane_current_path}" resume'
 `
 
+// The path is quoted here where the client is bare, because a directory can
+// contain a space and a tty cannot. The quotes are escaped because they are
+// already inside the double-quoted run-shell argument: tmux unescapes them when
+// it parses that argument, so the shell underneath receives one quoted word.
 const newBinding = `
 # prefix + {{key}} — start one. tmux asks for the slug; treewright does the rest.
-bind-key {{key}} command-prompt -p "new worktree:" 'run-shell -b "treewright popup -c #{client_tty} new %1"'
+bind-key {{key}} command-prompt -p "new worktree:" 'run-shell -b "treewright popup -c #{client_tty} -d \"#{pane_current_path}\" new %1"'
 `
 
 const titles = `

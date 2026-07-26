@@ -2,11 +2,15 @@ package cli
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"unicode/utf8"
 
 	"github.com/jay-snyder/treewright/internal/git"
+	"github.com/jay-snyder/treewright/internal/gittest"
 	"github.com/jay-snyder/treewright/internal/tmux"
 )
 
@@ -130,6 +134,77 @@ func TestPopupRefusesWhatItCannotRun(t *testing.T) {
 	if !strings.Contains(r.stderr, "cannot run itself") {
 		t.Errorf("stderr = %q, want it to say why", r.stderr)
 	}
+}
+
+// TestPopupAnswersAboutTheDirectoryItIsGiven covers the reason --dir exists.
+//
+// run-shell does not run in the calling pane's directory. It runs in the tmux
+// server's, wherever that was started — so a popup left to work out where it is
+// answers about whichever repository the server happens to have been launched
+// from, from every window on it. The symptom that surfaced it was the ls table
+// marking the same row as current no matter which worktree the key was pressed
+// in; the part that mattered was that a second repository's windows offered the
+// first one's worktrees.
+//
+// Two repositories are registered so that the caller's own directory decides
+// something: with one config, treewright falls back to it and the bug hides.
+// Their pickers are different widths, which is what makes the popup's size the
+// evidence — it is derived from the worktrees of whichever repo was resolved.
+//
+// The assertion rides on a failure because opening a popup needs a client to
+// draw on and a headless test has none. tmux reports the command line it was
+// given, which is exactly what is under test.
+func TestPopupAnswersAboutTheDirectoryItIsGiven(t *testing.T) {
+	requireTmux(t)
+	f := newFixture(t, "")
+	f.mustRun("new", "short")
+
+	// A second repository, registered beside the first, whose worktree is named
+	// far more widely than anything in it.
+	other := gittest.New(t)
+	other.Worktree("a-slug-long-enough-to-change-the-popups-width")
+	config := "main_dir = '" + other.MainDir + "'\nbase_branch = 'main'\nbranch_prefix = '" + gittest.BranchPrefix + "'\n"
+	if err := os.WriteFile(filepath.Join(f.registry, "other.toml"), []byte(config), 0o644); err != nil {
+		t.Fatalf("write the second config: %v", err)
+	}
+
+	// Standing in the first repository, as a popup spawned by run-shell stands in
+	// the server's directory rather than in the worktree the key was pressed in.
+	here := f.exec("popup", "resume")
+	there := f.exec("popup", "-d", other.MainDir, "resume")
+
+	for _, r := range []result{here, there} {
+		if r.err == nil {
+			t.Fatalf("popup succeeded with no client to draw on\n%s", r.both())
+		}
+	}
+	if !strings.Contains(there.err.Error(), "-d "+other.MainDir) {
+		t.Errorf("the popup did not open on the directory it was given:\n%v", there.err)
+	}
+	if w := popupWidth(t, here.err.Error()); w == popupWidth(t, there.err.Error()) {
+		t.Errorf("both popups came out %s wide, so --dir did not decide the repository:\n%v\n%v",
+			w, here.err, there.err)
+	}
+
+	// And the process is left where it was found, since Run is called in-process
+	// here and the next command would otherwise inherit somewhere it never went.
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	if wd != f.MainDir {
+		t.Errorf("working directory is %s, want it restored to %s", wd, f.MainDir)
+	}
+}
+
+// popupWidth reads the -w tmux was asked for out of its complaint.
+func popupWidth(t *testing.T, message string) string {
+	t.Helper()
+	m := regexp.MustCompile(`-w (\d+)`).FindStringSubmatch(message)
+	if m == nil {
+		t.Fatalf("no popup width in: %s", message)
+	}
+	return m[1]
 }
 
 // TestNoWorktreesReadsAsAMessage covers a repository nobody has started a worktree

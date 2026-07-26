@@ -88,6 +88,14 @@ func TestScriptLoadsIntoARealServer(t *testing.T) {
 		t.Errorf("a binding does not name the client to draw on:\n%s", keys)
 	}
 
+	// And both must hand over the directory, for the same class of reason: a
+	// run-shell command runs in the tmux server's directory, not the calling
+	// pane's, so a popup left to ask where it is answers about whichever
+	// repository the server was started from — from every window on it.
+	if strings.Count(keys, "pane_current_path") != 2 {
+		t.Errorf("a binding does not pass the pane's directory:\n%s", keys)
+	}
+
 	if titles, err := tmux("show-options", "-g", "-v", "set-titles"); err != nil || titles != "on" {
 		t.Errorf("set-titles = %q (%v), want it turned on", titles, err)
 	}
@@ -195,7 +203,7 @@ func TestScriptHonorsCustomKeys(t *testing.T) {
 // empty key is a deliberate "bind nothing", not a mistake to fall back from.
 func TestAnEmptyKeyOmitsItsBinding(t *testing.T) {
 	script := Script(Keys{Resume: "T"})
-	if !strings.Contains(script, `treewright popup -c "#{client_tty}" resume`) {
+	if !strings.Contains(script, `treewright popup -c "#{client_tty}" -d "#{pane_current_path}" resume`) {
 		t.Errorf("the kept binding is missing:\n%s", script)
 	}
 	if strings.Contains(script, "new %1") {
