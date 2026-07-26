@@ -2,6 +2,7 @@ package cli
 
 import (
 	"errors"
+	"os"
 	"strings"
 	"testing"
 
@@ -52,19 +53,63 @@ func TestCdWithNoWorktrees(t *testing.T) {
 	}
 }
 
-// TestCdTakesTheOnlyWorktree checks that a single candidate is not put to a menu:
-// with one worktree there is nothing to choose, and a prompt there would be a
-// keystroke with one possible answer.
-func TestCdTakesTheOnlyWorktree(t *testing.T) {
+// TestALoneWorktreeIsStillAChoice replaces the shortcut that used to take a
+// single worktree without asking.
+//
+// There is no longer a single row to take. The base checkout is in the list, so
+// one worktree makes two rows and a real decision — and "the only candidate" was
+// only ever a reason to skip the menu because the base checkout was missing from
+// it. With no tty to answer on, cd cancels, which is what shows a menu was put.
+func TestALoneWorktreeIsStillAChoice(t *testing.T) {
 	f := newFixture(t, "")
 	f.mustRun("new", "solo")
 
 	r := f.exec("cd")
-	if r.err != nil {
-		t.Fatalf("cd: %v\n%s", r.err, r.both())
+	if r.err == nil {
+		t.Fatalf("cd took the lone worktree without offering the base checkout\n%s", r.both())
 	}
-	if got, want := strings.TrimSpace(r.stdout), f.DirFor("solo"); got != want {
-		t.Errorf("stdout = %q, want %q", got, want)
+	if !strings.Contains(r.stderr, "cancelled") {
+		t.Errorf("stderr = %q, want a menu offered and then dismissed", r.stderr)
+	}
+}
+
+// TestTheBaseCheckoutIsReachableByName covers the one row with no slug on it.
+//
+// The menu numbers it like any other, but a script has no menu, and the whole
+// point of putting the base checkout in the list is that it stops being the one
+// place treemux cannot take you. So it answers to names: "base", which is what
+// the command that opens it is called, and the branch it is parked on, which is
+// what the SLUG column shows and therefore what someone reads off the list and
+// types back.
+func TestTheBaseCheckoutIsReachableByName(t *testing.T) {
+	f := newFixture(t, "")
+	f.mustRun("new", "solo")
+
+	for _, name := range []string{"base", "main"} {
+		r := f.exec("cd", name)
+		if r.err != nil {
+			t.Fatalf("cd %s: %v\n%s", name, r.err, r.both())
+		}
+		if got := strings.TrimSpace(r.stdout); got != f.MainDir {
+			t.Errorf("cd %s = %q, want the main checkout %q", name, got, f.MainDir)
+		}
+	}
+}
+
+// TestTheBaseCheckoutIsNotRemovable is the other half of putting it in the list.
+// rm and prune work off the worktrees treemux created, and the base checkout is
+// not one — so the name that reaches it everywhere else must not reach it here.
+func TestTheBaseCheckoutIsNotRemovable(t *testing.T) {
+	f := newFixture(t, "")
+	f.mustRun("new", "solo")
+
+	for _, name := range []string{"base", "main"} {
+		if _, err := f.run("rm", name); err == nil {
+			t.Errorf("rm %s succeeded — the main checkout is not removable", name)
+		}
+	}
+	if _, err := os.Stat(f.MainDir); err != nil {
+		t.Fatalf("the main checkout is gone: %v", err)
 	}
 }
 

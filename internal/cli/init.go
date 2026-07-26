@@ -87,7 +87,12 @@ func cmdComplete(env *Env, args []string) error {
 	// No arity check here: completion must never fail, and an unrecognized
 	// request simply offers nothing.
 	switch at(args, 0) {
-	case "slugs":
+	// Two lists, differing by one name, because the commands that ask differ by
+	// what they can do. "slugs" is what rm completes: the worktrees, which are
+	// what it can remove. "targets" is what resume and cd complete: the same
+	// worktrees plus the base checkout, which they can reach and rm cannot.
+	// Offering "base" to rm would be completing a word that only ever errors.
+	case "slugs", "targets":
 		cfg, err := resolveConfig("")
 		if err != nil {
 			return nil
@@ -95,6 +100,12 @@ func cmdComplete(env *Env, args []string) error {
 		managed, err := repoFor(cfg).Managed()
 		if err != nil {
 			return nil
+		}
+		if at(args, 0) == "targets" {
+			// Just the one spelling, though resume and cd also answer to the base
+			// branch: completion is for finding a name, and a list offering the
+			// same row twice makes it harder, not easier.
+			fmt.Fprintln(env.Stdout, "base")
 		}
 		for _, wt := range managed {
 			fmt.Fprintln(env.Stdout, wt.Slug)

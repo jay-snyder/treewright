@@ -7,6 +7,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/jay-snyder/treemux/internal/git"
 	"github.com/jay-snyder/treemux/internal/tmux"
 	"github.com/jay-snyder/treemux/internal/ui"
 )
@@ -114,6 +115,21 @@ func sizeFor(command string) (width, height int) {
 	if err != nil {
 		return defaultWidth, defaultHeight
 	}
+	// The rows the picker will show, in the cheap form popupSize measures: the
+	// base checkout at the head, as chooseWorktree puts it, and nothing inspected
+	// — the columns that cost a git call are not the ones the data can stretch.
+	rows := make([]git.Info, 0, len(managed)+1)
+	if len(managed) > 0 {
+		branch, _ := git.CurrentBranch(cfg.MainDir)
+		rows = append(rows, git.Info{
+			Worktree: git.Worktree{Dir: cfg.MainDir, Branch: branch},
+			Status:   git.StatusBase,
+		})
+	}
+	for _, wt := range managed {
+		rows = append(rows, git.Info{Worktree: wt})
+	}
+
 	if len(managed) == 0 {
 		// Nothing to pick from, so the popup holds one sentence and the hint
 		// under it — and sizing it for a picker that will not appear is the same
@@ -128,7 +144,7 @@ func sizeFor(command string) (width, height int) {
 		const border, lines, cursor = 2, 3, 1 // message, blank, hint
 		return utf8.RuneCountInString(noWorktreesMessage(repo.Name())) + border, lines + cursor + border
 	}
-	return popupSize(managed, tmux.Windows(sessionFor(cfg)))
+	return popupSize(rows, tmux.Windows(sessionFor(cfg)))
 }
 
 // noWorktreesMessage is what treemux says about a repository nobody has started a

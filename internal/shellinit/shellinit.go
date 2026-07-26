@@ -106,7 +106,8 @@ _treemux() {
     return
   fi
   case "$words[2]" in
-    rm|resume|cd)                compadd -- ${(f)"$(command treemux __complete slugs 2>/dev/null)"} ;;
+    rm)                          compadd -- ${(f)"$(command treemux __complete slugs 2>/dev/null)"} ;;
+    resume|cd)                   compadd -- ${(f)"$(command treemux __complete targets 2>/dev/null)"} ;;
     ls|prune|base|config|attach) compadd -- ${(f)"$(command treemux __complete repos 2>/dev/null)"} ;;
     shell-init)                  compadd -- ${(f)"$(command treemux __complete shells 2>/dev/null)"} ;;
   esac
@@ -139,7 +140,8 @@ _treemux_completions() {
   fi
   local candidates=""
   case "${COMP_WORDS[1]}" in
-    rm|resume|cd)                candidates="$(command treemux __complete slugs 2>/dev/null)" ;;
+    rm)                          candidates="$(command treemux __complete slugs 2>/dev/null)" ;;
+    resume|cd)                   candidates="$(command treemux __complete targets 2>/dev/null)" ;;
     ls|prune|base|config|attach) candidates="$(command treemux __complete repos 2>/dev/null)" ;;
     shell-init)                  candidates="$(command treemux __complete shells 2>/dev/null)" ;;
   esac
@@ -184,7 +186,8 @@ complete -c treemux -n __fish_use_subcommand -a config     -d 'print the setting
 complete -c treemux -n __fish_use_subcommand -a doctor     -d 'check the installation and every registered config'
 complete -c treemux -n __fish_use_subcommand -a shell-init -d 'print the shell integration'
 complete -c treemux -n __fish_use_subcommand -a tmux-init  -d 'print the tmux integration'
-complete -c treemux -n '__fish_seen_subcommand_from rm resume cd' -a '(command treemux __complete slugs)'
+complete -c treemux -n '__fish_seen_subcommand_from rm' -a '(command treemux __complete slugs)'
+complete -c treemux -n '__fish_seen_subcommand_from resume cd' -a '(command treemux __complete targets)'
 complete -c treemux -n '__fish_seen_subcommand_from ls prune base config attach' -a '(command treemux __complete repos)'
 complete -c treemux -n '__fish_seen_subcommand_from shell-init' -a '(command treemux __complete shells)'
 complete -c treemux -n '__fish_seen_subcommand_from rm' -s f -l force -d 'remove even when unsaved work would be lost'

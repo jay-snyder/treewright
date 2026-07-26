@@ -57,15 +57,13 @@ func TestPopupSizeCoversTheTable(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			windows := map[string]tmux.Window{}
-			managed := make([]git.Worktree, 0, len(tc.infos))
 			for _, info := range tc.infos {
-				managed = append(managed, git.Worktree{Slug: info.Slug, Dir: info.Dir})
 				if tc.window.ID != "" {
 					windows[info.Dir] = tc.window
 				}
 			}
 
-			gotW, gotH := popupSize(managed, windows)
+			gotW, gotH := popupSize(tc.infos, windows)
 
 			// The picker prints the header indented by the width of its "n) "
 			// prefix, then one prefixed line per row, a blank, and the prompt.
@@ -96,12 +94,13 @@ func TestPopupSizeCoversTheTable(t *testing.T) {
 // TestPopupSizeBeatsAPercentage is the point of the whole exercise, stated as a
 // number: on a wide terminal the old 70%x60% was several times the content.
 func TestPopupSizeBeatsAPercentage(t *testing.T) {
-	managed := []git.Worktree{
-		{Slug: "eng-1557-migrate-api-eb-to-ecs", Dir: "/wt/a"},
-		{Slug: "eng-1646-app-landing-page-redesign", Dir: "/wt/b"},
-		{Slug: "eng-1675-cold-start-checklist-boost", Dir: "/wt/c"},
+	listing := []git.Info{
+		{Worktree: git.Worktree{Branch: "staging", Dir: "/wt/main"}, Status: git.StatusBase},
+		{Worktree: git.Worktree{Slug: "eng-1557-migrate-api-eb-to-ecs", Dir: "/wt/a"}},
+		{Worktree: git.Worktree{Slug: "eng-1646-app-landing-page-redesign", Dir: "/wt/b"}},
+		{Worktree: git.Worktree{Slug: "eng-1675-cold-start-checklist-boost", Dir: "/wt/c"}},
 	}
-	w, h := popupSize(managed, nil)
+	w, h := popupSize(listing, nil)
 
 	// The terminal this was reported on.
 	const cols, rows = 237, 62

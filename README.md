@@ -24,7 +24,9 @@ flowchart TD
 - **One tmux session per repository**, named after its config, holding every
   window treemux opens for it.
 - **One base window** sits in the main checkout, parked on the base branch. Use it
-  to spawn new work and ask general questions — never for feature work.
+  to spawn new work and ask general questions — never for feature work. It is the
+  first row of every listing and of the `resume` menu, so it is one keystroke away
+  from wherever you are.
 - **Each worktree** is a checkout (`myrepo-<slug>`) on a branch (`<prefix><slug>`),
   with a window in that session named after its ticket.
 - **When the PR merges**, one command tears all three down together — and refuses
@@ -308,8 +310,8 @@ config, or the name you pass.
 | Command | What it does |
 |---|---|
 | `treemux new <slug> [window-name]` | Create a worktree and branch off the latest `origin/<base_branch>`, carry configured files in, and open a window on it in the repository's tmux session. |
-| `treemux resume [slug]` | Reopen a window on an existing worktree, or switch to the one already open. Menu when the slug is omitted. |
-| `treemux cd [slug]` | Move your shell into a worktree. Menu when the slug is omitted. |
+| `treemux resume [slug]` | Reopen a window on an existing worktree, or switch to the one already open. Menu when the slug is omitted, with the base checkout at the top of it. |
+| `treemux cd [slug]` | Move your shell into a worktree, or into the main checkout with `base`. Menu when the slug is omitted. |
 | `treemux base [repo]` | Select the base window on the main checkout, opening it if it is not there. |
 | `treemux attach [repo]` | Attach this terminal to a repository's tmux session, on whichever window was current there. Moves the client instead when already inside tmux. |
 | `treemux popup [-c <client>] <command>` | Run a treemux command in a tmux popup sized to its output. What the `tmux-init` key bindings go through. |
@@ -329,6 +331,27 @@ to mind: `create` for `new`, `remove` and `delete` for `rm`, `list` and `status`
 for `ls`, `main` and `home` for `base`, `reopen` for `resume`. Help lists only the
 canonical name, so there is one spelling to learn and another that forgives you.
 A name that is close to a command but not one gets pointed at the nearest match.
+
+### The base checkout is in the menu
+
+`resume` and `cd` list the main checkout above the worktrees, under the branch it
+is parked on. It belongs there on both of the list's own terms: it is where you
+land between worktrees — investigating, reviewing a pull request, asking an agent
+to start the next piece of work — and, since a tmux session does not survive a
+reboot while a checkout on disk does, it is something you reopen. Left out of the
+list, the one window that is always there, and that keeps the session alive, was
+the one window the resume key could not reach.
+
+It is not a worktree, and nothing pretends otherwise. `rm` and `prune` work off
+the worktrees treemux created, so neither can name it; `ls --json` flags its row
+with `"base": true` for anything reading the listing to decide where work should
+go. Name it `base`, or name the branch it is on.
+
+Two ways in, one window. `treemux base` opens it fresh with `command`; picking it
+out of the resume menu runs `resume_command`, the same "carry on where I left off"
+every other row gets — which after a reboot is the point. The difference shows
+only on the first open, since every later call finds the window by its directory
+and switches to it.
 
 ### Naming a worktree
 
@@ -401,11 +424,23 @@ about ref formats. If you pass a slug that already starts with your
 | `merged` | green | The work has landed in `origin/<base_branch>`. Safe to remove; `prune` reaps these. |
 | `unpushed (n)` | red | `n` commits exist only in this worktree. `rm` refuses without `--force`. |
 | `active` | cyan | Pushed but not merged — an open pull request. `prune` never touches these. |
+| `base (n)` | dim | The main checkout, which is not a worktree and is never removed. `n` counts uncommitted files when there are any. |
+
+The first four answer one question — how safe is this to throw away — and `base`
+is deliberately outside that scale, because none of their answers is true of the
+main checkout. A base checkout sitting level with origin has no commits outside
+it, which would read as `merged`: the green that means "safe to delete", about the
+one directory that must never go.
+
+Its divergence column is still worth reading, and means something slightly
+different: measured against `origin/<base_branch>` as every row is, for the
+checkout parked on that branch it is how far behind origin you are — whether the
+investigation or the review you are doing there is against a stale tree.
 
 The counts are the numbers `rm` refuses over, so a listing says how much a
 `--force` would discard. The worktree you are standing in is marked with an
 asterisk, and that column appears only when one of the rows is in fact where you
-are.
+are — which now includes standing in the main checkout.
 
 `ls` does not fetch — it changes no ref — so a branch that landed since your last
 fetch still reads as `active`. `rm` and `prune` both fetch before they judge, and

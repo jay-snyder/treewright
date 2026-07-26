@@ -267,10 +267,29 @@ func TestLsMarksTheCurrentWorktree(t *testing.T) {
 		}
 	})
 
-	t.Run("no marker column from the main checkout", func(t *testing.T) {
-		// A column that is blank on every row would be a permanent indent paid for
-		// a case that is not occurring.
+	t.Run("marked from the main checkout, which is a row of its own", func(t *testing.T) {
+		// The base checkout heads the listing, so standing in it is standing in a
+		// row — and the marker belongs on that row rather than on nothing.
+		var marked string
 		for _, line := range strings.Split(f.mustRun("ls"), "\n") {
+			if strings.HasPrefix(line, "*") {
+				marked = line
+			}
+		}
+		if marked == "" {
+			t.Fatalf("nothing marked from the main checkout:\n%s", f.mustRun("ls"))
+		}
+		if !strings.Contains(marked, "base") {
+			t.Errorf("marked row = %q, want the base checkout's", marked)
+		}
+	})
+
+	t.Run("no marker column from outside the repo", func(t *testing.T) {
+		// A column that is blank on every row would be a permanent indent paid for
+		// a case that is not occurring — which is now only the case when the
+		// caller is standing in none of the checkouts at all.
+		t.Chdir(t.TempDir())
+		for _, line := range strings.Split(f.mustRun("ls", "proj"), "\n") {
 			if strings.HasPrefix(line, " ") || strings.HasPrefix(line, "*") {
 				t.Errorf("line is indented for an unused marker column: %q", line)
 			}
@@ -631,8 +650,9 @@ func TestResumeUsesConfiguredCommand(t *testing.T) {
 	f := newFixture(t, "command = 'true'\nresume_command = 'touch "+marker+"'\n")
 	f.mustRun("new", "solo")
 
-	// A lone worktree is chosen without a menu.
-	f.mustRun("resume")
+	// Named rather than picked: the menu always has the base checkout in it, so
+	// even a lone worktree is now one of two rows and there is no tty to choose on.
+	f.mustRun("resume", "solo")
 	waitForFile(t, marker, "resume_command")
 }
 
@@ -659,6 +679,44 @@ func TestBaseWarnsWhenOffTheBaseBranch(t *testing.T) {
 	if !strings.Contains(out, "not main") {
 		t.Errorf("output = %q, want a drift warning", out)
 	}
+
+	// The warning is the base window's, not the `base` command's, so it has to
+	// survive the other way in — which is the whole reason both routes go through
+	// one function.
+	f.Git(f.MainDir, "checkout", "--quiet", "-b", "wandered-again")
+	if out := f.mustRun("resume", "base"); !strings.Contains(out, "not main") {
+		t.Errorf("resume base = %q, want the same drift warning", out)
+	}
+}
+
+// TestBaseWindowCommand pins the one place the two ways into that window
+// disagree, and why each is right.
+//
+// `base` opens a general-purpose window and runs command. Picking the base row
+// out of the resume menu is resuming, and runs resume_command — after a reboot
+// the triage you were doing in the base window is exactly what you want back,
+// not a blank one. It shows once and never again: every later call finds the
+// window by its directory and switches to it, whatever started it.
+//
+// The names here are curt because they end up in a socket path: tmux is given a
+// server of this test's own, named after it, and a long one overflows the length
+// a unix socket may have.
+func TestBaseWindowCommand(t *testing.T) {
+	requireTmux(t)
+
+	t.Run("base", func(t *testing.T) {
+		marker := filepath.Join(t.TempDir(), "fresh")
+		f := newFixture(t, "command = 'touch "+marker+"'\nresume_command = 'true'\n")
+		f.mustRun("base")
+		waitForFile(t, marker, "command")
+	})
+
+	t.Run("resume", func(t *testing.T) {
+		marker := filepath.Join(t.TempDir(), "resumed")
+		f := newFixture(t, "command = 'true'\nresume_command = 'touch "+marker+"'\n")
+		f.mustRun("resume", "base")
+		waitForFile(t, marker, "resume_command")
+	})
 }
 
 func TestConfigSelection(t *testing.T) {
@@ -938,6 +996,7 @@ func TestLsJSON(t *testing.T) {
 
 	var rows []struct {
 		Slug     string `json:"slug"`
+		Base     bool   `json:"base"`
 		Dir      string `json:"dir"`
 		Branch   string `json:"branch"`
 		Status   string `json:"status"`
@@ -949,10 +1008,20 @@ func TestLsJSON(t *testing.T) {
 	if err := json.Unmarshal([]byte(r.stdout), &rows); err != nil {
 		t.Fatalf("output is not valid JSON: %v\n%s", err, r.stdout)
 	}
-	if len(rows) != 1 {
-		t.Fatalf("got %d rows, want 1: %s", len(rows), r.stdout)
+	// The base checkout heads the listing as it heads the menu, and says so, so
+	// that a consumer working out where to put a ticket can tell the one row it
+	// can never remove from the ones it can.
+	if len(rows) != 2 {
+		t.Fatalf("got %d rows, want the base checkout and alpha: %s", len(rows), r.stdout)
 	}
-	got := rows[0]
+	base := rows[0]
+	if !base.Base || base.Slug != "" || base.Status != "base" || base.Dir != f.MainDir {
+		t.Errorf("base row = %+v, want the main checkout flagged and unslugged", base)
+	}
+	got := rows[1]
+	if got.Base {
+		t.Errorf("alpha is flagged as the base checkout: %+v", got)
+	}
 	if got.Slug != "alpha" || got.Branch != "x/alpha" || got.Status != "unpushed" || got.Unpushed != 1 {
 		t.Errorf("row = %+v", got)
 	}

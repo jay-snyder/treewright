@@ -397,7 +397,15 @@ func cmdLs(env *Env, args []string) error {
 	session := sessionFor(cfg)
 	windows := tmux.Windows(session)
 
-	infos := make([]git.Info, 0, len(managed))
+	// Nothing at all when there are no worktrees, in either mode. The base
+	// checkout heads the listing as it heads the menu, but a table holding only
+	// the row that is always there says nothing a repository with no worktrees
+	// needs to hear, and a JSON consumer counting what it can work on should not
+	// have to subtract the one row it can never remove.
+	infos := make([]git.Info, 0, len(managed)+1)
+	if len(managed) > 0 {
+		infos = append(infos, repo.BaseCheckout(cfg.BaseBranch))
+	}
 	for _, wt := range managed {
 		infos = append(infos, repo.Inspect(wt, cfg.BaseBranch))
 	}
@@ -519,13 +527,19 @@ func cmdResume(env *Env, args []string) error {
 	if err != nil {
 		return err
 	}
-	if len(managed) == 0 {
+	if len(managed) == 0 && slug == "" {
 		// A message rather than an error, because a repository with no worktrees
 		// yet is an ordinary state and not a fault — `ls` says the same thing the
 		// same way. It is still reported through the non-zero exit that keeps a
 		// popup open, though: with nothing to choose from there is nothing else
 		// on screen, and a popup that closed on success would take the only
 		// sentence explaining itself with it.
+		//
+		// The base checkout is not offered as the lone row here, though it is a
+		// row everywhere else. With no worktrees it is the session's only window,
+		// so a menu whose one entry is "the window you are already in" answers a
+		// question nobody asked, and it would cost the sentence that says how to
+		// start work — the only thing worth putting on that screen.
 		env.progressf("%s", noWorktreesMessage(repo.Name()))
 		return ErrSilent
 	}
@@ -541,6 +555,12 @@ func cmdResume(env *Env, args []string) error {
 		return err
 	}
 
+	// The base checkout opens the way `base` opens it, under the base window's
+	// name — with resume_command, this being resume.
+	if target.Base {
+		return openBaseWindow(env, cfg, cfg.ResumeCommand)
+	}
+
 	// openWindow does the rest: a window already open on that worktree is the
 	// session being asked for, so it is switched to rather than duplicated.
 	return openWindow(env, cfg, tmux.Spec{
@@ -552,23 +572,68 @@ func cmdResume(env *Env, args []string) error {
 	})
 }
 
-// chooseWorktree picks the worktree a command should act on: the one named, the
-// only one there is, or one the user selects from a menu.
+// choice is what `resume` and `cd` act on: one row of the menu.
+//
+// The base checkout is a row like any other to the person reading the list, and
+// unlike any other to the code: it has no slug, `rm` and `prune` cannot name it,
+// and it opens under its own window name. So it is flagged rather than dressed
+// up as a worktree — a synthetic slug would be a name that means nothing to
+// `cfg.DirFor`, and the first command to forget the difference would be one
+// that deletes something.
+type choice struct {
+	git.Worktree
+	Base bool
+}
+
+// baseChoice is the main checkout as a selectable row.
+func baseChoice(cfg *config.Config) choice {
+	branch, _ := git.CurrentBranch(cfg.MainDir)
+	return choice{Worktree: git.Worktree{Dir: cfg.MainDir, Branch: branch}, Base: true}
+}
+
+// baseNames are what selects the base checkout when a name is typed rather than
+// picked. Both spellings, because both are what comes to mind: "base" is the
+// command that opens it and stays right whatever the checkout is parked on,
+// while the branch is what the menu displays in the SLUG column, and a name you
+// can read off the list and not type back is a small betrayal.
+//
+// Exact matches only. Slug resolution accepts a prefix, but stretching that here
+// would let a "b" that used to mean the "bugfix" worktree quietly start meaning
+// the base checkout instead. A worktree whose slug is literally "base" loses the
+// short spelling to the checkout and keeps its own full one, which is as it
+// should be: the checkout is the thing you cannot otherwise name.
+func baseNames(cfg *config.Config, base choice) []string {
+	names := []string{"base", cfg.BaseBranch}
+	if base.Branch != "" {
+		names = append(names, base.Branch)
+	}
+	return names
+}
+
+// chooseWorktree picks what a command should act on: the row named, or one the
+// user selects from a menu.
 //
 // The menu is the `ls` table with a number beside each row, so the thing being
 // chosen from is the listing the user already reads, showing the status and
 // divergence that make the choice — not a bare list of names.
-func chooseWorktree(env *Env, cfg *config.Config, repo git.Repo, managed []git.Worktree, slug string) (git.Worktree, error) {
-	switch {
-	case slug != "":
-		return resolveSlug(env, repo, managed, slug)
-	case len(managed) == 1:
-		// Nothing to choose between: prompting would be a keystroke that has only
-		// one possible answer.
-		return managed[0], nil
+func chooseWorktree(env *Env, cfg *config.Config, repo git.Repo, managed []git.Worktree, slug string) (choice, error) {
+	base := baseChoice(cfg)
+
+	if slug != "" {
+		for _, name := range baseNames(cfg, base) {
+			if slug == name {
+				return base, nil
+			}
+		}
+		wt, err := resolveSlug(env, repo, managed, slug)
+		return choice{Worktree: wt}, err
 	}
 
-	infos := make([]git.Info, 0, len(managed))
+	// The base checkout heads the list, pinned above the slugs rather than sorted
+	// among them, so the row you return to most is the one your fingers already
+	// know — and stays row 1 as worktrees come and go around it.
+	infos := make([]git.Info, 0, len(managed)+1)
+	infos = append(infos, repo.BaseCheckout(cfg.BaseBranch))
 	for _, wt := range managed {
 		infos = append(infos, repo.Inspect(wt, cfg.BaseBranch))
 	}
@@ -579,9 +644,12 @@ func chooseWorktree(env *Env, cfg *config.Config, repo git.Repo, managed []git.W
 	idx, err := ui.Pick(env.Stderr, header, rows)
 	if err != nil {
 		env.progressf("cancelled")
-		return git.Worktree{}, errCancelled
+		return choice{}, errCancelled
 	}
-	return managed[idx], nil
+	if idx == 0 {
+		return base, nil
+	}
+	return choice{Worktree: managed[idx-1]}, nil
 }
 
 // errCancelled reports that the menu was dismissed rather than answered.
@@ -625,7 +693,10 @@ func cmdCd(env *Env, args []string) error {
 	if err != nil {
 		return err
 	}
-	if len(managed) == 0 {
+	// As in resume, and for the same reason: with no worktrees the base checkout
+	// is not worth a menu of its own. Named outright it still works, which is
+	// what keeps "cd base" answerable in a repository nobody has forked yet.
+	if len(managed) == 0 && slug == "" {
 		return fmt.Errorf("%s", noWorktreesMessage(repo.Name()))
 	}
 
@@ -659,7 +730,23 @@ func cmdBase(env *Env, args []string) error {
 	if err != nil {
 		return err
 	}
+	return openBaseWindow(env, cfg, cfg.Command)
+}
 
+// openBaseWindow selects the base window on the main checkout, opening it if it
+// is not there. It is what `base` does, and what picking the base row out of the
+// `resume` menu does, so there is one definition of what that window is.
+//
+// The command is the caller's, because that is the one thing the two ways in
+// disagree about and each is right in its own terms. `base` opens a
+// general-purpose window and runs `command`. `resume` reopens something you were
+// already using and runs `resume_command`, the same "carry on where I left off"
+// every other row in that menu gets — which after a reboot is the point, the
+// triage you were doing in the base window being exactly what you want back.
+//
+// The disagreement shows once and then never again: every later call finds the
+// window by its directory and switches to it, whatever it was started with.
+func openBaseWindow(env *Env, cfg *config.Config, command string) error {
 	if branch, err := git.CurrentBranch(cfg.MainDir); err == nil && branch != cfg.BaseBranch {
 		where := branch
 		if where == "" {
@@ -680,13 +767,13 @@ func cmdBase(env *Env, args []string) error {
 		return openWindow(env, cfg, tmux.Spec{
 			Dir:     cfg.MainDir,
 			Name:    strings.ToUpper(cfg.BaseBranch),
-			Command: cfg.Command,
+			Command: command,
 		})
 	}
 
 	// Without tmux there is no window to open, so run the command here and hand
 	// it the terminal.
-	cmd := exec.Command("sh", "-c", cfg.Command)
+	cmd := exec.Command("sh", "-c", command)
 	cmd.Dir = cfg.MainDir
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	return cmd.Run()

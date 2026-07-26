@@ -361,6 +361,14 @@ const (
 	StatusMerged   Status = "merged"   // landed in origin/<base>; safe to remove
 	StatusUnpushed Status = "unpushed" // commits exist only here
 	StatusActive   Status = "active"   // pushed, not yet merged (open pull request)
+
+	// StatusBase is the main checkout, which is not a worktree and is never
+	// thrown away. It gets a status of its own because the others answer "how
+	// safe is this to remove", and every one of their answers is wrong here: a
+	// base checkout sitting level with origin has no commits outside it, which
+	// reads as merged — the green that means "safe to delete" — about the one
+	// directory in the repository that must never go.
+	StatusBase Status = "base"
 )
 
 // Info is everything the ls table and the removal guards need about one
@@ -395,6 +403,30 @@ func (r Repo) Inspect(wt Worktree, base string) Info {
 	default:
 		info.Status = StatusActive
 	}
+	return info
+}
+
+// BaseCheckout describes the main checkout as a row alongside the worktrees.
+//
+// Two of the three columns mean the same thing here as anywhere: uncommitted
+// files are work left lying in the window you investigate from, and the
+// divergence is measured against origin/<base> exactly as it is for a worktree —
+// which for the checkout parked on that branch is the "you need to pull"
+// indicator, and the one number that says whether what you are reading is stale.
+//
+// Only the status is different, and StatusBase says why.
+//
+// The branch is read fresh rather than remembered, because the base checkout is
+// the one place the user switches branches by hand, from inside the window.
+func (r Repo) BaseCheckout(base string) Info {
+	branch, err := CurrentBranch(r.Dir)
+	if err != nil {
+		branch = "" // detached, or unreadable: the same "no branch" either way
+	}
+	info := Info{Worktree: Worktree{Dir: r.Dir, Branch: branch}, Status: StatusBase}
+	info.DirtyFiles = DirtyFiles(r.Dir)
+	info.Unpushed = r.Unpushed(branch)
+	info.Ahead, info.Behind, info.Compared = r.AheadBehind(branch, base)
 	return info
 }
 

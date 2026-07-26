@@ -146,8 +146,14 @@ unless [window-name] overrides it.`,
 worktree, or switches to the window already open there — following it into
 another session if that is where it turns out to be.
 
-With no slug, a lone worktree is chosen automatically and otherwise a menu is
-shown. Naming a slug skips the menu, and an unambiguous prefix of one is enough.`,
+With no slug a menu is shown. Naming a slug skips it, and an unambiguous prefix
+of one is enough.
+
+The base checkout heads that menu, so the window you return to between worktrees
+is reachable from the same key as the rest — and after a reboot, which a checkout
+on disk survives and a tmux session does not, it is reopened along with them. Name
+it "base" or name the branch it is parked on. It runs resume_command like every
+other row; "treemux base" is the way in that opens it fresh.`,
 			run: cmdResume,
 		},
 		{
@@ -155,7 +161,8 @@ shown. Naming a slug skips the menu, and an unambiguous prefix of one is enough.
 			args:    "[slug]",
 			summary: "move your shell into a worktree",
 			long: `Changes the calling shell's directory to a worktree, choosing from a
-menu when no slug is given. An unambiguous prefix of a slug is enough.
+menu when no slug is given. An unambiguous prefix of a slug is enough, and "base"
+moves you to the main checkout.
 
 The path is also printed, so this works without the shell integration as
 cd "$(treemux cd <slug>)" — but with the integration loaded, treemux moves your
@@ -174,7 +181,11 @@ the checkout has drifted off the base branch.
 It is the same window every time: one already sitting in the main checkout is
 selected rather than a second one being opened beside it. Being the repository's
 session's first window, it is also what keeps that session alive as worktrees come
-and go.`,
+and go.
+
+"treemux resume" reaches the same window, since the base checkout is a row of its
+menu. The difference is only ever visible on the first open of the day: this runs
+command, for a general-purpose window, where resume runs resume_command.`,
 			run: cmdBase,
 		},
 		{
@@ -225,6 +236,12 @@ origin/<base_branch>, and the tmux window open in it, by name. A window that is
 not in this repository's session is shown as session:window, since that is why
 resuming it would move you somewhere unexpected. The worktree you are standing in
 is marked with an asterisk.
+
+The base checkout heads the listing, as it heads the resume menu, under the branch
+it is parked on. Its status is "base" rather than one of the removable ones, and
+its divergence is how far your main checkout has drifted from origin — whether
+what you are reading there is stale. Nothing is printed at all until there is at
+least one worktree.
 
 Changes no working tree, branch, or ref, though detecting a squash merge writes a
 dangling object to the object database. It also does not fetch, so a branch that
@@ -373,7 +390,7 @@ worth reading first.`,
 		},
 		{
 			name:    "__complete",
-			args:    "<slugs|repos|shells|flags [command]>",
+			args:    "<slugs|targets|repos|shells|flags [command]>",
 			summary: "list completion candidates",
 			hidden:  true,
 			run:     cmdComplete,

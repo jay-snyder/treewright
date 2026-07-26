@@ -41,6 +41,10 @@ func statusColor(s git.Status) ui.Color {
 		return ui.Red
 	case git.StatusDirty:
 		return ui.Yellow
+	case git.StatusBase:
+		// Deliberately outside that scale. The base checkout is not a candidate
+		// for removal, so it gets the one color that is not urging anything.
+		return ui.Dim
 	default:
 		return ui.Cyan
 	}
@@ -53,14 +57,40 @@ func statusColor(s git.Status) ui.Color {
 // refuse over: "dirty (3)" says how much a --force would discard, where "dirty"
 // alone leaves the reader to go and look.
 func statusText(info git.Info) string {
-	switch info.Status {
-	case git.StatusDirty:
+	switch {
+	case info.Status == git.StatusDirty:
 		return fmt.Sprintf("dirty (%d)", info.DirtyFiles)
-	case git.StatusUnpushed:
+	case info.Status == git.StatusUnpushed:
 		return fmt.Sprintf("unpushed (%d)", info.Unpushed)
+	case info.Status == git.StatusBase && info.DirtyFiles > 0:
+		// The base checkout keeps its own status — it is never removable, so
+		// "dirty" would be answering a question nobody asks of it — but the count
+		// still carries, because half-finished investigation left lying in the
+		// window you launch everything from is worth seeing before you fork
+		// another branch off it.
+		return fmt.Sprintf("base (%d)", info.DirtyFiles)
 	default:
 		return string(info.Status)
 	}
+}
+
+// slugCell names a row in the SLUG column.
+//
+// A worktree is named by its slug, which is also what you type at `resume` and
+// `cd`. The base checkout has no slug — it is a checkout rather than something
+// treemux created — so the column carries the branch it is parked on instead.
+// That is the more useful of the two things it could say: the row is always the
+// first one, so "base" would only repeat the position, while the branch is what
+// tells you whether your general-purpose window is sitting on staging, on main,
+// or somewhere you left it three days ago.
+func slugCell(info git.Info) string {
+	if info.Status != git.StatusBase {
+		return info.Slug
+	}
+	if info.Branch == "" {
+		return "detached"
+	}
+	return info.Branch
 }
 
 // windowCell says where a worktree's window is, in the width of a table column.
@@ -82,6 +112,13 @@ func windowCell(w tmux.Window, session string) string {
 
 // worktreeTable builds the table shown by `ls` and used as the `resume` and `cd`
 // menus, so a menu is a picker over the same rows the user already knows.
+//
+// Callers put the base checkout at the head of infos. It belongs in the list on
+// both of the list's own terms: it is somewhere you return to between worktrees,
+// and — since a tmux session does not survive a reboot while a checkout on disk
+// does — it is something you reopen. Leaving it out made the one window that is
+// always there, and that keeps the session alive, the one window the menu could
+// not reach.
 //
 // The worktree the caller is standing in gets a leading asterisk, and the column
 // holding it appears only when one of the rows is in fact the current directory:
@@ -111,7 +148,7 @@ func worktreeTable(infos []git.Info, windows map[string]tmux.Window, session str
 			divergence = fmt.Sprintf("+%d/-%d", info.Ahead, info.Behind)
 		}
 		cells := []ui.Cell{
-			ui.Text(info.Slug),
+			ui.Text(slugCell(info)),
 			ui.Colored(statusText(info), statusColor(info.Status)),
 			ui.Text(divergence),
 			ui.Text(windowCell(windows[info.Dir], session)),
@@ -141,9 +178,16 @@ func worktreeTable(infos []git.Info, windows map[string]tmux.Window, session str
 // invisible; one a few columns smaller wraps every row of the table, and one too
 // short scrolls the head of the list away before it can be read.
 //
+// The rows are the table's, but filled in only as far as the width needs: the
+// status and divergence columns are measured from their widest possible content
+// rather than from these, so nothing here has to have been inspected. What the
+// caller must get right is how many rows there are and what goes in the two
+// columns the data can stretch, which is why the cells are measured through the
+// very functions that render them.
+//
 // The layout mirrored here is worktreeTable's, and TestPopupSizeCoversTheTable
 // renders a real one to check this still covers it.
-func popupSize(managed []git.Worktree, windows map[string]tmux.Window) (width, height int) {
+func popupSize(rows []git.Info, windows map[string]tmux.Window) (width, height int) {
 	const (
 		// The two columns whose width the data cannot push past: the longest
 		// status is "unpushed (nnn)", and divergence never outgrows its header.
@@ -162,19 +206,19 @@ func popupSize(managed []git.Worktree, windows map[string]tmux.Window) (width, h
 	)
 
 	slugCol, windowCol := len("SLUG"), len("WINDOW")
-	for _, wt := range managed {
-		slugCol = max(slugCol, len(wt.Slug))
-		windowCol = max(windowCol, len(windowCell(windows[wt.Dir], "")))
+	for _, info := range rows {
+		slugCol = max(slugCol, len(slugCell(info)))
+		windowCol = max(windowCol, len(windowCell(windows[info.Dir], "")))
 	}
 	// The "n) " the picker puts in front of every row, and the same indent it
 	// gives the header.
-	indexCol := len(strconv.Itoa(len(managed))) + 2
+	indexCol := len(strconv.Itoa(len(rows))) + 2
 
 	width = indexCol + markerCol + slugCol + gap + statusCol + gap + divergenceCol + gap + windowCol
 	width = max(width, promptCol) + border
 
 	// A header, a row each, a blank line, and the prompt.
-	height = 1 + len(managed) + 1 + 1 + border
+	height = 1 + len(rows) + 1 + 1 + border
 	return width, height
 }
 
@@ -183,7 +227,15 @@ func popupSize(managed []git.Worktree, windows map[string]tmux.Window) (width, h
 // Ahead and Behind are pointers so that an impossible comparison serializes as
 // null rather than as 0, which would claim the branch is level with its base.
 type worktreeJSON struct {
-	Slug       string `json:"slug"`
+	Slug string `json:"slug"`
+
+	// Base marks the main checkout, which is in this listing for the same reason
+	// it is in the table but is not one of the worktrees: it has no slug, and
+	// `rm` and `prune` cannot name it. A consumer deciding what to tear down —
+	// an agent reading this to work out where a ticket should go — needs the
+	// distinction spelled out rather than inferred from an empty slug.
+	Base bool `json:"base"`
+
 	Dir        string `json:"dir"`
 	Branch     string `json:"branch"`
 	Status     string `json:"status"`
@@ -206,6 +258,7 @@ func worktreesJSON(infos []git.Info, windows map[string]tmux.Window) []worktreeJ
 		w := windows[info.Dir]
 		row := worktreeJSON{
 			Slug:          info.Slug,
+			Base:          info.Status == git.StatusBase,
 			Dir:           info.Dir,
 			Branch:        info.Branch,
 			Status:        string(info.Status),
