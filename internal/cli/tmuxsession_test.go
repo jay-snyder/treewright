@@ -2,10 +2,14 @@ package cli
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jay-snyder/treewright/internal/config"
 	"github.com/jay-snyder/treewright/internal/gittest"
@@ -355,6 +359,112 @@ func TestTheWorktreesWindowIsFoundHoweverWindowsAreArranged(t *testing.T) {
 	// Two panes stand in the worktree, and resuming must not make a third.
 	if got := panesOn(t, wt); got != 2 {
 		t.Errorf("%d panes in the worktree, want 2 — a duplicate window was opened", got)
+	}
+}
+
+// TestAFailingCommandKeepsItsWindowOpen is the visibility a vanishing window
+// takes away. tmux closes a window as soon as its command exits, so a `command`
+// that cannot start — a typo, a tool not installed, a config the tool rejects —
+// erases its own explanation at the speed it appeared.
+func TestAFailingCommandKeepsItsWindowOpen(t *testing.T) {
+	requireTmux(t)
+	f := newFixture(t, "command = 'echo no such model >&2; exit 12'\n")
+
+	r := f.exec("new", "boom")
+	if r.err != nil {
+		t.Fatalf("new: %v\n%s", r.err, r.both())
+	}
+
+	// The command has to have run and failed before there is anything to see, and
+	// nothing waits for it, so this is what "the window is still there" means.
+	var pane string
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		pane, _ = tmuxctl(t, "capture-pane", "-p", "-t", windowIDNamed(t, "proj", "BOOM"))
+		if strings.Contains(pane, "press Enter") {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	// What the user came for is the command's own output, which is why the window
+	// is held rather than merely reported as having closed.
+	if !strings.Contains(pane, "no such model") {
+		t.Errorf("pane = %q, want the failing command's own output still on screen", pane)
+	}
+	if !strings.Contains(pane, `"echo no such model >&2; exit 12" exited 12`) {
+		t.Errorf("pane = %q, want the command and its status named", pane)
+	}
+	if !strings.Contains(pane, "press Enter") {
+		t.Errorf("pane = %q, want the way to close it", pane)
+	}
+	// And the window is a real window, found the way every other one is: a user who
+	// fixes the config and resumes gets this window, not a second one beside it.
+	if got := panesOn(t, f.DirFor("boom")); got != 1 {
+		t.Errorf("%d panes in the worktree, want the held window to be the only one", got)
+	}
+}
+
+// TestASuccessfulCommandClosesItsWindowAsBefore is the other half, and the reason
+// the wrapper checks the status at all: holding every window open would turn
+// finishing normally into a keypress.
+func TestASuccessfulCommandClosesItsWindowAsBefore(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		command string
+		want    string
+	}{
+		{"a command that succeeds", "true", ""},
+		// 128 and up is a command killed by a signal, which is nearly always the
+		// user's own Ctrl-C. Reporting a stop they asked for is not news.
+		{"a command the user interrupted", "sh -c 'exit 130'", ""},
+		{"a command that failed", "sh -c 'exit 3'", "press Enter"},
+		// A command that exits rather than merely failing is the case a flat script
+		// gets wrong: the exit ends the wrapper too, and the window closes.
+		{"a command that exits by itself", "exit 3", "press Enter"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// Stdin is /dev/null, so the read that holds a window open returns at
+			// once rather than hanging this test.
+			out, err := exec.Command("sh", "-c", heldOpenOnFailure(tc.command)).CombinedOutput()
+			if tc.want == "" && len(out) > 0 {
+				t.Errorf("output = %q, want nothing said about a command that did not fail", out)
+			}
+			if tc.want != "" && !strings.Contains(string(out), tc.want) {
+				t.Errorf("output = %q, want it to mention %q", out, tc.want)
+			}
+			// The wrapper exits with the command's own status either way, so
+			// nothing downstream can tell it apart from running the command bare.
+			var status int
+			var exit *exec.ExitError
+			if errors.As(err, &exit) {
+				status = exit.ExitCode()
+			}
+			if want := wantStatus(tc.command); status != want {
+				t.Errorf("exit status = %d, want the command's own %d", status, want)
+			}
+		})
+	}
+}
+
+// wantStatus is the status each command in the table above exits with, read off
+// the command itself so the table says one thing once.
+func wantStatus(command string) int {
+	if _, after, found := strings.Cut(command, "exit "); found {
+		n, _ := strconv.Atoi(strings.TrimSuffix(after, "'"))
+		return n
+	}
+	return 0
+}
+
+// TestABlankCommandIsLeftAlone keeps the wrapper out of the one case tmux handles
+// by opening a plain shell: a script around nothing would run the shell, exit 0,
+// and close the window that was meant to stay.
+func TestABlankCommandIsLeftAlone(t *testing.T) {
+	for _, command := range []string{"", "   "} {
+		if got := heldOpenOnFailure(command); got != command {
+			t.Errorf("heldOpenOnFailure(%q) = %q, want it untouched", command, got)
+		}
 	}
 }
 

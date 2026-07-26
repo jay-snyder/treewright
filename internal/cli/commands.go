@@ -174,22 +174,25 @@ func copyFile(src, dst string, mode os.FileMode) error {
 	return out.Close()
 }
 
-// startPostCreate launches the configured setup command without waiting, so the
-// window opens immediately.
+// startPostCreate launches the configured setup without waiting, so the window
+// opens immediately.
 //
 // Its output goes to a log file under .git rather than to the terminal or to
 // /dev/null: inside the worktree it would show up as an untracked file and make
 // the tree read as dirty, and discarded entirely there would be no way to find
 // out why an install failed.
 func startPostCreate(env *Env, cfg *config.Config, dir, slug string) error {
-	if strings.TrimSpace(cfg.PostCreate) == "" {
+	logPath, failedPath := postCreatePaths(cfg, slug)
+	// Cleared before the early return as well as before a run: a slug can be
+	// recreated after its worktree was removed, and a marker left by the last one
+	// would otherwise report a failure this worktree never had.
+	_ = os.Remove(failedPath)
+	if len(cfg.PostCreate) == 0 {
 		return nil
 	}
-	logDir := filepath.Join(cfg.MainDir, ".git", "treewright")
-	if err := os.MkdirAll(logDir, 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
 		return err
 	}
-	logPath := filepath.Join(logDir, "post-create-"+strings.ReplaceAll(slug, "/", "-")+".log")
 	logFile, err := os.Create(logPath)
 	if err != nil {
 		return err
@@ -198,7 +201,7 @@ func startPostCreate(env *Env, cfg *config.Config, dir, slug string) error {
 	// cut off its output after treewright exits.
 	defer logFile.Close()
 
-	cmd := exec.Command("sh", "-c", cfg.PostCreate)
+	cmd := exec.Command("sh", "-c", postCreateScript(cfg.PostCreate, failedPath))
 	cmd.Dir = dir
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
@@ -206,8 +209,81 @@ func startPostCreate(env *Env, cfg *config.Config, dir, slug string) error {
 		return err
 	}
 	// Deliberately not waited on: the process outlives treewright.
-	env.progressf("running post_create in the background — log: %s", logPath)
+	if len(cfg.PostCreate) > 1 {
+		env.progressf("running %d post_create commands in the background — log: %s", len(cfg.PostCreate), logPath)
+	} else {
+		env.progressf("running post_create in the background — log: %s", logPath)
+	}
 	return nil
+}
+
+// postCreatePaths returns where a worktree's setup writes its log, and the marker
+// a failed one leaves behind. Both live beside the repository rather than inside
+// the worktree, where they would read as untracked files and make the tree dirty.
+func postCreatePaths(cfg *config.Config, slug string) (logPath, failedPath string) {
+	stem := filepath.Join(cfg.MainDir, ".git", "treewright", "post-create-"+strings.ReplaceAll(slug, "/", "-"))
+	return stem + ".log", stem + ".failed"
+}
+
+// warnIfSetupFailed reports a post_create that stopped, on the commands a user
+// reaches a worktree through.
+//
+// Nothing waits for post_create — that is the point of running it in the
+// background — so treewright has already exited by the time it fails, and the
+// failure has nowhere to be said. Left at that, the log is the only record, and
+// reading it requires already suspecting there is something to read: the window
+// opened, the agent started, and the first sign of trouble is a build failing for
+// reasons that have nothing to do with the work. So the failing step leaves a
+// marker, and the next command that mentions this worktree says so.
+//
+// It keeps saying so, rather than clearing the marker once reported. A half
+// installed worktree stays half installed, and a warning that appears once, in
+// whichever command happened to run first, is one a user who stepped away never
+// sees. Finishing the setup by hand and removing the file is what ends it.
+func warnIfSetupFailed(env *Env, cfg *config.Config, slug string) {
+	logPath, failedPath := postCreatePaths(cfg, slug)
+	body, err := os.ReadFile(failedPath)
+	if err != nil {
+		return
+	}
+	if failing := strings.TrimSpace(string(body)); failing != "" {
+		env.warnf("post_create in %s stopped at %q — see %s", slug, failing, logPath)
+		return
+	}
+	env.warnf("post_create in %s did not finish — see %s", slug, logPath)
+}
+
+// postCreateScript renders the configured commands as one shell script that runs
+// them in order and stops at the first failure.
+//
+// The sequencing has to happen inside the shell rather than here, because
+// treewright exits as soon as the window is open — there is no treewright left to
+// run the second command. So the whole sequence goes to one `sh -c`.
+//
+// Each command runs in a subshell, which makes it a step in the sense every
+// steps-list a user already knows means it: one that starts in the worktree root
+// whatever the last one did, and whose failure is its own. `set -e` over a flat
+// script was the alternative, and it fails in both directions — it reaches inside
+// a step to stop on a failure the user had already handled with `||`, and a step
+// that calls `exit` itself, or sources something that does, ends the whole run
+// silently. A step wanting to work elsewhere says `cd sub && ...` in its own step.
+//
+// Each step is announced into the log in the `$ command` form a terminal would
+// have shown, and a failing one says so by name before exiting. Without that, a
+// log truncated halfway through a five-step install is indistinguishable from one
+// still being written.
+//
+// A failing step also writes the command that failed to failedPath, which is the
+// only way the failure reaches the user: nothing waits for this script, so by the
+// time it stops there is no treewright left to report it. See warnIfSetupFailed.
+func postCreateScript(commands []string, failedPath string) string {
+	var b strings.Builder
+	for _, c := range commands {
+		fmt.Fprintf(&b, "printf '\\n$ %%s\\n' %s\n", shellQuote(c))
+		fmt.Fprintf(&b, "( %s\n) || { tw_status=$?; printf '\\npost_create stopped: %%s failed\\n' %s; printf '%%s\\n' %s > %s; exit $tw_status; }\n",
+			c, shellQuote(c), shellQuote(c), shellQuote(failedPath))
+	}
+	return b.String()
 }
 
 // ---- rm --------------------------------------------------------------------
@@ -410,6 +486,15 @@ func cmdLs(env *Env, args []string) error {
 		infos = append(infos, repo.Inspect(wt, cfg.BaseBranch))
 	}
 
+	// After the output rather than before it, in either mode: a warning above a
+	// table is scrolled off by the table, and stderr is not part of the answer, so
+	// `ls --json | jq` is unaffected either way.
+	defer func() {
+		for _, wt := range managed {
+			warnIfSetupFailed(env, cfg, wt.Slug)
+		}
+	}()
+
 	if asJSON {
 		// An empty array, not a message: a caller parsing this needs valid JSON
 		// whether or not there is anything to report.
@@ -560,6 +645,9 @@ func cmdResume(env *Env, args []string) error {
 	if target.Base {
 		return openBaseWindow(env, cfg, cfg.ResumeCommand)
 	}
+
+	// Said before the window opens, since afterwards the agent has the screen.
+	warnIfSetupFailed(env, cfg, target.Slug)
 
 	// openWindow does the rest: a window already open on that worktree is the
 	// session being asked for, so it is switched to rather than duplicated.
@@ -712,6 +800,11 @@ func cmdCd(env *Env, args []string) error {
 	}
 
 	fmt.Fprintln(env.Stdout, target.Dir)
+	// A shell about to run the project's own commands in there is exactly who needs
+	// to know the install stopped half way.
+	if !target.Base {
+		warnIfSetupFailed(env, cfg, target.Slug)
+	}
 	emitEval(env, "cd "+shellQuote(target.Dir))
 	if env.EvalFile == "" {
 		env.progressf("no shell integration loaded — run: cd %s", target.Dir)

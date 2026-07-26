@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jay-snyder/treewright/internal/config"
 	"github.com/jay-snyder/treewright/internal/gittest"
 	"github.com/jay-snyder/treewright/internal/tmux"
 )
@@ -88,6 +89,22 @@ func waitForFile(t *testing.T, path, what string) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Errorf("%s never produced %s", what, path)
+}
+
+// waitForContent polls for a file to contain want. A sequence of commands is
+// finished only once its last one has left its mark, and the file exists from the
+// first, so waitForFile cannot answer that.
+func waitForContent(t *testing.T, path, want, what string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if body, err := os.ReadFile(path); err == nil && strings.Contains(string(body), want) {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	body, _ := os.ReadFile(path)
+	t.Errorf("%s never wrote %q to %s — it holds %q", what, want, path, body)
 }
 
 // privateTmuxServer points treewright at a tmux server of this test's own, in a
@@ -547,6 +564,102 @@ func TestNewRunsPostCreate(t *testing.T) {
 	// The hook is deliberately not waited on, so poll for its effect rather than
 	// assuming it has already finished.
 	waitForFile(t, filepath.Join(f.DirFor("hooked"), "post-create-marker"), "post_create")
+}
+
+// TestNewRunsPostCreateCommandsInOrder covers the list spelling of the setting.
+// Order is the whole point of it — a generate step reads what an install step
+// wrote — so the commands here would produce different content if they were run
+// concurrently or in the order the shell happened to reach them.
+func TestNewRunsPostCreateCommandsInOrder(t *testing.T) {
+	f := newFixture(t, "post_create = ['echo one >> steps', 'echo two >> steps', 'echo three >> steps']\n")
+
+	out := f.mustRun("new", "hooked")
+	if !strings.Contains(out, "3 post_create commands") {
+		t.Errorf("output = %q, want the number of commands reported", out)
+	}
+
+	steps := filepath.Join(f.DirFor("hooked"), "steps")
+	waitForContent(t, steps, "three", "post_create")
+	body, err := os.ReadFile(steps)
+	if err != nil {
+		t.Fatalf("read the steps file: %v", err)
+	}
+	if got := string(body); got != "one\ntwo\nthree\n" {
+		t.Errorf("steps = %q, want the commands run in the configured order", got)
+	}
+}
+
+// TestPostCreateStopsAtTheFirstFailure keeps a broken install from being followed
+// by every step that assumed it worked, which turns one failure into a log full of
+// unrelated ones and buries the cause.
+// The middle command exits rather than merely failing, which is the case a flat
+// script gets wrong: an `exit` there ends the run with no failure reported at all.
+func TestPostCreateStopsAtTheFirstFailure(t *testing.T) {
+	f := newFixture(t, "post_create = ['echo first > ran', 'exit 3', 'echo third > never']\n")
+
+	f.mustRun("new", "broken")
+	log := filepath.Join(f.MainDir, ".git", "treewright", "post-create-broken.log")
+	waitForContent(t, log, "post_create stopped", "post_create")
+
+	body, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatalf("read the log: %v", err)
+	}
+	// The log has to name the command that failed: the reader is looking at a
+	// truncated sequence and cannot otherwise tell a stop from a run still going.
+	if !strings.Contains(string(body), "post_create stopped: exit 3 failed") {
+		t.Errorf("log = %q, want the failing command named", body)
+	}
+	// Each step announces itself, so the log reads as the terminal session it stands in for.
+	if !strings.Contains(string(body), "$ echo first > ran") {
+		t.Errorf("log = %q, want each command echoed as it runs", body)
+	}
+	if _, err := os.Stat(filepath.Join(f.DirFor("broken"), "never")); err == nil {
+		t.Error("a command after the failing one ran anyway")
+	}
+	if _, err := os.Stat(filepath.Join(f.DirFor("broken"), "ran")); err != nil {
+		t.Error("the command before the failing one did not run")
+	}
+}
+
+// TestAFailedPostCreateIsReportedLater is what the marker file is for. Nothing
+// waits for post_create, so treewright has exited by the time it fails and has
+// nowhere to say so; without this, a half-installed worktree announces itself as a
+// build breaking for reasons that look nothing like a missing install.
+func TestAFailedPostCreateIsReportedLater(t *testing.T) {
+	f := newFixture(t, "post_create = ['echo nope >&2', 'exit 1']\n")
+
+	f.mustRun("new", "broken")
+	_, failed := postCreatePaths(&config.Config{MainDir: f.MainDir}, "broken")
+	waitForFile(t, failed, "post_create")
+
+	// Every command that reaches a worktree says it, because which one a user runs
+	// next is not knowable — and none of them may put it on stdout.
+	for _, args := range [][]string{{"ls"}, {"ls", "--json"}, {"cd", "broken"}, {"resume", "broken"}} {
+		// resume opens a window and so fails where tmux is missing; the warning
+		// comes first either way, which is the whole assertion here.
+		r := f.exec(args...)
+		if !strings.Contains(r.stderr, `post_create in broken stopped at "exit 1"`) {
+			t.Errorf("%v stderr = %q, want the failed setup reported", args, r.stderr)
+		}
+		if strings.Contains(r.stdout, "post_create") {
+			t.Errorf("%v put the warning on stdout: %q", args, r.stdout)
+		}
+	}
+	// The listing is still machine-readable — the warning is on the other stream.
+	var rows []map[string]any
+	if err := json.Unmarshal([]byte(f.exec("ls", "--json").stdout), &rows); err != nil {
+		t.Errorf("ls --json: %v", err)
+	}
+
+	// A slug is reusable once its worktree is gone, and the next worktree under it
+	// has not failed at anything.
+	f.mustRun("rm", "broken", "--force", "--yes")
+	f.writeConfig("main_dir = '" + f.MainDir + "'\n")
+	f.mustRun("new", "broken")
+	if got := f.exec("ls").stderr; strings.Contains(got, "post_create") {
+		t.Errorf("stderr = %q, want no failure carried over from the removed worktree", got)
+	}
 }
 
 // ---- rm --------------------------------------------------------------------

@@ -51,6 +51,12 @@ func openWindow(env *Env, cfg *config.Config, spec tmux.Spec) error {
 	spec.Session = sessionFor(cfg)
 	spec.Repo = cfg.Name
 
+	// Kept as the user wrote it for everything below that talks about it, while
+	// tmux gets the wrapped form: a message naming a command has to name the
+	// command, not treewright's scaffolding around it.
+	command := spec.Command
+	spec.Command = heldOpenOnFailure(command)
+
 	// A window already sitting in that directory is the session being asked for,
 	// so switch to it rather than opening a duplicate beside it.
 	if w, ok := tmux.Windows(spec.Session)[spec.Dir]; ok {
@@ -61,7 +67,7 @@ func openWindow(env *Env, cfg *config.Config, spec tmux.Spec) error {
 			env.warnf("window %s is in session %s rather than %s — switching to it there",
 				w.Name, w.Session, spec.Session)
 		}
-		return focusWindow(env, cfg, w, spec.Command)
+		return focusWindow(env, cfg, w, command)
 	}
 
 	var (
@@ -79,7 +85,46 @@ func openWindow(env *Env, cfg *config.Config, spec tmux.Spec) error {
 	if err != nil {
 		return err
 	}
-	return focusWindow(env, cfg, w, spec.Command)
+	return focusWindow(env, cfg, w, command)
+}
+
+// heldOpenOnFailure wraps a window's command so that one which fails leaves its
+// output on screen instead of taking the window down with it.
+//
+// tmux closes a window the moment its command exits, which means the whole of what
+// went wrong — the `command not found`, the config error, the stack trace — is
+// erased at exactly the speed it appeared. treewright can say afterwards that the
+// window "closed as soon as it opened", and does, but that is a guess arriving in
+// another terminal, without the one thing the user needs, which is the message.
+//
+// So a failing command's window stays up until the user has read it and pressed
+// Enter. A successful one closes as before: the shell exits with the same status,
+// so nothing about finishing normally changes.
+//
+// Anything above 128 is let through untouched. That range is a command killed by a
+// signal — usually the user's own Ctrl-C — and holding a window open to report a
+// stop the user asked for would turn every deliberate quit into a keypress.
+//
+// The wrapper is a shell script because tmux already runs the command through a
+// shell, so this adds no layer that was not there: `command` is still one shell
+// line, run as written, and still the thing the pane's foreground process is.
+//
+// It runs inside a subshell for the same reason post_create's steps do. A command
+// that calls `exit` itself, or sources something that does — a wrapper script, a
+// shell function, an activate — would otherwise end the whole script at that line
+// and close the window with its output erased, which is the case this exists for.
+func heldOpenOnFailure(command string) string {
+	if strings.TrimSpace(command) == "" {
+		return command
+	}
+	return "( " + command + "\n)\n" +
+		"tw_status=$?\n" +
+		`if [ "$tw_status" -eq 0 ] || [ "$tw_status" -gt 128 ]; then exit "$tw_status"; fi` + "\n" +
+		"printf '\\n\"%s\" exited %s — this window is kept so the output above stays readable\\n'" +
+		" " + shellQuote(command) + ` "$tw_status"` + "\n" +
+		"printf 'press Enter to close it\\n'\n" +
+		"read -r tw_done\n" +
+		`exit "$tw_status"` + "\n"
 }
 
 // focusWindow brings a window to the foreground, or says how to reach it when

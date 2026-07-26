@@ -83,9 +83,10 @@ type Config struct {
 	// default independently: setting Command alone does not change this.
 	ResumeCommand string `toml:"resume_command"`
 
-	// PostCreate is an optional shell command run in a new worktree after it is
-	// created, for dependency installation. It runs in the background.
-	PostCreate string `toml:"post_create"`
+	// PostCreate is the optional setup to run in a new worktree after it is
+	// created, for dependency installation. It runs in the background, and may be
+	// written as one command or as a list of them to run in order.
+	PostCreate Commands `toml:"post_create"`
 
 	// TicketPattern is a regular expression whose first submatch names the tmux
 	// window when it matches a slug. Defaults to DefaultTicketPattern.
@@ -96,6 +97,59 @@ type Config struct {
 	// default cannot serve: a session name already taken by something else, and
 	// two configs that deliberately want to share one session.
 	TmuxSession string `toml:"tmux_session"`
+}
+
+// Commands is a setting written either as one shell command or as a list of them
+// to run in order:
+//
+//	post_create = "npm install"
+//	post_create = ["npm install", "npm run codegen", "npm run build"]
+//
+// Two shapes under one key, rather than the two keys branch_prefix and
+// branch_prefixes are: the plural of this setting has no name that reads like
+// anything, and a second key would let a file set both and leave a reader to
+// learn which one won. One key that takes either shape has neither problem —
+// what the file says is what runs, and every config written before the list
+// existed still means what it meant.
+//
+// The list is not merely a nicety over "a && b && c" written out longhand. It is
+// what lets the log name the step it is on, and the step it stopped at.
+type Commands []string
+
+// UnmarshalTOML accepts either spelling. A string becomes the single command it
+// is; a list becomes its elements.
+//
+// An empty string stays empty rather than becoming a command that runs nothing,
+// because `post_create = ""` is how a config that once had a setup step says it
+// no longer does. An empty element inside a list is refused instead: a blank line
+// in a list of commands is a half-finished edit, and skipping it silently would
+// hide the mistake behind a run that looked fine.
+func (c *Commands) UnmarshalTOML(v any) error {
+	switch value := v.(type) {
+	case string:
+		if strings.TrimSpace(value) == "" {
+			*c = nil
+			return nil
+		}
+		*c = Commands{value}
+		return nil
+	case []any:
+		list := make(Commands, 0, len(value))
+		for i, item := range value {
+			s, ok := item.(string)
+			if !ok {
+				return fmt.Errorf("entry %d is %T, not a command", i+1, item)
+			}
+			if strings.TrimSpace(s) == "" {
+				return fmt.Errorf("entry %d is empty — remove it, or write the command", i+1)
+			}
+			list = append(list, s)
+		}
+		*c = list
+		return nil
+	default:
+		return fmt.Errorf("want one command or a list of them, not %T", v)
+	}
 }
 
 // Dir returns the registry directory holding the per-repo config files.

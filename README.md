@@ -234,13 +234,23 @@ carry_files = ["apps/api/.env", ".env.local"]
 command        = "claude"              # what `new` and `base` launch
 resume_command = "claude --continue"   # what `resume` launches
 post_create    = "npm install"         # runs in the background after `new`
+
+# Or a list of commands, run in order and stopped at the first failure. Each one
+# is its own step, starting in the worktree root. `new` prints where the log is.
+# post_create = ["npm install", "npm run codegen", "npm run build"]
+
 ticket_pattern = '(?i)^(eng-[0-9]+)'   # first capture group names the window
 tmux_session   = "shop"                # session for this repo (default: this file's name)
 ```
 
 `main_dir` is the only one you need. Misspell a key and you get an error instead
 of a setting that silently does nothing. If you're ever unsure what's in effect,
-`tw config` prints the lot with defaults filled in.
+`tw config` prints the lot with defaults filled in, and `tw doctor` checks it.
+
+Nothing that runs for you fails quietly. If `post_create` stops, the next `ls`,
+`cd` or `resume` for that worktree tells you which command it stopped at and where
+the log is. If `command` fails, its window stays open with the error still on
+screen rather than closing before you can read it.
 
 You don't have to say which repo you mean. treewright matches on where you're
 standing, and that works from inside a worktree too.

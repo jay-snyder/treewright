@@ -64,7 +64,7 @@ branch_prefix  = "alice/"
 carry_files    = ["apps/api/.env", "aws/config"]
 command        = "codex"
 resume_command = "codex resume"
-post_create    = "pnpm install"
+post_create    = "npm install"
 ticket_pattern = '(?i)^(proj-[0-9]+)'
 tmux_session   = "work"
 `,
@@ -74,8 +74,11 @@ tmux_session   = "work"
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if c.BaseBranch != "staging" || c.BranchPrefix != "alice/" || c.Command != "codex" || c.PostCreate != "pnpm install" {
+	if c.BaseBranch != "staging" || c.BranchPrefix != "alice/" || c.Command != "codex" {
 		t.Errorf("scalar fields wrong: %+v", c)
+	}
+	if got := strings.Join(c.PostCreate, ","); got != "npm install" {
+		t.Errorf("PostCreate = %q, want the one command the file names", got)
 	}
 	if c.TmuxSession != "work" {
 		t.Errorf("TmuxSession = %q, want %q", c.TmuxSession, "work")
@@ -106,6 +109,38 @@ func TestLoadReadsBranchPrefixes(t *testing.T) {
 	// slug gets, so sorting the list would change which branch `new eng-1` creates.
 	if !c.Explicit("branch_prefixes") || c.Explicit("branch_prefix") {
 		t.Errorf("Explicit disagrees with the file: %+v", c)
+	}
+}
+
+// TestLoadReadsPostCreateEitherWay covers the second shape of the setting, which
+// TestLoadReadsEveryField cannot: a file writes one command or a list, not both.
+func TestLoadReadsPostCreateEitherWay(t *testing.T) {
+	dir := registry(t, map[string]string{
+		"list":  "main_dir = \"/tmp/repo\"\npost_create = [\"npm install\", \"npm run build\"]\n",
+		"blank": "main_dir = \"/tmp/repo\"\npost_create = \"\"\n",
+	})
+
+	c, err := Load(filepath.Join(dir, "list.toml"))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	// Order is the setting: the build runs against what install put there.
+	if got := strings.Join(c.PostCreate, " | "); got != "npm install | npm run build" {
+		t.Errorf("PostCreate = %q, want the file's order preserved", got)
+	}
+
+	// A config that once had a setup step and no longer does keeps loading, and
+	// keeps meaning nothing runs.
+	c, err = Load(filepath.Join(dir, "blank.toml"))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(c.PostCreate) != 0 {
+		t.Errorf("PostCreate = %q, want nothing to run", c.PostCreate)
+	}
+	// Still a key the file set, so `config` reports it as chosen rather than defaulted.
+	if !c.Explicit("post_create") {
+		t.Error("Explicit(post_create) = false, want the key the file set to be seen")
 	}
 }
 
@@ -172,6 +207,25 @@ func TestLoadRejectsBadConfigs(t *testing.T) {
 			name:    "branch prefix that reads as a flag",
 			body:    "main_dir = \"/tmp/repo\"\nbranch_prefixes = [\"-x/\", \"bug/\"]\n",
 			wantErr: "would read as a flag",
+		},
+		{
+			// A list of commands is hand-written, and a stray value in one would
+			// otherwise reach `sh` as whatever %v made of it.
+			name:    "non-command in post_create",
+			body:    "main_dir = \"/tmp/repo\"\npost_create = [\"npm install\", 7]\n",
+			wantErr: "entry 2 is int64, not a command",
+		},
+		{
+			// Unlike post_create = "", which is a setting turned off, a blank entry
+			// among real ones is a half-finished edit.
+			name:    "empty entry in post_create",
+			body:    "main_dir = \"/tmp/repo\"\npost_create = [\"npm install\", \"  \"]\n",
+			wantErr: "entry 2 is empty",
+		},
+		{
+			name:    "post_create that is neither shape",
+			body:    "main_dir = \"/tmp/repo\"\npost_create = true\n",
+			wantErr: "want one command or a list of them",
 		},
 		{
 			name:    "malformed toml",

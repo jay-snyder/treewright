@@ -412,6 +412,43 @@ Its author, committer, and dates are fixed, so its hash depends only on the tree
 and parent being tested: repeated runs reuse the same object rather than leaving
 a new one behind each time, and `git gc` reaps it.
 
+## Reporting what failed
+
+Two of the things `new` sets in motion run where treewright cannot watch them, and
+each needed its own answer.
+
+**A window's command** — `command`, or `resume_command` — is run by tmux, which
+closes the window the moment it exits. A command that cannot start erases its own
+explanation at the speed it appeared: the window flashes, and the `command not
+found` goes with it. treewright can say afterwards that the window "closed as soon
+as it opened", and does, but that is a guess arriving in another terminal without
+the one thing needed, which is the message. So the command is wrapped: one that
+exits nonzero leaves its window up with its output still on screen, above a line
+naming the command, its status, and the Enter that closes it.
+
+A command that succeeds closes its window exactly as before — holding every window
+open would turn finishing normally into a keypress. So would reporting a stop the
+user asked for, which is why anything above 128, the range of a command killed by a
+signal and nearly always a Ctrl-C, is let through untouched. The command runs in a
+subshell so that an `exit` of its own — from a wrapper script, a shell function, an
+`activate` — ends the command rather than the wrapper, which would close the window
+with the output erased and is the whole case this exists for.
+
+**post_create** cannot be reported as it happens at all: nothing waits for it, so
+treewright has already exited by the time it fails. The failing step writes the
+command that stopped it beside the log, and the next `ls`, `cd` or `resume` that
+mentions that worktree warns, naming the command and the log. It keeps warning: a
+half-installed worktree stays half installed, and a warning shown once, in
+whichever command happened to run first, is one a user who stepped away never sees.
+Finishing the install by hand and deleting the marker is what ends it. The marker
+is cleared whenever a worktree is created under that slug, so a recreated worktree
+does not inherit the failure of the one before it.
+
+`doctor` covers what can be seen in advance rather than after: `command` and
+`resume_command` are checked for a first word that is on PATH. post_create is not,
+because its commands are shell lines where a first word is as likely to be a
+builtin as a program, and a false warning about `cd` is worse than no check.
+
 ## Safety
 
 `rm` refuses, absent `--force`, when the worktree has uncommitted changes or
@@ -471,6 +508,34 @@ file remains the record: it is a way to start one, not a layer above it. `config
 prints what is in force with defaults marked as such, because the gap between a
 config file and the behavior it produces — invisible defaults, unexpanded paths,
 and which of several configs applies — is where the confusion lives.
+
+### post_create
+
+Either one command or a list of them, under one key rather than the two spellings
+`branch_prefix` and `branch_prefixes` are. The plural of this setting has no name
+that reads like anything, and a second key would let a file set both and leave a
+reader to work out which won; one key taking either shape has neither problem, and
+every config written before the list existed still means what it meant. An empty
+string stays "nothing to run", that being how a config that once had a setup step
+says it no longer does, but an empty entry *inside* a list is refused as the
+half-finished edit it is.
+
+The commands run in one `sh -c`, because treewright exits as soon as the window is
+open and is not there to run the second one. Each is wrapped in a subshell, which
+makes it a step in the sense every CI steps-list already means: it starts in the
+worktree root whatever the last one did, and its failure is its own. `set -e` over
+a flat script was the alternative and it fails in both directions — it reaches
+inside a step to stop on a failure the user had already handled with `||`, and a
+step that calls `exit`, or sources something that does, ends the whole run with
+nothing reported. A step that wants to work elsewhere writes `cd sub && ...`.
+
+Each step is echoed into the log as `$ command`, and a failing one names itself
+before the run stops, because a log truncated halfway through a five-step install
+is otherwise indistinguishable from one still being written. The log lives in
+`.git/treewright/` rather than in the worktree, where it would show up as an
+untracked file and make the tree read as dirty — and rather than nowhere, which is
+what discarding the output would leave you with when an install fails. How the
+failure reaches the user is below.
 
 ## The shell integration
 

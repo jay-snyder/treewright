@@ -365,3 +365,15 @@ func TestConfigDistinguishesDefaultsFromChoices(t *testing.T) {
 		t.Errorf("file = %q, want the config's path", got)
 	}
 }
+
+// TestConfigReportsPostCreateAsASequence covers the list spelling, where what a
+// reader needs from the row is the order the commands run in — a comma-separated
+// list would read as a set, like carry_files above it.
+func TestConfigReportsPostCreateAsASequence(t *testing.T) {
+	f := newFixture(t, "post_create = ['npm install', 'npm run build']\n")
+
+	out := f.mustRun("config")
+	if !strings.Contains(out, "npm install → npm run build") {
+		t.Errorf("config = %q, want both commands in order", out)
+	}
+}

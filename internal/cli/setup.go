@@ -331,7 +331,10 @@ func renderConfig(name, mainDir, baseBranch string, prefixes []string, carry []s
 	fmt.Fprintf(&b, "# resume_command = %s\n\n", tomlString(config.DefaultResumeCommand))
 
 	fmt.Fprintf(&b, "# Run in the background in each new worktree, for dependency installation.\n")
-	fmt.Fprintf(&b, "# post_create = \"npm install\"\n\n")
+	fmt.Fprintf(&b, "# Either one command, or a list of them run in order, stopping at the first\n")
+	fmt.Fprintf(&b, "# failure.\n")
+	fmt.Fprintf(&b, "# post_create = \"npm install\"\n")
+	fmt.Fprintf(&b, "# post_create = [\"npm install\", \"npm run codegen\"]\n\n")
 
 	fmt.Fprintf(&b, "# Regexp whose first submatch names the tmux window, so a slug like\n")
 	fmt.Fprintf(&b, "# eng-142-white-screen opens a window called ENG-142. Pin it to your own\n")
@@ -440,7 +443,10 @@ func cmdConfig(env *Env, args []string) error {
 	add("carry_files", strings.Join(cfg.CarryFiles, ", "), cfg.Explicit("carry_files"))
 	add("command", cfg.Command, cfg.Explicit("command"))
 	add("resume_command", cfg.ResumeCommand, cfg.Explicit("resume_command"))
-	add("post_create", cfg.PostCreate, cfg.Explicit("post_create"))
+	// Joined with the arrow rather than with ", " as carry_files is, because these
+	// run in sequence and a comma would read as a set: what a reader wants to see
+	// is the order, and that a later step waits on an earlier one.
+	add("post_create", strings.Join(cfg.PostCreate, " → "), cfg.Explicit("post_create"))
 	add("ticket_pattern", cfg.TicketPattern, cfg.Explicit("ticket_pattern"))
 	// The session name in force, not the raw setting: what a reader wants to know
 	// is which session their windows land in, which is the config's name until

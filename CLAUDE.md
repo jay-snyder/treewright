@@ -115,7 +115,10 @@ from a slug.
 **The config is data, never code.** TOML, unknown keys rejected, no shelling out
 to read it. `branch_prefix` and `branch_prefixes` are two spellings of one
 setting: read them through `Prefixes()`, and a file setting both is a load error
-rather than a precedence rule.
+rather than a precedence rule. `post_create` deliberately does *not* follow that
+pattern — it is one key taking either a string or a list, via
+`config.Commands.UnmarshalTOML`, so there is no second key to set as well. Don't
+"make it consistent" by adding one.
 
 **Branch-name rules live in `internal/refname`, not in the code that uses them.**
 `CheckSlug` runs in `new`, `CheckPrefix` runs in `config.Load`, and both are
@@ -124,6 +127,17 @@ rather than git's ref-syntax advice three steps later.
 `TestCheckPrefixAgreesWithGit` runs the real binary against every case — a rule
 added on one side and not the other fails there. Two divergences are deliberate
 and marked `stricter`: a slug may not contain `/`, and neither may start with `-`.
+
+**A window's command is wrapped; every message about it is not.** `openWindow`
+hands tmux `heldOpenOnFailure(command)`, which holds a failing window open so its
+output can be read, and keeps the plain string the caller passed for the prose that
+names it. Both it and `postCreateScript` run the user's command in a subshell so an
+`exit` of its own does not end the wrapper — the case that erases the output.
+
+**A background failure needs somewhere to be reported.** Nothing waits for
+post_create, so a failing step leaves a marker beside its log and
+`warnIfSetupFailed` reports it from `ls`, `cd` and `resume`. A new mechanism that
+runs unattended needs the same, or it fails silently.
 
 **Read-only-looking commands still write to `.git`.** Squash-merge detection
 synthesizes a dangling commit object (`IsMerged`), with fixed author/committer
