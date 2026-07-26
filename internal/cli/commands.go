@@ -12,6 +12,7 @@ import (
 
 	"github.com/jay-snyder/treewright/internal/config"
 	"github.com/jay-snyder/treewright/internal/git"
+	"github.com/jay-snyder/treewright/internal/refname"
 	"github.com/jay-snyder/treewright/internal/tmux"
 	"github.com/jay-snyder/treewright/internal/ui"
 )
@@ -108,48 +109,27 @@ func cmdNew(env *Env, args []string) error {
 // validateSlug rejects slugs that would not round-trip through a directory name
 // or a branch name.
 //
-// A slug containing "/" turns "<repo>-a/b" into a nested path: `new` silently
-// creates the intermediate "<repo>-a" directory and `rm` later removes only the
-// leaf, leaving it behind empty.
-//
-// The rest of the rules are git's, from check-ref-format. They are restated here
-// rather than delegated to git so that the answer is one sentence naming the
-// slug, instead of git's several lines about ref syntax arriving from three steps
-// deeper — by which point treewright has already announced what it was about to do.
+// The rules themselves live in internal/refname, which owns the branch-name syntax
+// for both halves of a name: the restatement that refuses a bad slug here is the
+// one that refuses a bad branch prefix when a config is loaded. What stays here is
+// the part that depends on the configuration — a leading word that could have been
+// a prefix — and turning a refusal into a usage error.
 func validateSlug(cfg *config.Config, slug string) error {
 	if slug == "" {
 		return usageErrorf("new", "the slug is empty once the branch prefix is removed")
 	}
-	if strings.Contains(slug, "/") {
-		// Where several prefixes are configured, a leading "feature/" is meaningful,
-		// so one treewright does not recognize is far likelier to be the scheme
-		// misspelled than a slug with a slash in it. Naming the configured set
-		// answers both readings at once.
-		if leading, _, found := strings.Cut(slug, "/"); found && len(cfg.Prefixes()) > 1 {
-			return usageErrorf("new", "%q does not name a configured branch prefix — this repo uses %s",
-				leading+"/", prefixList(cfg))
-		}
-		return usageErrorf("new", "slug %q cannot contain %q — it would nest the worktree inside a stray directory", slug, "/")
+	// Where several prefixes are configured, a leading "feature/" is meaningful, so
+	// one treewright does not recognize is far likelier to be the scheme misspelled
+	// than a slug with a slash in it. Naming the configured set answers both
+	// readings at once, and it has to come first: refname's account of "/" is about
+	// stray directories, which is the right answer only when a prefix is not what
+	// was meant.
+	if leading, _, found := strings.Cut(slug, "/"); found && len(cfg.Prefixes()) > 1 {
+		return usageErrorf("new", "%q does not name a configured branch prefix — this repo uses %s",
+			leading+"/", prefixList(cfg))
 	}
-	if strings.ContainsAny(slug, " \t\n") {
-		return usageErrorf("new", "slug %q cannot contain whitespace — it becomes both a directory and a branch name", slug)
-	}
-	// git rejects these outright in a ref name; ~^: and ? * [ are its wildcard
-	// and revision syntax, and control characters are simply forbidden.
-	for _, r := range slug {
-		if strings.ContainsRune("~^:?*[\\", r) || r < 0x20 || r == 0x7f {
-			return usageErrorf("new", "slug %q cannot contain %q — git does not allow it in a branch name", slug, r)
-		}
-	}
-	// The positional rules: a leading dash reads as a flag, and the others are
-	// spellings git reserves.
-	switch {
-	case strings.HasPrefix(slug, "-"):
-		return usageErrorf("new", "slug %q cannot start with %q — it would read as a flag", slug, "-")
-	case strings.HasPrefix(slug, "."), strings.HasSuffix(slug, "."):
-		return usageErrorf("new", "slug %q cannot start or end with %q — git does not allow it in a branch name", slug, ".")
-	case strings.Contains(slug, ".."), strings.Contains(slug, "@{"), strings.HasSuffix(slug, ".lock"):
-		return usageErrorf("new", "slug %q is not usable as a branch name — git reserves %q, %q and a %q suffix", slug, "..", "@{", ".lock")
+	if err := refname.CheckSlug(slug); err != nil {
+		return usageErrorf("new", "%v", err)
 	}
 	return nil
 }

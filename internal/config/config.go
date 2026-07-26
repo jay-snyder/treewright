@@ -18,6 +18,8 @@ import (
 	"strings"
 
 	"github.com/BurntSushi/toml"
+
+	"github.com/jay-snyder/treewright/internal/refname"
 )
 
 // Defaults applied when a config leaves a field out.
@@ -181,6 +183,16 @@ func Load(path string) (*Config, error) {
 			seen[p] = true
 		}
 	}
+	// Checked here rather than left to git, for the same reason a slug is: a prefix
+	// is hand-written, often several at a time, and the alternative is git refusing
+	// a branch three steps into a `new` that has already said what it was doing —
+	// about a value the user last looked at when they wrote the file. The error names
+	// the prefix, and every command loads the config, so `doctor` reports it too.
+	for _, p := range c.Prefixes() {
+		if err := refname.CheckPrefix(p); err != nil {
+			return nil, fmt.Errorf("%s: %w", filepath.Base(path), err)
+		}
+	}
 
 	if c.BaseBranch == "" {
 		c.BaseBranch = DefaultBaseBranch
@@ -228,16 +240,31 @@ func Resolve(name, repoMainDir string) (*Config, error) {
 
 	if repoMainDir != "" {
 		want := canonical(repoMainDir)
+		var failed []error
 		for _, n := range names {
 			c, err := Load(filepath.Join(Dir(), n+".toml"))
 			if err != nil {
 				// A broken config elsewhere in the registry must not block work
-				// on a repo whose own config is fine; skip it while matching.
+				// on a repo whose own config is fine, so it is skipped while
+				// matching — but the error is kept, in case nothing matches.
+				failed = append(failed, err)
 				continue
 			}
 			if canonical(c.MainDir) == want {
 				return c, nil
 			}
+		}
+		// Nothing matched and something would not load: that is nearly always the
+		// reason, and nearly always the config for this very repo, edited a moment
+		// ago. Reporting only "no config matches" would send the user looking for a
+		// file that is sitting right there with a typo in it. The unreadable config
+		// leads, the failure to match being the consequence rather than the fault.
+		if len(failed) > 1 {
+			return nil, fmt.Errorf("%w (and no other config matches repo %s; %d more could not be read either)",
+				failed[0], repoMainDir, len(failed)-1)
+		}
+		if len(failed) == 1 {
+			return nil, fmt.Errorf("%w (and no other config matches repo %s)", failed[0], repoMainDir)
 		}
 		return nil, fmt.Errorf("no registered config matches repo %s (have: %s)", repoMainDir, strings.Join(names, ", "))
 	}

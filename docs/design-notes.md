@@ -297,6 +297,23 @@ we picked would be a rule to learn, and the file itself would no longer say whic
 prefix a branch gets. `config` reports the row under whichever spelling the file
 used, so the line it names is the line that is there.
 
+Prefixes are checked when the config is read, not when a branch is created — the
+same restatement of `git check-ref-format` that validates a slug, in
+`internal/refname`, so the two halves of a branch name are held to one set of
+rules. A prefix is hand-written, often several at a time, and the alternative is
+git refusing a branch three steps into a `new` that has already announced what it
+was doing, about a value the user last looked at when they wrote the file. Because
+every command loads the config, `doctor` reports it too, naming the offending entry
+rather than the key.
+
+Both checks are tested against the real `git check-ref-format`, which is the only
+way a restatement stays honest: reading the rules off the documentation had a
+component ending in a dot wrong (`feature./eng-1` is legal, and looks the least
+legal of any of them). Two divergences are deliberate and declared in the tests: a
+slug may not contain `/`, because of the stray parent directory, and neither half
+may start with `-`, which git allows in a ref and every command that takes flags
+does not.
+
 ### Guessing them at setup
 
 `setup` counts the leading namespace of every branch on origin — not of the local
@@ -440,7 +457,10 @@ Which config applies, in order: an explicit name; the config whose `main_dir` is
 the repository you are standing in; the only config, when the registry holds
 exactly one; otherwise an error listing the names. A broken config elsewhere in
 the registry is skipped while matching rather than blocking work on a repository
-whose own config is fine.
+whose own config is fine — but if nothing matched, the skipped error is what gets
+reported, since the unreadable config is nearly always this repo's own, edited a
+moment ago, and "no config matches" alone would send you looking for a file that is
+sitting right there with a typo in it.
 
 `main_dir` is resolved through symlinks, not merely cleaned. git reports fully
 resolved paths for every worktree, so a `main_dir` that reaches the repo through

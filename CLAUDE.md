@@ -49,6 +49,7 @@ ldflags. Validate config changes with `goreleaser check`.
 | `internal/cli/eval.go` | The eval-file protocol and shell quoting. |
 | `internal/cli/init.go` | `shell-init`, `tmux-init`, `__complete`. |
 | `internal/config` | TOML loading, defaults, and which config applies. |
+| `internal/refname` | git's branch-name rules, restated for slugs and prefixes. |
 | `internal/git` | Every git call, including merged/unpushed/dirty logic. |
 | `internal/tmux` | Every tmux call, window identity, popups. |
 | `internal/ui` | Picker, table, color. |
@@ -115,6 +116,14 @@ from a slug.
 to read it. `branch_prefix` and `branch_prefixes` are two spellings of one
 setting: read them through `Prefixes()`, and a file setting both is a load error
 rather than a precedence rule.
+
+**Branch-name rules live in `internal/refname`, not in the code that uses them.**
+`CheckSlug` runs in `new`, `CheckPrefix` runs in `config.Load`, and both are
+restatements of `git check-ref-format` so a bad name is one sentence naming it
+rather than git's ref-syntax advice three steps later.
+`TestCheckPrefixAgreesWithGit` runs the real binary against every case — a rule
+added on one side and not the other fails there. Two divergences are deliberate
+and marked `stricter`: a slug may not contain `/`, and neither may start with `-`.
 
 **Read-only-looking commands still write to `.git`.** Squash-merge detection
 synthesizes a dangling commit object (`IsMerged`), with fixed author/committer

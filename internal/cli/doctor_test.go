@@ -158,6 +158,25 @@ func TestDoctorReportsAnUnreadableConfig(t *testing.T) {
 	}
 }
 
+// TestDoctorReportsAnUnusableBranchPrefix is the payoff of validating prefixes when
+// the config is read rather than when a branch is created: the check a user runs
+// after editing the file is where the mistake surfaces, instead of three steps into
+// the next `new`.
+func TestDoctorReportsAnUnusableBranchPrefix(t *testing.T) {
+	f := newFixture(t, "")
+	f.writeConfig("main_dir = '" + f.MainDir + "'\nbranch_prefixes = ['feature/', 'fea ture/']\n")
+
+	r := f.exec("doctor")
+	if !errors.Is(r.err, ErrSilent) {
+		t.Errorf("err = %v, want ErrSilent", r.err)
+	}
+	// The offending prefix, not just the key: the list has two entries and only one
+	// of them is wrong.
+	if !strings.Contains(r.stdout, `"fea ture/"`) {
+		t.Errorf("stdout = %q, want the bad prefix named", r.stdout)
+	}
+}
+
 func TestDoctorReportsAMissingCommand(t *testing.T) {
 	f := newFixture(t, "command = 'definitely-not-installed-anywhere'\nresume_command = 'true'\n")
 

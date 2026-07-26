@@ -155,6 +155,25 @@ func TestLoadRejectsBadConfigs(t *testing.T) {
 			wantErr: `lists "feature/" twice`,
 		},
 		{
+			// A prefix is hand-written, often several at a time, and git would
+			// otherwise refuse the branch several steps into a `new` that has
+			// already said what it was doing.
+			name:    "unusable branch prefix",
+			body:    "main_dir = \"/tmp/repo\"\nbranch_prefix = \"fea ture/\"\n",
+			wantErr: "cannot contain whitespace",
+		},
+		{
+			// One bad entry in a list has to name itself, not just the key.
+			name:    "unusable prefix in a list",
+			body:    "main_dir = \"/tmp/repo\"\nbranch_prefixes = [\"feature/\", \".hidden/\"]\n",
+			wantErr: `".hidden/"`,
+		},
+		{
+			name:    "branch prefix that reads as a flag",
+			body:    "main_dir = \"/tmp/repo\"\nbranch_prefixes = [\"-x/\", \"bug/\"]\n",
+			wantErr: "would read as a flag",
+		},
+		{
 			name:    "malformed toml",
 			body:    "main_dir = = \"/tmp/repo\"",
 			wantErr: "",
@@ -306,6 +325,26 @@ func TestResolveIgnoresBrokenSiblingConfigs(t *testing.T) {
 	}
 	if c.Name != "good" {
 		t.Errorf("Name = %q, want good", c.Name)
+	}
+}
+
+// TestResolveReportsAnUnreadableConfigWhenNothingMatches covers the other side of
+// skipping a broken config: when the broken one is this repo's own, silence about it
+// leaves "no config matches" pointing at a file that is right there.
+func TestResolveReportsAnUnreadableConfigWhenNothingMatches(t *testing.T) {
+	registry(t, map[string]string{
+		"mine": "main_dir = \"/tmp/mine\"\nbranch_prefix = \"fea ture/\"\n",
+	})
+
+	_, err := Resolve("", "/tmp/mine")
+	if err == nil {
+		t.Fatal("want an error")
+	}
+	// The mistake, named, and the reason the command could not proceed.
+	for _, want := range []string{"mine.toml", `"fea ture/"`, "no other config matches"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error = %q, want it to mention %q", err, want)
+		}
 	}
 }
 
