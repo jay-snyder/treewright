@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jay-snyder/treemux/internal/shellinit"
+	"github.com/jay-snyder/treewright/internal/shellinit"
 )
 
 // ---- cd --------------------------------------------------------------------
@@ -23,7 +23,7 @@ func TestCdMovesTheCallingShell(t *testing.T) {
 }
 
 // TestCdWorksWithoutTheIntegration covers the plain-binary case: the path is the
-// command's answer, so `cd "$(treemux cd x)"` substitutes correctly, and the user
+// command's answer, so `cd "$(treewright cd x)"` substitutes correctly, and the user
 // is told why nothing moved on its own.
 func TestCdWorksWithoutTheIntegration(t *testing.T) {
 	f := newFixture(t, "")
@@ -49,7 +49,7 @@ func TestCdWithNoWorktrees(t *testing.T) {
 	f := newFixture(t, "")
 
 	r := f.exec("cd")
-	if !strings.Contains(r.stderr, "treemux new") {
+	if !strings.Contains(r.stderr, "treewright new") {
 		t.Errorf("stderr = %q, want it to point at the command that makes one", r.stderr)
 	}
 	if r.err == nil {
@@ -84,7 +84,7 @@ func TestALoneWorktreeIsStillAChoice(t *testing.T) {
 //
 // The menu numbers it like any other, but a script has no menu, and the whole
 // point of putting the base checkout in the list is that it stops being the one
-// place treemux cannot take you. So it answers to names: "base", which is what
+// place treewright cannot take you. So it answers to names: "base", which is what
 // the command that opens it is called, and the branch it is parked on, which is
 // what the SLUG column shows and therefore what someone reads off the list and
 // types back.
@@ -104,7 +104,7 @@ func TestTheBaseCheckoutIsReachableByName(t *testing.T) {
 }
 
 // TestTheBaseCheckoutIsNotRemovable is the other half of putting it in the list.
-// rm and prune work off the worktrees treemux created, and the base checkout is
+// rm and prune work off the worktrees treewright created, and the base checkout is
 // not one — so the name that reaches it everywhere else must not reach it here.
 func TestTheBaseCheckoutIsNotRemovable(t *testing.T) {
 	f := newFixture(t, "")
@@ -220,7 +220,7 @@ func TestAnUnknownSlugNamesTheAlternatives(t *testing.T) {
 // ---- new's guards ----------------------------------------------------------
 
 // TestNewOnAnExistingWorktreePointsAtResume replaces a git failure that arrived
-// after treemux had already announced what it was doing.
+// after treewright had already announced what it was doing.
 func TestNewOnAnExistingWorktreePointsAtResume(t *testing.T) {
 	f := newFixture(t, "")
 	f.mustRun("new", "feature")
@@ -230,7 +230,7 @@ func TestNewOnAnExistingWorktreePointsAtResume(t *testing.T) {
 		t.Fatal("want an error")
 	}
 	msg := r.err.Error()
-	if !strings.Contains(msg, "already exists") || !strings.Contains(msg, "treemux resume feature") {
+	if !strings.Contains(msg, "already exists") || !strings.Contains(msg, "treewright resume feature") {
 		t.Errorf("err = %v, want it to name the command that opens the existing worktree", r.err)
 	}
 	// The failure has to precede the narration, or the output reads as though the
@@ -316,7 +316,7 @@ func TestAliasesReachTheirCommand(t *testing.T) {
 			if r.err != nil {
 				t.Fatalf("help %s: %v", alias, r.err)
 			}
-			if !strings.Contains(r.stdout, "usage: treemux "+want) {
+			if !strings.Contains(r.stdout, "usage: treewright "+want) {
 				t.Errorf("help %s = %q, want the usage for %s", alias, r.stdout, want)
 			}
 		})
@@ -353,7 +353,7 @@ func TestShellInitIsSilentOnStdout(t *testing.T) {
 	if r.stderr != "" {
 		t.Errorf("stderr = %q, want silence in a shell startup file", r.stderr)
 	}
-	if !strings.HasPrefix(r.stdout, "# treemux shell integration for zsh") {
+	if !strings.HasPrefix(r.stdout, "# treewright shell integration for zsh") {
 		t.Errorf("stdout = %q, want the zsh script", r.stdout)
 	}
 

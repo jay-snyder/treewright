@@ -5,8 +5,8 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	"github.com/jay-snyder/treemux/internal/git"
-	"github.com/jay-snyder/treemux/internal/tmux"
+	"github.com/jay-snyder/treewright/internal/git"
+	"github.com/jay-snyder/treewright/internal/tmux"
 )
 
 // Opening a popup needs a client to draw on, which a headless test has none of.
@@ -134,7 +134,7 @@ func TestPopupRefusesWhatItCannotRun(t *testing.T) {
 // TestNoWorktreesReadsAsAMessage covers a repository nobody has started a worktree
 // in yet, which is an ordinary state and not a fault.
 //
-// What makes it a message rather than an error is that treemux prints it itself,
+// What makes it a message rather than an error is that treewright prints it itself,
 // unprefixed — an error returned from a command comes back through main wearing
 // "error:".
 //
@@ -154,7 +154,7 @@ func TestNoWorktreesReadsAsAMessage(t *testing.T) {
 		t.Errorf("stderr = %q, want it to say there is nothing to resume", r.stderr)
 	}
 	// And it has to say what to do next, that being why it is printed at all.
-	if !strings.Contains(r.stderr, "treemux new") {
+	if !strings.Contains(r.stderr, "treewright new") {
 		t.Errorf("stderr = %q, want it to name the way out", r.stderr)
 	}
 }

@@ -11,13 +11,13 @@ import (
 
 // pane renders one line of the listing parsePanes reads, so the tests below say
 // what they mean rather than spelling out tab positions. The window carries no
-// worktree stamp: it is one treemux did not open, or one open since before
-// treemux stamped them.
+// worktree stamp: it is one treewright did not open, or one open since before
+// treewright stamped them.
 func pane(id, session, name, dir string) string {
 	return stamped(id, session, name, "", dir)
 }
 
-// stamped renders a pane whose window treemux opened on worktree — which is not
+// stamped renders a pane whose window treewright opened on worktree — which is not
 // necessarily where the pane is standing now, since a shell can walk anywhere.
 func stamped(id, session, name, worktree, dir string) string {
 	return strings.Join([]string{id, session, name, worktree, dir}, "\t")
@@ -102,9 +102,9 @@ func TestParsePanes(t *testing.T) {
 			},
 		},
 		{
-			// The everyday collision: `treemux cd eng-1` leaves the base window's
+			// The everyday collision: `treewright cd eng-1` leaves the base window's
 			// shell standing in the worktree, so MAIN and ENG-1 both report
-			// the same directory. The window treemux opened there is the worktree's,
+			// the same directory. The window treewright opened there is the worktree's,
 			// whichever of them the listing reaches first.
 			name: "the window opened on the worktree wins over one standing in it",
 			out: pane("@1", "myrepo", "MAIN", "/wt/eng-1") + "\n" +
@@ -150,7 +150,7 @@ func TestParsePanes(t *testing.T) {
 			},
 		},
 		{
-			// A window in no session treemux knows about is still reported: it is
+			// A window in no session treewright knows about is still reported: it is
 			// what stops a second window being opened on the same directory.
 			name:   "a window outside the preferred session is kept",
 			out:    pane("@9", "someone-else", "HAND-MADE", "/shared"),
@@ -197,7 +197,7 @@ func TestParsePanes(t *testing.T) {
 // offered to close.
 func TestParsePanesIgnoresWindowOrder(t *testing.T) {
 	lines := []string{
-		pane("@1", "proj", "MAIN", "/wt/eng-1"), // the base window, after `treemux cd eng-1`
+		pane("@1", "proj", "MAIN", "/wt/eng-1"), // the base window, after `treewright cd eng-1`
 		stamped("@2", "proj", "ENG-1", "/wt/eng-1", "/wt/eng-1"),
 		stamped("@3", "proj", "ENG-2", "/wt/eng-2", "/wt/eng-2"),
 		pane("@4", "elsewhere", "HAND-MADE", "/wt/eng-2"),
@@ -278,8 +278,8 @@ func TestParseBoundKey(t *testing.T) {
 bind-key -r -T prefix \;      select-pane -D
 bind-key -r -T prefix \'      select-pane -R
 bind-key    -T prefix n       new-window -c "#{pane_current_path}"
-bind-key    -T prefix b       command-prompt -p "new worktree:" "run-shell -b \"treemux popup -c #{client_tty} new %1\""
-bind-key    -T prefix g       run-shell -b "treemux popup -c \"#{client_tty}\" resume"
+bind-key    -T prefix b       command-prompt -p "new worktree:" "run-shell -b \"treewright popup -c #{client_tty} new %1\""
+bind-key    -T prefix g       run-shell -b "treewright popup -c \"#{client_tty}\" resume"
 bind-key -r -T prefix "C-;"   resize-pane -D 5`
 
 	tests := []struct {
@@ -288,17 +288,17 @@ bind-key -r -T prefix "C-;"   resize-pane -D 5`
 		want  string
 	}{
 		{
-			// Both terms, because either alone catches the wrong line: "treemux"
+			// Both terms, because either alone catches the wrong line: "treewright"
 			// also matches the resume binding, and " new " would match any
-			// treemux-ish command that mentioned it.
-			name: "the binding that starts a worktree", match: []string{"treemux", " new "}, want: "b",
+			// treewright-ish command that mentioned it.
+			name: "the binding that starts a worktree", match: []string{"treewright", " new "}, want: "b",
 		},
-		{name: "the binding that switches", match: []string{"treemux", "resume"}, want: "g"},
+		{name: "the binding that switches", match: []string{"treewright", "resume"}, want: "g"},
 		{
 			// The trap this spacing avoids: new-window is not starting a worktree.
-			name: "new-window is not a match", match: []string{"treemux", " new "}, want: "b",
+			name: "new-window is not a match", match: []string{"treewright", " new "}, want: "b",
 		},
-		{name: "nothing bound to it", match: []string{"treemux", "prune"}, want: ""},
+		{name: "nothing bound to it", match: []string{"treewright", "prune"}, want: ""},
 		{
 			// list-keys escapes a key that would be ambiguous in its own output,
 			// and a reader has to press the key, not the escaping.
@@ -306,7 +306,7 @@ bind-key -r -T prefix "C-;"   resize-pane -D 5`
 		},
 		{name: "a quoted key is unquoted", match: []string{"resize-pane -D 5"}, want: "C-;"},
 		{name: "a repeatable binding, whose -r shifts the fields", match: []string{"select-pane -R"}, want: "'"},
-		{name: "empty listing", match: []string{"treemux"}, want: ""},
+		{name: "empty listing", match: []string{"treewright"}, want: ""},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -325,8 +325,8 @@ bind-key -r -T prefix "C-;"   resize-pane -D 5`
 // to draw on, which a headless test has none of, so this is where they get
 // checked.
 func TestPopupArgs(t *testing.T) {
-	got := strings.Join(popupArgs("/dev/ttys005", "/code/repo", "treemux resume", 78, 9), " ")
-	want := "display-popup -EE -w 78 -h 9 -e TREEMUX_POPUP=1 -c /dev/ttys005 -d /code/repo treemux resume"
+	got := strings.Join(popupArgs("/dev/ttys005", "/code/repo", "treewright resume", 78, 9), " ")
+	want := "display-popup -EE -w 78 -h 9 -e TREEWRIGHT_POPUP=1 -c /dev/ttys005 -d /code/repo treewright resume"
 	if got != want {
 		t.Errorf("popupArgs = %q, want %q", got, want)
 	}
@@ -347,7 +347,7 @@ func TestPopupArgs(t *testing.T) {
 
 	// Both are optional, and an empty one must not become a flag with no value —
 	// tmux would read the command that follows as the flag's argument.
-	bare := strings.Join(popupArgs("", "", "treemux ls", 80, 12), " ")
+	bare := strings.Join(popupArgs("", "", "treewright ls", 80, 12), " ")
 	if strings.Contains(bare, "-c") || strings.Contains(bare, "-d") {
 		t.Errorf("popupArgs with no client or directory = %q, want neither flag", bare)
 	}
@@ -376,7 +376,7 @@ func TestPopupIgnoresTheInnerCommandsExitStatus(t *testing.T) {
 	t.Setenv("TMUX_TMPDIR", dir)
 	t.Setenv("TMUX", "")
 	label := strings.ReplaceAll(t.Name(), "/", "-")
-	t.Setenv("TREEMUX_TMUX_LABEL", label)
+	t.Setenv("TREEWRIGHT_TMUX_LABEL", label)
 	t.Cleanup(func() {
 		_ = exec.Command("tmux", "-L", label, "kill-server").Run()
 		_ = os.RemoveAll(dir)
@@ -397,18 +397,18 @@ func TestPopupIgnoresTheInnerCommandsExitStatus(t *testing.T) {
 	}
 }
 
-// TestAttachArgs pins the two things `treemux attach` exists to get right, and
+// TestAttachArgs pins the two things `treewright attach` exists to get right, and
 // that a person copying "tmux attach -t myrepo" out of a progress line cannot:
 // the session is named exactly, and the server flag survives.
 func TestAttachArgs(t *testing.T) {
-	t.Setenv("TREEMUX_TMUX_LABEL", "")
+	t.Setenv("TREEWRIGHT_TMUX_LABEL", "")
 	if got, want := strings.Join(AttachArgs("api"), " "), "attach-session -t =api"; got != want {
 		t.Errorf("AttachArgs(%q) = %q, want %q", "api", got, want)
 	}
 
 	// Without this, attaching would reach the default server while every window
-	// treemux opened went to another one — and report no session at all.
-	t.Setenv("TREEMUX_TMUX_LABEL", "work")
+	// treewright opened went to another one — and report no session at all.
+	t.Setenv("TREEWRIGHT_TMUX_LABEL", "work")
 	if got, want := strings.Join(AttachArgs("api"), " "), "-L work attach-session -t =api"; got != want {
 		t.Errorf("AttachArgs under a label = %q, want %q", got, want)
 	}

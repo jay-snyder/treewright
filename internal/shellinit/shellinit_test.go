@@ -23,9 +23,31 @@ func TestEveryScriptDefinesTheWrapperAndCompletion(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Script(%q): %v", shell, err)
 		}
-		// The wrapper exists to pass TREEMUX_EVAL_FILE and source what comes
+		// The wrapper exists to pass TREEWRIGHT_EVAL_FILE and source what comes
 		// back; without either half the integration does nothing.
-		for _, want := range []string{"TREEMUX_EVAL_FILE", "command treemux", "__complete"} {
+		for _, want := range []string{"TREEWRIGHT_EVAL_FILE", "command treewright", "__complete"} {
+			if !strings.Contains(script, want) {
+				t.Errorf("%s script is missing %q", shell, want)
+			}
+		}
+	}
+}
+
+// TestEveryScriptDefinesTheShortName checks that tw — the everyday name — is a
+// wrapper with the same completion in every shell. The strings are per-shell
+// because each shell has its own way of saying "and complete tw like treewright".
+func TestEveryScriptDefinesTheShortName(t *testing.T) {
+	wants := map[string][]string{
+		"zsh":  {`tw() { treewright "$@" }`, "compdef _treewright treewright tw"},
+		"bash": {`tw() { treewright "$@"; }`, "complete -F _treewright_completions treewright tw"},
+		"fish": {"function tw --wraps treewright", "treewright $argv"},
+	}
+	for _, shell := range Shells() {
+		script, err := Script(shell)
+		if err != nil {
+			t.Fatalf("Script(%q): %v", shell, err)
+		}
+		for _, want := range wants[shell] {
 			if !strings.Contains(script, want) {
 				t.Errorf("%s script is missing %q", shell, want)
 			}
@@ -70,7 +92,7 @@ func TestScriptsParse(t *testing.T) {
 // code into someone else's shell: zsh and bash expand aliases in a function body
 // at definition time, so an alias in the user's startup file rewrites the words
 // the shim emits. `alias rm='rm -i'` is common, and turns the cleanup below into
-// an interactive prompt on every treemux call unless rm is called through
+// an interactive prompt on every treewright call unless rm is called through
 // `command`.
 func TestExternalCommandsResistAliases(t *testing.T) {
 	for _, shell := range Shells() {
@@ -79,11 +101,11 @@ func TestExternalCommandsResistAliases(t *testing.T) {
 			t.Fatalf("Script(%q): %v", shell, err)
 		}
 		// Matched on the invocation rather than on the bare program name: the
-		// completion tables list "rm" and "treemux" as candidate data, and those
+		// completion tables list "rm" and "treewright" as candidate data, and those
 		// are not calls. "mktemp" and "rm -f" appear only where the wrapper runs
 		// them, so finding one unprefixed is unambiguous.
 		//
-		// treemux itself is covered by the "command treemux" assertion above.
+		// treewright itself is covered by the "command treewright" assertion above.
 		for _, invocation := range []string{"mktemp ", "rm -f"} {
 			rest := script
 			for {
@@ -132,10 +154,10 @@ func TestWrapperSurvivesAnRmAlias(t *testing.T) {
 			if err := os.WriteFile(shim, []byte(script), 0o644); err != nil {
 				t.Fatalf("write shim: %v", err)
 			}
-			// A stub treemux on PATH that writes to the eval file, so the wrapper
+			// A stub treewright on PATH that writes to the eval file, so the wrapper
 			// exercises the branch where it sources something and then cleans up.
-			stub := filepath.Join(dir, "treemux")
-			if err := os.WriteFile(stub, []byte("#!/bin/sh\necho 'export TREEMUX_TEST_RAN=1' >> \"$TREEMUX_EVAL_FILE\"\n"), 0o755); err != nil {
+			stub := filepath.Join(dir, "treewright")
+			if err := os.WriteFile(stub, []byte("#!/bin/sh\necho 'export TREEWRIGHT_TEST_RAN=1' >> \"$TREEWRIGHT_EVAL_FILE\"\n"), 0o755); err != nil {
 				t.Fatalf("write stub: %v", err)
 			}
 
@@ -151,15 +173,15 @@ func TestWrapperSurvivesAnRmAlias(t *testing.T) {
 			program := "shopt -s expand_aliases 2>/dev/null\n" +
 				"alias rm='rm -i'\nalias mktemp='mktemp -q'\n" +
 				"source " + shim + "\n" +
-				"treemux ls\n" +
-				"echo \"ran=$TREEMUX_TEST_RAN\"\n" +
-				"echo \"leftover=$(ls \"$TMPDIR\" | grep -c '^treemux-eval\\.' || true)\"\n" +
+				"treewright ls\n" +
+				"echo \"ran=$TREEWRIGHT_TEST_RAN\"\n" +
+				"echo \"leftover=$(ls \"$TMPDIR\" | grep -c '^treewright-eval\\.' || true)\"\n" +
 				"eval 'probe() { rm -f /probe; }'\n" +
 				"case \"$(typeset -f probe)\" in\n" +
 				"  *'rm -i'*) echo 'aliases-active=yes' ;;\n" +
 				"  *) echo 'aliases-active=no' ;;\n" +
 				"esac\n" +
-				"case \"$(typeset -f treemux)\" in\n" +
+				"case \"$(typeset -f treewright)\" in\n" +
 				"  *'rm -i'*) echo 'wrapper-rewritten=yes' ;;\n" +
 				"  *) echo 'wrapper-rewritten=no' ;;\n" +
 				"esac\n"

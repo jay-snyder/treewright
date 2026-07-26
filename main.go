@@ -1,4 +1,4 @@
-// Command treemux manages isolated git worktree + tmux + agent sessions: one
+// Command treewright manages isolated git worktree + tmux + agent sessions: one
 // command per worktree, torn down together when the work is done.
 //
 // Translating errors into exit codes happens only here, so that every other
@@ -10,8 +10,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 
-	"github.com/jay-snyder/treemux/internal/cli"
+	"github.com/jay-snyder/treewright/internal/cli"
 )
 
 // version is overwritten at build time via -ldflags "-X main.version=v1.2.3";
@@ -19,7 +20,9 @@ import (
 var version = "dev"
 
 func main() {
-	err := cli.Run(cli.Env{Args: os.Args[1:], Version: version})
+	// Argv0 is passed through so help output can address the user by the name
+	// they invoked — "tw", usually — rather than always the full one.
+	err := cli.Run(cli.Env{Args: os.Args[1:], Argv0: filepath.Base(os.Args[0]), Version: version})
 	if err == nil {
 		return
 	}

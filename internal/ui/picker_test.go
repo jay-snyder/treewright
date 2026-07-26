@@ -8,7 +8,7 @@ import (
 )
 
 // TestDecide covers the selection rule directly, mirroring the cases the zsh
-// suite asserted on _treemux_pick_decide.
+// suite asserted on _treewright_pick_decide.
 func TestDecide(t *testing.T) {
 	tests := []struct {
 		name  string

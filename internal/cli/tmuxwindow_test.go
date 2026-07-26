@@ -20,21 +20,21 @@ import (
 // tmuxctl runs a tmux command against the test's private server.
 func tmuxctl(t *testing.T, args ...string) (string, error) {
 	t.Helper()
-	label := os.Getenv("TREEMUX_TMUX_LABEL")
+	label := os.Getenv("TREEWRIGHT_TMUX_LABEL")
 	if label == "" {
-		t.Fatal("no private tmux server — newFixture is what sets TREEMUX_TMUX_LABEL")
+		t.Fatal("no private tmux server — newFixture is what sets TREEWRIGHT_TMUX_LABEL")
 	}
 	out, err := exec.Command("tmux", append([]string{"-L", label}, args...)...).CombinedOutput()
 	return strings.TrimSpace(string(out)), err
 }
 
 // startSession creates a session holding one window that sits in dir and stays
-// open, standing in for a session treemux itself would have created.
+// open, standing in for a session treewright itself would have created.
 //
 // -f /dev/null because a tmux server reads ~/.tmux.conf as it starts, and this is
 // usually the call that starts the test's server. Without it the developer's own
 // bindings and options land in the table these tests inspect — so a developer who
-// had loaded treemux's own tmux integration into their config would watch the
+// had loaded treewright's own tmux integration into their config would watch the
 // suite fail on their machine and nowhere else. The socket is already private;
 // the configuration has to be too.
 func startSession(t *testing.T, session, window, dir string) {
@@ -56,7 +56,7 @@ func startShellSession(t *testing.T, session, window, dir string) {
 	}
 }
 
-// walkInto moves a window's shell into dir, which is what `treemux cd` does to
+// walkInto moves a window's shell into dir, which is what `treewright cd` does to
 // the base window — and the everyday way two windows come to stand in one
 // worktree.
 //
@@ -78,12 +78,12 @@ func walkInto(t *testing.T, session, window, dir string) {
 	t.Fatalf("window %s never moved into %s", window, dir)
 }
 
-// windowStamp reads back one of the user options treemux records on a window.
+// windowStamp reads back one of the user options treewright records on a window.
 //
 // Through a format rather than through show-options, which does not consider an
 // option nobody set to be an option at all: it answers "invalid option" and
 // fails, where a format renders it as the empty string. The format is also how
-// treemux reads the stamp back itself, and how a user's status line would, so
+// treewright reads the stamp back itself, and how a user's status line would, so
 // this asks the question the way it is really asked.
 func windowStamp(t *testing.T, session, window, option string) string {
 	t.Helper()
@@ -96,10 +96,10 @@ func windowStamp(t *testing.T, session, window, option string) string {
 
 // twoWindowsInOneWorktree builds the collision the lookup has to survive: the
 // base window, opened first and standing in the worktree after a
-// `treemux cd`, and the worktree's own window, opened by treemux afterwards.
+// `treewright cd`, and the worktree's own window, opened by treewright afterwards.
 //
 // The visitor is deliberately both the older window and the one arranged first,
-// so neither age nor position can pick the right answer — only what treemux
+// so neither age nor position can pick the right answer — only what treewright
 // recorded on the window it opened. It returns the worktree they share.
 func twoWindowsInOneWorktree(t *testing.T, f *fixture) string {
 	t.Helper()
@@ -170,7 +170,7 @@ func panesOn(t *testing.T, dir string) int {
 }
 
 // TestRmClosesTheWindowOnTheRemovedWorktree is the regression test for a teardown
-// run from somewhere else, which is how it is normally run: `treemux rm eng-1` from
+// run from somewhere else, which is how it is normally run: `treewright rm eng-1` from
 // the base window used to close nothing, because it looked at the caller's own pane
 // rather than at the worktree's, and left a window sitting in a deleted directory.
 func TestRmClosesTheWindowOnTheRemovedWorktree(t *testing.T) {
@@ -233,7 +233,7 @@ func TestRmLeavesOtherWindowsAlone(t *testing.T) {
 
 // TestRmClosesTheWorktreesWindowNotAVisitor is the dangerous half of the lookup
 // bug. Two windows stand in the worktree — the worktree's own, and a base window
-// whose shell followed a `treemux cd` into it — and the one to close is the
+// whose shell followed a `treewright cd` into it — and the one to close is the
 // worktree's. Choosing by position, as this used to, picked whichever was further
 // left, so a rearranged status line had `rm --yes` closing the base window: the
 // window that keeps the session alive, while the genuinely stranded one stayed

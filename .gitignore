@@ -1,5 +1,5 @@
 # Compiled binary from `go build` in the repo root.
-/treemux
+/treewright
 
 # GoReleaser build output.
 /dist/

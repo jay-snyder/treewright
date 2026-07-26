@@ -1,14 +1,18 @@
-// Package shellinit produces the shell integration treemux needs.
+// Package shellinit produces the shell integration treewright needs.
 //
-// treemux is a compiled binary, so it runs in its own process and cannot change
+// treewright is a compiled binary, so it runs in its own process and cannot change
 // the calling shell's working directory. Two small things therefore have to live
-// in the shell itself: a wrapper function that lets treemux hand back a command
+// in the shell itself: a wrapper function that lets treewright hand back a command
 // to run (see the eval-file protocol in internal/cli), and tab completion.
 //
 // Rather than installing files per shell, the binary prints its own integration:
 //
-//	eval "$(treemux shell-init zsh)"     # or bash
-//	treemux shell-init fish | source
+//	eval "$(treewright shell-init zsh)"     # or bash
+//	treewright shell-init fish | source
+//
+// Each script also defines tw, the everyday short name: the same wrapper under
+// fewer keystrokes, with the same completion. treewright is the name of the
+// product; tw is the name of the habit.
 //
 // The shims are versioned with the binary that emits them, so they can never
 // drift out of sync with it. This is the same approach fzf, zoxide, direnv and
@@ -48,8 +52,8 @@ var scripts = map[string]string{
 }
 
 // The wrapper in each shell follows the same three steps: make a temp file,
-// hand its path to the binary as $TREEMUX_EVAL_FILE, then source it if the
-// binary wrote anything. Two commands write to it: `treemux cd`, and `treemux rm`
+// hand its path to the binary as $TREEWRIGHT_EVAL_FILE, then source it if the
+// binary wrote anything. Two commands write to it: `treewright cd`, and `treewright rm`
 // when the shell is standing in the directory being deleted.
 //
 // Every external program the wrappers call is invoked through `command`, for the
@@ -60,31 +64,31 @@ var scripts = map[string]string{
 // BSD and GNU rm both let the later flag win. Nothing here should depend on that.
 //
 // The subcommand names each script lists are checked against the real command
-// table by a test, so a command added to treemux cannot silently go missing from
+// table by a test, so a command added to treewright cannot silently go missing from
 // completion.
 
-const zshScript = `# treemux shell integration for zsh. Load with: eval "$(treemux shell-init zsh)"
+const zshScript = `# treewright shell integration for zsh. Load with: eval "$(treewright shell-init zsh)"
 # Note: rc, not status — status is a special parameter in zsh and cannot be a local.
-treemux() {
+treewright() {
   local evalfile rc
-  evalfile="$(command mktemp "${TMPDIR:-/tmp}/treemux-eval.XXXXXX")" || return 1
+  evalfile="$(command mktemp "${TMPDIR:-/tmp}/treewright-eval.XXXXXX")" || return 1
   # "command" skips this function and runs the real binary, and shields mktemp
   # and rm from any alias of the same name.
-  TREEMUX_EVAL_FILE="$evalfile" command treemux "$@"
+  TREEWRIGHT_EVAL_FILE="$evalfile" command treewright "$@"
   rc=$?
   [[ -s "$evalfile" ]] && source "$evalfile"
   command rm -f "$evalfile"
   return $rc
 }
 
-_treemux() {
+_treewright() {
   local -a cmds
   cmds=(
     'new:create a worktree and branch, and open a tmux window in it'
     'resume:reopen a window on an existing worktree'
     'cd:move your shell into a worktree'
     'base:open a window on the main checkout'
-    'popup:run a treemux command in a tmux popup sized to its output'
+    'popup:run a treewright command in a tmux popup sized to its output'
     'attach:attach this terminal to the repository tmux session'
     'ls:list worktrees with their status'
     'rm:tear down a worktree and its branch'
@@ -96,73 +100,79 @@ _treemux() {
     'tmux-init:print the tmux integration'
   )
   if (( CURRENT == 2 )); then
-    _describe -t commands 'treemux command' cmds
+    _describe -t commands 'treewright command' cmds
     return
   fi
-  # A word being typed as a flag gets that command's flags, which treemux
+  # A word being typed as a flag gets that command's flags, which treewright
   # reports from the same table that renders its help.
   if [[ "$words[CURRENT]" == -* ]]; then
-    compadd -- ${(f)"$(command treemux __complete flags "$words[2]" 2>/dev/null)"}
+    compadd -- ${(f)"$(command treewright __complete flags "$words[2]" 2>/dev/null)"}
     return
   fi
   case "$words[2]" in
-    rm)                          compadd -- ${(f)"$(command treemux __complete slugs 2>/dev/null)"} ;;
-    resume|cd)                   compadd -- ${(f)"$(command treemux __complete targets 2>/dev/null)"} ;;
-    ls|prune|base|config|attach) compadd -- ${(f)"$(command treemux __complete repos 2>/dev/null)"} ;;
-    shell-init)                  compadd -- ${(f)"$(command treemux __complete shells 2>/dev/null)"} ;;
+    rm)                          compadd -- ${(f)"$(command treewright __complete slugs 2>/dev/null)"} ;;
+    resume|cd)                   compadd -- ${(f)"$(command treewright __complete targets 2>/dev/null)"} ;;
+    ls|prune|base|config|attach) compadd -- ${(f)"$(command treewright __complete repos 2>/dev/null)"} ;;
+    shell-init)                  compadd -- ${(f)"$(command treewright __complete shells 2>/dev/null)"} ;;
   esac
 }
-(( $+functions[compdef] )) && compdef _treemux treemux
+# tw calls the treewright *function*, resolved at call time, so the eval-file
+# protocol works identically under either name.
+tw() { treewright "$@" }
+(( $+functions[compdef] )) && compdef _treewright treewright tw
 `
 
-const bashScript = `# treemux shell integration for bash. Load with: eval "$(treemux shell-init bash)"
-treemux() {
+const bashScript = `# treewright shell integration for bash. Load with: eval "$(treewright shell-init bash)"
+treewright() {
   local evalfile rc
-  evalfile="$(command mktemp "${TMPDIR:-/tmp}/treemux-eval.XXXXXX")" || return 1
+  evalfile="$(command mktemp "${TMPDIR:-/tmp}/treewright-eval.XXXXXX")" || return 1
   # "command" skips this function and runs the real binary, and shields mktemp
   # and rm from any alias of the same name.
-  TREEMUX_EVAL_FILE="$evalfile" command treemux "$@"
+  TREEWRIGHT_EVAL_FILE="$evalfile" command treewright "$@"
   rc=$?
   [[ -s "$evalfile" ]] && source "$evalfile"
   command rm -f "$evalfile"
   return $rc
 }
 
-_treemux_completions() {
+_treewright_completions() {
   local cur="${COMP_WORDS[COMP_CWORD]}"
   if [[ $COMP_CWORD -eq 1 ]]; then
     COMPREPLY=($(compgen -W "new resume cd base attach popup ls rm prune setup config doctor shell-init tmux-init" -- "$cur"))
     return
   fi
   if [[ "$cur" == -* ]]; then
-    COMPREPLY=($(compgen -W "$(command treemux __complete flags "${COMP_WORDS[1]}" 2>/dev/null)" -- "$cur"))
+    COMPREPLY=($(compgen -W "$(command treewright __complete flags "${COMP_WORDS[1]}" 2>/dev/null)" -- "$cur"))
     return
   fi
   local candidates=""
   case "${COMP_WORDS[1]}" in
-    rm)                          candidates="$(command treemux __complete slugs 2>/dev/null)" ;;
-    resume|cd)                   candidates="$(command treemux __complete targets 2>/dev/null)" ;;
-    ls|prune|base|config|attach) candidates="$(command treemux __complete repos 2>/dev/null)" ;;
-    shell-init)                  candidates="$(command treemux __complete shells 2>/dev/null)" ;;
+    rm)                          candidates="$(command treewright __complete slugs 2>/dev/null)" ;;
+    resume|cd)                   candidates="$(command treewright __complete targets 2>/dev/null)" ;;
+    ls|prune|base|config|attach) candidates="$(command treewright __complete repos 2>/dev/null)" ;;
+    shell-init)                  candidates="$(command treewright __complete shells 2>/dev/null)" ;;
   esac
   COMPREPLY=($(compgen -W "$candidates" -- "$cur"))
 }
-complete -F _treemux_completions treemux
+# tw calls the treewright *function*, resolved at call time, so the eval-file
+# protocol works identically under either name.
+tw() { treewright "$@"; }
+complete -F _treewright_completions treewright tw
 `
 
-const fishScript = `# treemux shell integration for fish. Load with: treemux shell-init fish | source
-function treemux
+const fishScript = `# treewright shell integration for fish. Load with: treewright shell-init fish | source
+function treewright
     set -l tmp /tmp
     if set -q TMPDIR
         set tmp $TMPDIR
     end
-    set -l evalfile (command mktemp $tmp/treemux-eval.XXXXXX)
+    set -l evalfile (command mktemp $tmp/treewright-eval.XXXXXX)
     or return 1
     # "command" skips this function and runs the real binary. fish resolves
     # functions at call time rather than expanding aliases at definition time, so
     # this is for consistency with the other shims rather than for safety.
-    set -lx TREEMUX_EVAL_FILE $evalfile
-    command treemux $argv
+    set -lx TREEWRIGHT_EVAL_FILE $evalfile
+    command treewright $argv
     set -l saved $status
     if test -s $evalfile
         source $evalfile
@@ -171,31 +181,36 @@ function treemux
     return $saved
 end
 
-complete -c treemux -f
-complete -c treemux -n __fish_use_subcommand -a new        -d 'create a worktree and branch, and open a tmux window in it'
-complete -c treemux -n __fish_use_subcommand -a resume     -d 'reopen a window on an existing worktree'
-complete -c treemux -n __fish_use_subcommand -a cd         -d 'move your shell into a worktree'
-complete -c treemux -n __fish_use_subcommand -a base       -d 'open a window on the main checkout'
-complete -c treemux -n __fish_use_subcommand -a attach     -d 'attach this terminal to the repository tmux session'
-complete -c treemux -n __fish_use_subcommand -a popup      -d 'run a treemux command in a tmux popup sized to its output'
-complete -c treemux -n __fish_use_subcommand -a ls         -d 'list worktrees with their status'
-complete -c treemux -n __fish_use_subcommand -a rm         -d 'tear down a worktree and its branch'
-complete -c treemux -n __fish_use_subcommand -a prune      -d 'remove every merged, clean worktree'
-complete -c treemux -n __fish_use_subcommand -a setup      -d 'write a config for the repository you are standing in'
-complete -c treemux -n __fish_use_subcommand -a config     -d 'print the settings in force, defaults included'
-complete -c treemux -n __fish_use_subcommand -a doctor     -d 'check the installation and every registered config'
-complete -c treemux -n __fish_use_subcommand -a shell-init -d 'print the shell integration'
-complete -c treemux -n __fish_use_subcommand -a tmux-init  -d 'print the tmux integration'
-complete -c treemux -n '__fish_seen_subcommand_from rm' -a '(command treemux __complete slugs)'
-complete -c treemux -n '__fish_seen_subcommand_from resume cd' -a '(command treemux __complete targets)'
-complete -c treemux -n '__fish_seen_subcommand_from ls prune base config attach' -a '(command treemux __complete repos)'
-complete -c treemux -n '__fish_seen_subcommand_from shell-init' -a '(command treemux __complete shells)'
-complete -c treemux -n '__fish_seen_subcommand_from rm' -s f -l force -d 'remove even when unsaved work would be lost'
-complete -c treemux -n '__fish_seen_subcommand_from rm' -s y -l yes -d 'do not ask before closing the tmux window'
-complete -c treemux -n '__fish_seen_subcommand_from prune' -s y -l yes -d 'actually remove them, instead of listing'
-complete -c treemux -n '__fish_seen_subcommand_from ls' -l json -d 'print machine-readable output'
-complete -c treemux -n '__fish_seen_subcommand_from setup' -s n -l dry-run -d 'print the config instead of writing it'
-complete -c treemux -n '__fish_seen_subcommand_from tmux-init' -l apply -d 'load it into the running tmux server'
-complete -c treemux -n '__fish_seen_subcommand_from tmux-init' -l resume-key -r -d 'prefix key that switches worktrees'
-complete -c treemux -n '__fish_seen_subcommand_from tmux-init' -l new-key -r -d 'prefix key that starts a worktree'
+complete -c treewright -f
+complete -c treewright -n __fish_use_subcommand -a new        -d 'create a worktree and branch, and open a tmux window in it'
+complete -c treewright -n __fish_use_subcommand -a resume     -d 'reopen a window on an existing worktree'
+complete -c treewright -n __fish_use_subcommand -a cd         -d 'move your shell into a worktree'
+complete -c treewright -n __fish_use_subcommand -a base       -d 'open a window on the main checkout'
+complete -c treewright -n __fish_use_subcommand -a attach     -d 'attach this terminal to the repository tmux session'
+complete -c treewright -n __fish_use_subcommand -a popup      -d 'run a treewright command in a tmux popup sized to its output'
+complete -c treewright -n __fish_use_subcommand -a ls         -d 'list worktrees with their status'
+complete -c treewright -n __fish_use_subcommand -a rm         -d 'tear down a worktree and its branch'
+complete -c treewright -n __fish_use_subcommand -a prune      -d 'remove every merged, clean worktree'
+complete -c treewright -n __fish_use_subcommand -a setup      -d 'write a config for the repository you are standing in'
+complete -c treewright -n __fish_use_subcommand -a config     -d 'print the settings in force, defaults included'
+complete -c treewright -n __fish_use_subcommand -a doctor     -d 'check the installation and every registered config'
+complete -c treewright -n __fish_use_subcommand -a shell-init -d 'print the shell integration'
+complete -c treewright -n __fish_use_subcommand -a tmux-init  -d 'print the tmux integration'
+complete -c treewright -n '__fish_seen_subcommand_from rm' -a '(command treewright __complete slugs)'
+complete -c treewright -n '__fish_seen_subcommand_from resume cd' -a '(command treewright __complete targets)'
+complete -c treewright -n '__fish_seen_subcommand_from ls prune base config attach' -a '(command treewright __complete repos)'
+complete -c treewright -n '__fish_seen_subcommand_from shell-init' -a '(command treewright __complete shells)'
+complete -c treewright -n '__fish_seen_subcommand_from rm' -s f -l force -d 'remove even when unsaved work would be lost'
+complete -c treewright -n '__fish_seen_subcommand_from rm' -s y -l yes -d 'do not ask before closing the tmux window'
+complete -c treewright -n '__fish_seen_subcommand_from prune' -s y -l yes -d 'actually remove them, instead of listing'
+complete -c treewright -n '__fish_seen_subcommand_from ls' -l json -d 'print machine-readable output'
+complete -c treewright -n '__fish_seen_subcommand_from setup' -s n -l dry-run -d 'print the config instead of writing it'
+complete -c treewright -n '__fish_seen_subcommand_from tmux-init' -l apply -d 'load it into the running tmux server'
+complete -c treewright -n '__fish_seen_subcommand_from tmux-init' -l resume-key -r -d 'prefix key that switches worktrees'
+complete -c treewright -n '__fish_seen_subcommand_from tmux-init' -l new-key -r -d 'prefix key that starts a worktree'
+
+# tw calls the treewright function, and --wraps inherits its completions.
+function tw --wraps treewright
+    treewright $argv
+end
 `

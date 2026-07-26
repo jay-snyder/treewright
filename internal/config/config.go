@@ -1,8 +1,8 @@
-// Package config loads treemux's per-repo configuration.
+// Package config loads treewright's per-repo configuration.
 //
 // One TOML file per repository lives in the registry directory:
 //
-//	${TREEMUX_CONFIG_DIR:-${XDG_CONFIG_HOME:-~/.config}/treemux/repos}/<name>.toml
+//	${TREEWRIGHT_CONFIG_DIR:-${XDG_CONFIG_HOME:-~/.config}/treewright/repos}/<name>.toml
 //
 // The format is TOML rather than a sourced shell script so that reading a config
 // cannot execute code: configs are meant to be shared, linted, and generated,
@@ -39,7 +39,7 @@ const (
 // Config is one repository's settings.
 type Config struct {
 	// Name is the config's file name without the .toml suffix. It is what a
-	// user passes to `treemux ls <name>`. Not read from the file itself.
+	// user passes to `treewright ls <name>`. Not read from the file itself.
 	Name string `toml:"-"`
 
 	// explicit holds the keys the file actually set, so that reporting a
@@ -65,7 +65,7 @@ type Config struct {
 	// Command is what to launch in the new tmux window. Defaults to "claude".
 	Command string `toml:"command"`
 
-	// ResumeCommand is what `treemux resume` launches. It is separate from
+	// ResumeCommand is what `treewright resume` launches. It is separate from
 	// Command because resuming is usually a different invocation, and the two
 	// default independently: setting Command alone does not change this.
 	ResumeCommand string `toml:"resume_command"`
@@ -87,7 +87,7 @@ type Config struct {
 
 // Dir returns the registry directory holding the per-repo config files.
 func Dir() string {
-	if d := os.Getenv("TREEMUX_CONFIG_DIR"); d != "" {
+	if d := os.Getenv("TREEWRIGHT_CONFIG_DIR"); d != "" {
 		return d
 	}
 	base := os.Getenv("XDG_CONFIG_HOME")
@@ -96,11 +96,11 @@ func Dir() string {
 		if err != nil {
 			// Without a home directory there is nowhere conventional to look;
 			// a relative path at least produces a comprehensible error later.
-			return filepath.Join(".config", "treemux", "repos")
+			return filepath.Join(".config", "treewright", "repos")
 		}
 		base = filepath.Join(home, ".config")
 	}
-	return filepath.Join(base, "treemux", "repos")
+	return filepath.Join(base, "treewright", "repos")
 }
 
 // Names lists the configs in the registry, sorted, without the .toml suffix.
@@ -230,7 +230,7 @@ func (c *Config) BranchFor(slug string) string { return c.BranchPrefix + slug }
 func (c *Config) DirFor(slug string) string { return c.MainDir + "-" + slug }
 
 // StripPrefix removes a branch prefix the user accidentally typed into the
-// slug, so that `treemux new alice/foo` under prefix "alice/" yields branch
+// slug, so that `treewright new alice/foo` under prefix "alice/" yields branch
 // "alice/foo" rather than "alice/alice/foo". It reports whether it stripped
 // anything, so the caller can say so instead of silently correcting the input.
 //

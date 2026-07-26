@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// The two commands here are about reaching treemux and reaching a session, which
+// The two commands here are about reaching treewright and reaching a session, which
 // is the part of the tool that lives outside any worktree: `attach` puts a
 // terminal in a repository's session, and `tmux-init` puts a key binding in the
 // server so that a window running an agent — which has no shell in it to type
@@ -29,7 +29,7 @@ func TestAttachWithoutASession(t *testing.T) {
 	if r.err == nil {
 		t.Fatalf("attach with no session succeeded, want an error\n%s", r.both())
 	}
-	if !strings.Contains(r.err.Error(), "treemux base proj") {
+	if !strings.Contains(r.err.Error(), "treewright base proj") {
 		t.Errorf("error = %q, want it to name the command that opens the session", r.err)
 	}
 	if r.stdout != "" {
@@ -37,7 +37,7 @@ func TestAttachWithoutASession(t *testing.T) {
 	}
 }
 
-// insideSession makes treemux believe it is running in a pane of a session, the
+// insideSession makes treewright believe it is running in a pane of a session, the
 // way a real one would be.
 //
 // $TMUX is the flag that says there is a client to move rather than a terminal to
@@ -128,7 +128,7 @@ func TestAttachPrefersTheConfiguredSession(t *testing.T) {
 // two Escapes — one to dismiss the picker, one to clear the popup holding
 // "cancelled" on screen. Nothing failed, so it exits 0.
 //
-// cd cannot follow: its answer is the path on stdout, and `cd "$(treemux cd)"`
+// cd cannot follow: its answer is the path on stdout, and `cd "$(treewright cd)"`
 // succeeding with nothing to print would send the shell to the home directory.
 //
 // The picker reads keys from /dev/tty, so with no terminal it reports cancellation
@@ -152,7 +152,7 @@ func TestCancellingResumeSucceedsAndCancellingCdDoesNot(t *testing.T) {
 
 	cd := f.exec("cd")
 	if cd.err == nil {
-		t.Error("cd err = nil; an empty answer would send `cd \"$(treemux cd)\"` home")
+		t.Error("cd err = nil; an empty answer would send `cd \"$(treewright cd)\"` home")
 	}
 	if cd.stdout != "" {
 		t.Errorf("stdout = %q, want no path when nothing was chosen", cd.stdout)
@@ -181,7 +181,7 @@ func TestTmuxInitPrintsTheIntegration(t *testing.T) {
 
 // TestTmuxInitTakesTheKeysAsFlags covers customization through the route that
 // works for both ways of loading the snippet. Editing the printed file cannot
-// help someone whose tmux.conf says `run-shell 'treemux tmux-init --apply'`,
+// help someone whose tmux.conf says `run-shell 'treewright tmux-init --apply'`,
 // which is the form most people will use.
 func TestTmuxInitTakesTheKeysAsFlags(t *testing.T) {
 	f := newFixture(t, "")
@@ -246,7 +246,7 @@ func TestTmuxInitApplyHonorsCustomKeys(t *testing.T) {
 	if !strings.Contains(keys, "bind-key    -T prefix G") {
 		t.Errorf("G is not bound after --apply:\n%s", keys)
 	}
-	if strings.Contains(keys, "treemux new") {
+	if strings.Contains(keys, "treewright new") {
 		t.Errorf("an empty --new-key still bound something:\n%s", keys)
 	}
 }
@@ -272,8 +272,8 @@ func TestTmuxInitApplyLoadsTheBindings(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list the key bindings: %v\n%s", err, keys)
 	}
-	if !strings.Contains(keys, "treemux popup") {
-		t.Errorf("no binding reaches treemux after --apply:\n%s", keys)
+	if !strings.Contains(keys, "treewright popup") {
+		t.Errorf("no binding reaches treewright after --apply:\n%s", keys)
 	}
 }
 

@@ -1,4 +1,4 @@
-# treemux
+# treewright
 
 One command per piece of work: an isolated git worktree on its own branch, a
 tmux window, and a coding-agent session — created together, torn down together.
@@ -15,14 +15,14 @@ flowchart TD
         W1["window PROJ-142<br/>~/code/myrepo-proj-142<br/>branch alice/proj-142"]
         W2["window PROJ-143<br/>~/code/myrepo-proj-143<br/>branch alice/proj-143"]
     end
-    B -->|treemux new proj-142| W1
-    B -->|treemux new proj-143| W2
-    W1 -.->|PR merges → treemux rm proj-142| X1["removed"]
-    W2 -.->|PR merges → treemux rm proj-143| X2["removed"]
+    B -->|treewright new proj-142| W1
+    B -->|treewright new proj-143| W2
+    W1 -.->|PR merges → treewright rm proj-142| X1["removed"]
+    W2 -.->|PR merges → treewright rm proj-143| X2["removed"]
 ```
 
 - **One tmux session per repository**, named after its config, holding every
-  window treemux opens for it.
+  window treewright opens for it.
 - **One base window** sits in the main checkout, parked on the base branch. Use it
   to spawn new work and ask general questions — never for feature work. It is the
   first row of every listing and of the `resume` menu, so it is one keystroke away
@@ -35,70 +35,80 @@ flowchart TD
 ## Install
 
 ```sh
-brew install jay-snyder/tap/treemux
+brew install jay-snyder/tap/treewright
 ```
 
 The cask installs `git` and `tmux` alongside it, and clears the quarantine flag
 macOS would otherwise set on an unsigned download.
 
+It installs two names for one binary: `treewright`, and **`tw`**, the one your
+fingers will actually use. Every command answers to either; the examples below
+type `tw`. Lines that live in config files — `~/.tmux.conf`, shell startup —
+spell out `treewright`, because they are read by programs that do not know your
+shell's shortcuts.
+
 It is macOS-only, so on Linux use Go, or one of the tarballs attached to a
-[release](https://github.com/jay-snyder/treemux/releases):
+[release](https://github.com/jay-snyder/treewright/releases):
 
 ```sh
-go install github.com/jay-snyder/treemux@latest
+go install github.com/jay-snyder/treewright@latest
 ```
+
+`go install` gives you only the long name on PATH; the shell integration below
+defines `tw` for interactive use, and `ln -s "$(command -v treewright)" ~/bin/tw`
+covers scripts, if you want it there too.
 
 Or build from a clone:
 
 ```sh
-git clone https://github.com/jay-snyder/treemux && cd treemux
-go build -o treemux . && mv treemux ~/bin/    # anywhere on your PATH
+git clone https://github.com/jay-snyder/treewright && cd treewright
+go build -o treewright . && mv treewright ~/bin/    # anywhere on your PATH
 ```
 
 ### Shell integration
 
-treemux is a compiled binary, so it runs in its own process and cannot change
+treewright is a compiled binary, so it runs in its own process and cannot change
 your shell's working directory on its own. A small wrapper function closes that
 gap, and also wires up tab completion. Add one line to your shell's startup file:
 
 ```sh
-eval "$(treemux shell-init zsh)"     # ~/.zshrc
-eval "$(treemux shell-init bash)"    # ~/.bashrc
-treemux shell-init fish | source     # ~/.config/fish/config.fish
+eval "$(treewright shell-init zsh)"     # ~/.zshrc
+eval "$(treewright shell-init bash)"    # ~/.bashrc
+treewright shell-init fish | source     # ~/.config/fish/config.fish
 ```
 
-Two things need it. `treemux cd` moves your shell into a worktree, and after
-`treemux rm` deletes the worktree you were standing in, your shell would
+Two things need it. `tw cd` moves your shell into a worktree, and after
+`tw rm` deletes the worktree you were standing in, your shell would
 otherwise be left in a directory that no longer exists — with the integration it
 moves you to the main checkout automatically. Everything else works either way;
-without it, treemux prints the `cd` for you to run.
+without it, treewright prints the `cd` for you to run.
 
-If a shell function named `treemux` already exists in your shell — migrating from
-a shell-script predecessor, say — write the eval as `eval "$(command treemux
+If a shell function named `treewright` already exists in your shell — migrating from
+a shell-script predecessor, say — write the eval as `eval "$(command treewright
 shell-init zsh)"`. `command` skips functions and aliases, so the line cannot ask
 the thing being replaced for its own replacement.
 
 ### tmux integration
 
-treemux runs your agent as the tmux window's own command, so a worktree's pane *is*
-the agent: there is no shell in it to type `treemux resume` into. Reaching treemux
+treewright runs your agent as the tmux window's own command, so a worktree's pane *is*
+the agent: there is no shell in it to type `tw resume` into. Reaching treewright
 from inside a worktree meant splitting a pane or going to find a window that has a
-prompt. A key binding that opens treemux in a popup closes that gap. Add one line
+prompt. A key binding that opens treewright in a popup closes that gap. Add one line
 to `~/.tmux.conf`:
 
 ```tmux
-run-shell 'treemux tmux-init --apply'
+run-shell 'treewright tmux-init --apply'
 ```
 
 tmux has no equivalent of `eval "$(...)"`, so the binary loads the snippet itself.
 To read it first, and keep it as a file of your own to edit:
 
 ```sh
-treemux tmux-init > ~/.config/treemux/treemux.tmux
+tw tmux-init > ~/.config/treewright/treewright.tmux
 ```
 
 ```tmux
-source-file ~/.config/treemux/treemux.tmux
+source-file ~/.config/treewright/treewright.tmux
 ```
 
 Both load the same text, which binds two keys tmux itself leaves free:
@@ -108,12 +118,12 @@ Both load the same text, which binds two keys tmux itself leaves free:
 | `prefix + T` | Pick a worktree and switch to it, in a popup over whatever is running. |
 | `prefix + N` | Ask for a slug, then create the worktree. |
 
-It also turns terminal titles on, and documents the window options treemux records
+It also turns terminal titles on, and documents the window options treewright records
 for a status line to read. Unlike the shell integration, which can only be
-inferred, this one can be asked about: `treemux doctor` reports whether any key
-binding reaches treemux, because a binding is a thing the server holds.
+inferred, this one can be asked about: `tw doctor` reports whether any key
+binding reaches treewright, because a binding is a thing the server holds.
 
-Both bindings go through `treemux popup`, which works out how big the popup needs
+Both bindings go through `treewright popup`, which works out how big the popup needs
 to be before opening it. tmux fixes a popup's size at creation and `-w`/`-h` take
 only cells or a percentage of the terminal — and a percentage is the wrong unit
 for a picker, whose height is the number of worktrees and whose width is the widest
@@ -130,7 +140,7 @@ and plenty of people rebind those — so pass the keys instead of editing after 
 fact, and both ways of loading stay identical:
 
 ```sh
-treemux tmux-init --resume-key G --new-key C-n
+tw tmux-init --resume-key G --new-key C-n
 ```
 
 An empty key omits its binding, so `--new-key ""` binds only the picker. Keys are
@@ -151,8 +161,8 @@ to a file is for.
 Inside the repository you want to work on:
 
 ```sh
-treemux setup      # writes a config for this repo, guessing what it can
-treemux doctor     # checks tmux, the shell integration, and every config
+tw setup      # writes a config for this repo, guessing what it can
+tw doctor     # checks tmux, the shell integration, and every config
 ```
 
 `setup` detects the main checkout, reads the base branch from `origin/HEAD`,
@@ -164,10 +174,10 @@ Use `--dry-run` to see it without writing it.
 From there the loop is four commands:
 
 ```sh
-treemux new eng-142-white-screen   # worktree, branch, and a window running your agent
-treemux ls                         # where every worktree stands
-treemux cd eng-142                 # jump between them
-treemux rm eng-142                 # when the PR merges
+tw new eng-142-white-screen   # worktree, branch, and a window running your agent
+tw ls                         # where every worktree stands
+tw cd eng-142                 # jump between them
+tw rm eng-142                 # when the PR merges
 ```
 
 ## One session per repository
@@ -184,7 +194,7 @@ tmux session "myrepo"                        tmux session "api-gateway"
 
 Two repositories sharing one session reads badly, which is what this exists to
 prevent: both have a window called `MAIN`, a ticket key alone does not say which
-checkout it belongs to, and a `treemux ls` for one repository describes windows
+checkout it belongs to, and a `tw ls` for one repository describes windows
 sitting next to another's.
 
 What follows from it:
@@ -197,20 +207,20 @@ What follows from it:
 - **Commands follow their window across sessions.** Resuming a worktree while
   attached to another repository's session switches you there.
 - **Outside tmux nothing is skipped.** The session and window are created
-  detached, and treemux says to run `treemux attach` to reach them — its own
+  detached, and treewright says to run `treewright attach` to reach them — its own
   command rather than a `tmux attach` to copy, because that spelling names the
-  session exactly and finds the right server under `TREEMUX_TMUX_LABEL`.
+  session exactly and finds the right server under `TREEWRIGHT_TMUX_LABEL`.
 - **A window in the wrong session is used rather than duplicated** — one you
   opened by hand, or one from before the repository had a session. `ls` shows it as
   `session:window`, and `resume` switches to it there.
 
 `tmux_session` overrides the session name, for a name already taken by something
-else or two repositories that deliberately want to share one. `treemux doctor`
+else or two repositories that deliberately want to share one. `tw doctor`
 reports which session each repository maps to, and warns when two configs name the
 same one.
 
-`TREEMUX_TMUX_LABEL` aims treemux at a non-default tmux server, the way `tmux -L`
-does. Inside tmux nothing needs it: treemux reaches the server it is running under
+`TREEWRIGHT_TMUX_LABEL` aims treewright at a non-default tmux server, the way `tmux -L`
+does. Inside tmux nothing needs it: treewright reaches the server it is running under
 through `$TMUX`.
 
 ### Terminal and tab titles
@@ -222,8 +232,8 @@ the shell wrote before it started — under kitty, iTerm2 or any terminal with s
 integration, the command being run — stays there until the next prompt, which
 inside tmux never comes.
 
-`treemux tmux-init` turns it on, which is the one thing in that snippet not about
-treemux:
+`treewright tmux-init` turns it on, which is the one thing in that snippet not about
+treewright:
 
 ```tmux
 set -g set-titles on
@@ -234,42 +244,46 @@ set -g set-titles-string "#S: #W"
 repository and the worktree rather than the repository alone. Delete those two
 lines from the snippet if you set your own format.
 
-It is set there rather than by treemux itself, per session, for two reasons.
+It is set there rather than by treewright itself, per session, for two reasons.
 Session options are set with `set-option -t`, whose target does not accept tmux's
-exact-match `=name` form, so treemux would be back to the prefix matching the rest
+exact-match `=name` form, so treewright would be back to the prefix matching the rest
 of this section avoids. And a title format is yours: a file you loaded on purpose
-can change it, a `treemux new` should not.
+can change it, a `treewright new` should not.
 
-### What treemux records on a window
+### What treewright records on a window
 
-Every window treemux opens carries the worktree it belongs to, as tmux user options,
+Every window treewright opens carries the worktree it belongs to, as tmux user options,
 so a status line can name it without shelling out to git on every interval:
 
 | Option | Value |
 |---|---|
-| `@treemux_repo` | The config's name. |
-| `@treemux_worktree` | The checkout the window was opened on. |
-| `@treemux_slug` | The worktree. Unset on the base window, which is not one. |
-| `@treemux_branch` | The branch that worktree is on. |
+| `@treewright_repo` | The config's name. |
+| `@treewright_worktree` | The checkout the window was opened on. |
+| `@treewright_slug` | The worktree. Unset on the base window, which is not one. |
+| `@treewright_branch` | The branch that worktree is on. |
 
-Only the worktree is read back by treemux, and for a reason worth knowing: it is
+Only the worktree is read back by treewright, and for a reason worth knowing: it is
 what identifies a window. A pane's directory moves with every `cd`, and two
 windows can stand in one directory at once — the base window does exactly that
-after `treemux cd` — so which window a worktree owns cannot be read off where its
+after `treewright cd` — so which window a worktree owns cannot be read off where its
 shell happens to be standing.
 
-They are written when the window is created, so a window treemux merely finds and
+They are written when the window is created, so a window treewright merely finds and
 switches to keeps whatever it already had.
+
+The option names keep the full `@treewright_` prefix — they are a public,
+greppable interface for status lines, and a cryptic `@tw_` would save nothing
+anyone types by hand.
 
 ## Configure
 
 One TOML file per repository, in
-`${TREEMUX_CONFIG_DIR:-${XDG_CONFIG_HOME:-~/.config}/treemux/repos}/<name>.toml`.
-`treemux setup` writes one; the rest of this section is what it contains, and
-`treemux config` prints what is in force for the repo you are standing in,
+`${TREEWRIGHT_CONFIG_DIR:-${XDG_CONFIG_HOME:-~/.config}/treewright/repos}/<name>.toml`.
+`tw setup` writes one; the rest of this section is what it contains, and
+`tw config` prints what is in force for the repo you are standing in,
 defaults included.
 
-The file's name is what you pass to `treemux ls <name>`.
+The file's name is what you pass to `tw ls <name>`.
 
 ```toml
 main_dir      = "~/code/myrepo"   # required: the main checkout
@@ -294,14 +308,14 @@ tmux_session   = "work"                # session holding the windows (default: t
 | `carry_files` | none | Paths relative to `main_dir`, copied into each new worktree. |
 | `command` | `claude` | What `new` and `base` launch in the tmux window. |
 | `resume_command` | `claude --continue` | What `resume` launches. Set separately from `command`. |
-| `post_create` | none | Shell command run in the new worktree, in the background. Output goes to `<main_dir>/.git/treemux/post-create-<slug>.log`. |
+| `post_create` | none | Shell command run in the new worktree, in the background. Output goes to `<main_dir>/.git/treewright/post-create-<slug>.log`. |
 | `ticket_pattern` | `(?i)^([a-z]+-[0-9]+)` | Regexp whose first submatch names the tmux window. Non-matching slugs are truncated to 10 characters. |
 | `tmux_session` | the config's name | The tmux session this repository's windows go in. Periods and colons become dashes, since tmux reads them as target separators. |
 
 Unknown settings are an error rather than being silently ignored, so a
 misspelled key tells you instead of quietly doing nothing.
 
-treemux picks the config whose `main_dir` is the repository you are standing in —
+treewright picks the config whose `main_dir` is the repository you are standing in —
 which works from inside a worktree too. Outside any repository it uses the only
 config, or the name you pass.
 
@@ -309,22 +323,22 @@ config, or the name you pass.
 
 | Command | What it does |
 |---|---|
-| `treemux new <slug> [window-name]` | Create a worktree and branch off the latest `origin/<base_branch>`, carry configured files in, and open a window on it in the repository's tmux session. |
-| `treemux resume [slug]` | Reopen a window on an existing worktree, or switch to the one already open. Menu when the slug is omitted, with the base checkout at the top of it. |
-| `treemux cd [slug]` | Move your shell into a worktree, or into the main checkout with `base`. Menu when the slug is omitted. |
-| `treemux base [repo]` | Select the base window on the main checkout, opening it if it is not there. |
-| `treemux attach [repo]` | Attach this terminal to a repository's tmux session, on whichever window was current there. Moves the client instead when already inside tmux. |
-| `treemux popup [-c <client>] <command>` | Run a treemux command in a tmux popup sized to its output. What the `tmux-init` key bindings go through. |
-| `treemux ls [--json] [repo]` | List worktrees with status, divergence, and the tmux window open in each. Changes no working tree, branch, or ref. |
-| `treemux rm [-f] [-y] <slug>` | Tear down the worktree, branch, and stale remote ref, and offer to close its tmux window. Refuses when work would be lost, unless `--force`. |
-| `treemux prune [-y] [repo]` | Remove every merged, clean worktree. Lists them without `--yes`. |
-| `treemux setup [-n] [name]` | Write a config for the repository you are standing in, detecting what it can. |
-| `treemux config [repo]` | Print the settings in force, defaults included, and the file they came from. |
-| `treemux doctor` | Check the installation and every registered config. Exits non-zero on a failure. |
-| `treemux shell-init <shell>` | Print the shell integration for zsh, bash, or fish. |
-| `treemux tmux-init [--apply] [--resume-key <key>] [--new-key <key>]` | Print the tmux integration: popup key bindings and titles. `--apply` loads it into the running server instead. |
+| `tw new <slug> [window-name]` | Create a worktree and branch off the latest `origin/<base_branch>`, carry configured files in, and open a window on it in the repository's tmux session. |
+| `tw resume [slug]` | Reopen a window on an existing worktree, or switch to the one already open. Menu when the slug is omitted, with the base checkout at the top of it. |
+| `tw cd [slug]` | Move your shell into a worktree, or into the main checkout with `base`. Menu when the slug is omitted. |
+| `tw base [repo]` | Select the base window on the main checkout, opening it if it is not there. |
+| `tw attach [repo]` | Attach this terminal to a repository's tmux session, on whichever window was current there. Moves the client instead when already inside tmux. |
+| `tw popup [-c <client>] <command>` | Run a treewright command in a tmux popup sized to its output. What the `tmux-init` key bindings go through. |
+| `tw ls [--json] [repo]` | List worktrees with status, divergence, and the tmux window open in each. Changes no working tree, branch, or ref. |
+| `tw rm [-f] [-y] <slug>` | Tear down the worktree, branch, and stale remote ref, and offer to close its tmux window. Refuses when work would be lost, unless `--force`. |
+| `tw prune [-y] [repo]` | Remove every merged, clean worktree. Lists them without `--yes`. |
+| `tw setup [-n] [name]` | Write a config for the repository you are standing in, detecting what it can. |
+| `tw config [repo]` | Print the settings in force, defaults included, and the file they came from. |
+| `tw doctor` | Check the installation and every registered config. Exits non-zero on a failure. |
+| `tw shell-init <shell>` | Print the shell integration for zsh, bash, or fish. |
+| `tw tmux-init [--apply] [--resume-key <key>] [--new-key <key>]` | Print the tmux integration: popup key bindings and titles. `--apply` loads it into the running server instead. |
 
-Run `treemux help <command>` for detail on any one of them.
+Run `tw help <command>` for detail on any one of them.
 
 A few commands answer to a second name, for when the first one is not what comes
 to mind: `create` for `new`, `remove` and `delete` for `rm`, `list` and `status`
@@ -343,11 +357,11 @@ list, the one window that is always there, and that keeps the session alive, was
 the one window the resume key could not reach.
 
 It is not a worktree, and nothing pretends otherwise. `rm` and `prune` work off
-the worktrees treemux created, so neither can name it; `ls --json` flags its row
+the worktrees treewright created, so neither can name it; `ls --json` flags its row
 with `"base": true` for anything reading the listing to decide where work should
 go. Name it `base`, or name the branch it is on.
 
-Two ways in, one window. `treemux base` opens it fresh with `command`; picking it
+Two ways in, one window. `tw base` opens it fresh with `command`; picking it
 out of the resume menu runs `resume_command`, the same "carry on where I left off"
 every other row gets — which after a reboot is the point. The difference shows
 only on the first open, since every later call finds the window by its directory
@@ -367,7 +381,7 @@ carries both a ticket key and a description while people refer to that work by t
 key alone:
 
 ```
-$ treemux cd eng-1646
+$ tw cd eng-1646
 eng-1646 matches worktree eng-1646-app-landing-page-redesign
 ```
 
@@ -385,8 +399,8 @@ stdout carries the answer and nothing else, so any command can be piped:
 
 | Command | stdout |
 |---|---|
-| `new` | the new worktree's path — `cd "$(treemux new eng-1)"` works |
-| `cd` | the chosen worktree's path, so `cd "$(treemux cd eng-1)"` works unaided |
+| `new` | the new worktree's path — `cd "$(tw new eng-1)"` works |
+| `cd` | the chosen worktree's path, so `cd "$(tw cd eng-1)"` works unaided |
 | `rm` | the removed worktree's path |
 | `prune` | the paths it removed, or would remove |
 | `ls` | the table, or a JSON array with `--json` |
@@ -396,7 +410,7 @@ stdout carries the answer and nothing else, so any command can be piped:
 
 Progress, warnings, prompts, and errors go to stderr, prefixed `warning:` or
 `error:` when something is wrong and unprefixed when it is just narration. So
-`treemux ls --json | jq` and `treemux prune --yes > removed.txt` both stay clean.
+`tw ls --json | jq` and `tw prune --yes > removed.txt` both stay clean.
 
 `ls` colors the status column when writing to a terminal, and stays plain when
 redirected or when `NO_COLOR` is set. `--json` reports `ahead` and `behind` as
@@ -418,7 +432,7 @@ A slug becomes both a directory name and a branch name, so it may not contain `/
 and it is checked up front against the rest of git's branch-naming rules, so a
 slug with a space in it is one sentence rather than several lines of git's advice
 about ref formats. If you pass a slug that already starts with your
-`branch_prefix`, treemux strips it and says so, rather than producing
+`branch_prefix`, treewright strips it and says so, rather than producing
 `alice/alice/proj-142`.
 
 ### Statuses
@@ -456,13 +470,13 @@ so can disagree with a stale listing; they are the ones to trust.
 **Squash merges are recognized.** When a forge squash-merges a PR, the branch's
 own commits never land upstream — they are collapsed into one new commit and the
 remote branch is deleted. A naive "are these commits upstream?" check would call
-that landed work unpushed and refuse to clean it up. treemux instead synthesizes
+that landed work unpushed and refuse to clean it up. treewright instead synthesizes
 a single commit holding the branch's whole tree on top of its merge-base — the
 same patch a squash merge produces — and asks `git cherry` whether an equivalent
 patch is already upstream.
 
 That synthetic commit is written to the object database as a dangling object, so
-treemux needs write access to `.git` even for commands that only report. Its
+treewright needs write access to `.git` even for commands that only report. Its
 author, committer, and dates are fixed, so its hash depends only on the tree and
 parent being tested: repeated runs reuse the same object rather than leaving a
 new one behind each time, and `git gc` reaps it.
@@ -519,7 +533,7 @@ Layout:
 | `internal/git` | Every git operation, including the merged/unpushed/dirty logic. |
 | `internal/config` | TOML loading and which config applies. |
 | `internal/cli` | Subcommands, output formatting, and the eval-file protocol. |
-| `internal/tmux` | The handful of tmux commands treemux drives. |
+| `internal/tmux` | The handful of tmux commands treewright drives. |
 | `internal/ui` | The interactive picker and the table. |
 | `internal/shellinit` | The zsh, bash, and fish integration snippets. |
 | `internal/tmuxinit` | The tmux integration: key bindings and titles. |

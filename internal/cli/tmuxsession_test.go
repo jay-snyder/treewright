@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jay-snyder/treemux/internal/config"
-	"github.com/jay-snyder/treemux/internal/gittest"
+	"github.com/jay-snyder/treewright/internal/config"
+	"github.com/jay-snyder/treewright/internal/gittest"
 )
 
 // These tests cover where a window is put, rather than what is in it: one session
@@ -74,18 +74,18 @@ func TestNewOpensItsWindowInTheRepoSession(t *testing.T) {
 	if !strings.Contains(r.stderr, "created tmux session proj") {
 		t.Errorf("stderr = %q, want the new session reported", r.stderr)
 	}
-	// The way back in is given as treemux's own command rather than as a
+	// The way back in is given as treewright's own command rather than as a
 	// tmux attach for the user to copy: it names the session exactly, and it
-	// reaches the right server when TREEMUX_TMUX_LABEL has aimed treemux at one —
+	// reaches the right server when TREEWRIGHT_TMUX_LABEL has aimed treewright at one —
 	// which, in this test, it has.
-	if !strings.Contains(r.stderr, "attach with: treemux attach proj") {
+	if !strings.Contains(r.stderr, "attach with: treewright attach proj") {
 		t.Errorf("stderr = %q, want the attach command", r.stderr)
 	}
 
 	if got := windowsIn(t, "proj"); len(got) != 1 || got[0] != "ENG-142" {
 		t.Errorf("windows in session proj = %v, want just ENG-142", got)
 	}
-	// And the window is in the worktree, not wherever treemux was run.
+	// And the window is in the worktree, not wherever treewright was run.
 	if got := panesOn(t, f.DirFor("eng-142-white-screen")); got != 1 {
 		t.Errorf("%d panes in the new worktree, want 1", got)
 	}
@@ -93,14 +93,14 @@ func TestNewOpensItsWindowInTheRepoSession(t *testing.T) {
 	// identifies it later however its shell wanders and wherever it is dragged to.
 	// Checked here because this is the call that creates the session, the other of
 	// the two paths a window is opened by.
-	if got, want := windowStamp(t, "proj", "ENG-142", "@treemux_worktree"), f.DirFor("eng-142-white-screen"); got != want {
+	if got, want := windowStamp(t, "proj", "ENG-142", "@treewright_worktree"), f.DirFor("eng-142-white-screen"); got != want {
 		t.Errorf("window ENG-142 records worktree %q, want %q", got, want)
 	}
 }
 
 // TestNewRecordsTheWorktreeOnItsWindow covers the rest of what a window carries.
-// Only the worktree is read back by treemux; the others exist so that a status
-// line can name the worktree with "#{@treemux_slug}" instead of shelling out to git
+// Only the worktree is read back by treewright; the others exist so that a status
+// line can name the worktree with "#{@treewright_slug}" instead of shelling out to git
 // on every interval, and an option that is never written is one nobody can use.
 func TestNewRecordsTheWorktreeOnItsWindow(t *testing.T) {
 	requireTmux(t)
@@ -109,10 +109,10 @@ func TestNewRecordsTheWorktreeOnItsWindow(t *testing.T) {
 	f.mustRun("new", "eng-142-white-screen")
 
 	want := map[string]string{
-		"@treemux_worktree": f.DirFor("eng-142-white-screen"),
-		"@treemux_repo":     "proj",
-		"@treemux_slug":     "eng-142-white-screen",
-		"@treemux_branch":   f.BranchFor("eng-142-white-screen"),
+		"@treewright_worktree": f.DirFor("eng-142-white-screen"),
+		"@treewright_repo":     "proj",
+		"@treewright_slug":     "eng-142-white-screen",
+		"@treewright_branch":   f.BranchFor("eng-142-white-screen"),
 	}
 	for option, value := range want {
 		if got := windowStamp(t, "proj", "ENG-142", option); got != value {
@@ -131,13 +131,13 @@ func TestTheBaseWindowRecordsNoWorktree(t *testing.T) {
 
 	f.mustRun("base")
 
-	if got, want := windowStamp(t, "proj", "MAIN", "@treemux_worktree"), f.MainDir; got != want {
+	if got, want := windowStamp(t, "proj", "MAIN", "@treewright_worktree"), f.MainDir; got != want {
 		t.Errorf("base window records worktree %q, want the main checkout %q", got, want)
 	}
-	if got := windowStamp(t, "proj", "MAIN", "@treemux_repo"); got != "proj" {
+	if got := windowStamp(t, "proj", "MAIN", "@treewright_repo"); got != "proj" {
 		t.Errorf("base window records repo %q, want proj", got)
 	}
-	for _, option := range []string{"@treemux_slug", "@treemux_branch"} {
+	for _, option := range []string{"@treewright_slug", "@treewright_branch"} {
 		if got := windowStamp(t, "proj", "MAIN", option); got != "" {
 			t.Errorf("base window has %s = %q, want it left unset", option, got)
 		}
@@ -322,7 +322,7 @@ func TestLsReportsTheOpenWindow(t *testing.T) {
 
 // TestTheWorktreesWindowIsFoundHoweverWindowsAreArranged covers the reported bug
 // end to end. Two windows stand in one worktree — the worktree's own, and a base
-// window whose shell followed a `treemux cd` into it — and which one treemux
+// window whose shell followed a `treewright cd` into it — and which one treewright
 // named used to depend on where they sat, because the pane listing walks windows
 // in index order. Rearranging them renamed the window in `ls` and sent `resume`
 // somewhere else.

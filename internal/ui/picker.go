@@ -1,4 +1,4 @@
-// Package ui renders treemux's interactive terminal pieces.
+// Package ui renders treewright's interactive terminal pieces.
 package ui
 
 import (

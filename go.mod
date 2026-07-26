@@ -1,4 +1,4 @@
-module github.com/jay-snyder/treemux
+module github.com/jay-snyder/treewright
 
 go 1.26.5
 

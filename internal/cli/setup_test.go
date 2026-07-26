@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jay-snyder/treemux/internal/config"
+	"github.com/jay-snyder/treewright/internal/config"
 )
 
 // unregistered is a scratch repo whose config has been taken away again, which is
@@ -22,7 +22,7 @@ func unregistered(t *testing.T) *fixture {
 }
 
 // TestSetupProducesAUsableConfig is the whole point of the command: what it
-// writes must be a config the rest of treemux can immediately act on, not a
+// writes must be a config the rest of treewright can immediately act on, not a
 // template needing edits first.
 func TestSetupProducesAUsableConfig(t *testing.T) {
 	f := unregistered(t)

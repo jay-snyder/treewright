@@ -10,10 +10,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/jay-snyder/treemux/internal/config"
-	"github.com/jay-snyder/treemux/internal/git"
-	"github.com/jay-snyder/treemux/internal/tmux"
-	"github.com/jay-snyder/treemux/internal/ui"
+	"github.com/jay-snyder/treewright/internal/config"
+	"github.com/jay-snyder/treewright/internal/git"
+	"github.com/jay-snyder/treewright/internal/tmux"
+	"github.com/jay-snyder/treewright/internal/ui"
 )
 
 // ---- new -------------------------------------------------------------------
@@ -46,7 +46,7 @@ func cmdNew(env *Env, args []string) error {
 	// — and says "already exists" about a path rather than naming the command
 	// that opens what is already there.
 	if _, err := os.Stat(dir); err == nil {
-		return fmt.Errorf("worktree for %s already exists at %s — open it with \"treemux resume %s\"",
+		return fmt.Errorf("worktree for %s already exists at %s — open it with \"treewright resume %s\"",
 			slug, dir, slug)
 	}
 
@@ -81,11 +81,11 @@ func cmdNew(env *Env, args []string) error {
 	}
 
 	// The worktree path is this command's answer, so it goes to stdout and
-	// nowhere else: `cd "$(treemux new foo)"` is meant to work.
+	// nowhere else: `cd "$(treewright new foo)"` is meant to work.
 	fmt.Fprintln(env.Stdout, dir)
 
 	// Reported rather than returned: the worktree exists, the branch exists, and
-	// the path is already on stdout, so `cd "$(treemux new eng-1)"` must not fail
+	// the path is already on stdout, so `cd "$(treewright new eng-1)"` must not fail
 	// because tmux could not be made to open a window. resume and base do return
 	// it, a window being the whole of what they were asked for.
 	if err := openWindow(env, cfg, tmux.Spec{
@@ -110,7 +110,7 @@ func cmdNew(env *Env, args []string) error {
 // The rest of the rules are git's, from check-ref-format. They are restated here
 // rather than delegated to git so that the answer is one sentence naming the
 // slug, instead of git's several lines about ref syntax arriving from three steps
-// deeper — by which point treemux has already announced what it was about to do.
+// deeper — by which point treewright has already announced what it was about to do.
 func validateSlug(slug string) error {
 	if slug == "" {
 		return usageErrorf("new", "the slug is empty once the branch prefix is removed")
@@ -192,7 +192,7 @@ func startPostCreate(env *Env, cfg *config.Config, dir, slug string) error {
 	if strings.TrimSpace(cfg.PostCreate) == "" {
 		return nil
 	}
-	logDir := filepath.Join(cfg.MainDir, ".git", "treemux")
+	logDir := filepath.Join(cfg.MainDir, ".git", "treewright")
 	if err := os.MkdirAll(logDir, 0o755); err != nil {
 		return err
 	}
@@ -202,7 +202,7 @@ func startPostCreate(env *Env, cfg *config.Config, dir, slug string) error {
 		return err
 	}
 	// The child gets its own duplicated descriptor, so closing this one does not
-	// cut off its output after treemux exits.
+	// cut off its output after treewright exits.
 	defer logFile.Close()
 
 	cmd := exec.Command("sh", "-c", cfg.PostCreate)
@@ -212,7 +212,7 @@ func startPostCreate(env *Env, cfg *config.Config, dir, slug string) error {
 	if err := cmd.Start(); err != nil {
 		return err
 	}
-	// Deliberately not waited on: the process outlives treemux.
+	// Deliberately not waited on: the process outlives treewright.
 	env.progressf("running post_create in the background — log: %s", logPath)
 	return nil
 }
@@ -281,7 +281,7 @@ func cmdRm(env *Env, args []string) error {
 	// their shell is about to be standing in a directory that is gone.
 	wd, wdErr := os.Getwd()
 	// And which window is open on the worktree, asked while the worktree still
-	// exists. This is usually not the caller's own window: `treemux rm eng-1` is
+	// exists. This is usually not the caller's own window: `treewright rm eng-1` is
 	// run from the base window, and the one left pointing at a deleted directory
 	// is the window named after the worktree.
 	staleWindow := tmux.Windows(sessionFor(cfg))[dir]
@@ -293,7 +293,7 @@ func cmdRm(env *Env, args []string) error {
 	// the branch or prune refs is worth reporting but not fatal.
 	//
 	// A worktree on a detached HEAD has no branch to delete, which is not an error;
-	// git reports one only for worktrees created outside treemux.
+	// git reports one only for worktrees created outside treewright.
 	if branch != "" {
 		if err := repo.DeleteBranch(branch); err != nil {
 			env.warnf("could not delete branch %s: %v", branch, err)
@@ -317,7 +317,7 @@ func cmdRm(env *Env, args []string) error {
 }
 
 // escapeDeletedDir asks the calling shell to leave a directory that no longer
-// exists. Without the shell integration treemux can only say so.
+// exists. Without the shell integration treewright can only say so.
 func escapeDeletedDir(env *Env, mainDir, goneDir string) {
 	emitEval(env, "cd "+shellQuote(mainDir))
 	if env.EvalFile == "" {
@@ -357,7 +357,7 @@ func offerWindowClose(env *Env, window tmux.Window, assumeYes bool) {
 
 	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
 	if err != nil {
-		// Nobody to ask — treemux was run by a script or an agent. Say what to
+		// Nobody to ask — treewright was run by a script or an agent. Say what to
 		// run rather than closing a window unasked, since something may still be
 		// running in it.
 		env.progressf("its tmux window (%s%s) now points at a deleted directory; close it with: tmux kill-window -t %s",
@@ -662,7 +662,7 @@ func chooseWorktree(env *Env, cfg *config.Config, repo git.Repo, managed []git.W
 // Kept apart from ErrSilent because declining is not a failure, and the two
 // callers cannot treat it alike. `resume` prints nothing on stdout, so it can
 // honestly exit 0 and say nothing more. `cd` cannot: its answer is a path, and
-// `cd "$(treemux cd)"` with an empty answer would move the shell to the home
+// `cd "$(treewright cd)"` with an empty answer would move the shell to the home
 // directory — so there it stays a failure.
 //
 // The difference is visible in a tmux popup, which closes on success and stays up
@@ -675,10 +675,10 @@ var errCancelled = errors.New("cancelled")
 
 // cmdCd moves the calling shell into a worktree.
 //
-// treemux cannot change its parent's directory, so this leans on the same
+// treewright cannot change its parent's directory, so this leans on the same
 // eval-file protocol `rm` uses to escape a deleted directory: the shell wrapper
-// sources what treemux appends. Without the integration the path on stdout is
-// still the answer, so `cd "$(treemux cd foo)"` works unaided.
+// sources what treewright appends. Without the integration the path on stdout is
+// still the answer, so `cd "$(treewright cd foo)"` works unaided.
 func cmdCd(env *Env, args []string) error {
 	positional, err := parseArgs("cd", args, nil, nil, 1)
 	if err != nil {
@@ -709,7 +709,7 @@ func cmdCd(env *Env, args []string) error {
 	switch {
 	case errors.Is(err, errCancelled):
 		// Unlike resume, this one stays a failure. The path on stdout is the
-		// answer, and `cd "$(treemux cd)"` succeeding with nothing to print would
+		// answer, and `cd "$(treewright cd)"` succeeding with nothing to print would
 		// send the shell home.
 		return ErrSilent
 	case err != nil:
@@ -790,8 +790,8 @@ func openBaseWindow(env *Env, cfg *config.Config, command string) error {
 //
 // Three commands already print the way to reach a session they have just opened a
 // window in, and until now that was a `tmux attach -t <session>` for the user to
-// copy. That spelling is one treemux can get right and a person cannot always:
-// it has to name the session exactly, and under TREEMUX_TMUX_LABEL it has to
+// copy. That spelling is one treewright can get right and a person cannot always:
+// it has to name the session exactly, and under TREEWRIGHT_TMUX_LABEL it has to
 // reach a server the default `tmux attach` never looks at.
 //
 // It deliberately does not create the session. `base` is the command that opens a
@@ -812,7 +812,7 @@ func cmdAttach(env *Env, args []string) error {
 
 	session := sessionFor(cfg)
 	if !tmux.HasSession(session) {
-		return fmt.Errorf("no tmux session %s is running — open one with \"treemux base %s\"", session, cfg.Name)
+		return fmt.Errorf("no tmux session %s is running — open one with \"treewright base %s\"", session, cfg.Name)
 	}
 
 	// Inside tmux there is already a client holding this terminal, and attaching a
@@ -829,7 +829,7 @@ func cmdAttach(env *Env, args []string) error {
 	}
 
 	// Outside it, tmux wants the terminal for as long as the client stays
-	// attached, so it inherits treemux's own worktrees rather than the pipes every
+	// attached, so it inherits treewright's own worktrees rather than the pipes every
 	// other tmux call here runs through, and this returns when the user detaches.
 	attach := exec.Command("tmux", tmux.AttachArgs(session)...)
 	attach.Stdin, attach.Stdout, attach.Stderr = os.Stdin, os.Stdout, os.Stderr

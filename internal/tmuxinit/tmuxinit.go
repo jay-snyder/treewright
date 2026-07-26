@@ -1,20 +1,20 @@
 // Package tmuxinit produces the tmux-side integration, the way shellinit
 // produces the shell-side one.
 //
-// The gap it closes is particular to how treemux opens a window. The configured
+// The gap it closes is particular to how treewright opens a window. The configured
 // command is the window's own command, so a worktree's pane is the agent itself and
-// there is no shell in it to type "treemux resume" into: switching worktrees meant
+// there is no shell in it to type "treewright resume" into: switching worktrees meant
 // splitting a pane or going to find a window that has a prompt. A key binding
-// that opens treemux in a popup reaches it from anywhere, including from inside a
+// that opens treewright in a popup reaches it from anywhere, including from inside a
 // running agent, and closes again afterwards.
 //
 // tmux has no equivalent of eval "$(...)", so the snippet is loaded one of two
 // ways, both of which come from this one text:
 //
-//	run-shell 'treemux tmux-init --apply'   # the binary loads it into the server
+//	run-shell 'treewright tmux-init --apply'   # the binary loads it into the server
 //
-//	treemux tmux-init > ~/.config/treemux/treemux.tmux
-//	source-file ~/.config/treemux/treemux.tmux
+//	treewright tmux-init > ~/.config/treewright/treewright.tmux
+//	source-file ~/.config/treewright/treewright.tmux
 //
 // Printing is the default because a file of key bindings is worth reading before
 // it is loaded, and because it is then yours to edit.
@@ -43,7 +43,7 @@ type Keys struct {
 // W was the first choice, for the mnemonic with tmux's own w window picker, and
 // it is the reason these are configurable at all. A great many configurations
 // rebind lowercase w to kill-window, and there the slip destroys the very window
-// the binding exists to reach — a treemux worktree being a window with an agent
+// the binding exists to reach — a treewright worktree being a window with an agent
 // running in it and nothing else.
 func DefaultKeys() Keys { return Keys{Resume: "T", New: "N"} }
 
@@ -82,7 +82,7 @@ func (k Keys) Validate() error {
 	return nil
 }
 
-// Script returns the tmux configuration treemux suggests, binding keys.
+// Script returns the tmux configuration treewright suggests, binding keys.
 func Script(k Keys) string {
 	var b strings.Builder
 	b.WriteString(header)
@@ -111,27 +111,27 @@ func fill(template, key string) string {
 	return strings.ReplaceAll(template, "{{key}}", key)
 }
 
-const header = `# treemux tmux integration. Load it from ~/.tmux.conf with either:
+const header = `# treewright tmux integration. Load it from ~/.tmux.conf with either:
 #
-#     run-shell 'treemux tmux-init --apply'
+#     run-shell 'treewright tmux-init --apply'
 #
-#     treemux tmux-init > ~/.config/treemux/treemux.tmux
-#     source-file ~/.config/treemux/treemux.tmux
+#     treewright tmux-init > ~/.config/treewright/treewright.tmux
+#     source-file ~/.config/treewright/treewright.tmux
 #
 # The first is always in step with the installed binary; the second is a file you
-# can read and edit. Both load exactly what "treemux tmux-init" prints.
+# can read and edit. Both load exactly what "treewright tmux-init" prints.
 #
 # To move the keys, pass them through rather than editing after the fact, so the
 # two ways of loading this stay identical:
 #
-#     treemux tmux-init --resume-key G --new-key C-n
+#     treewright tmux-init --resume-key G --new-key C-n
 #
 # An empty key omits its binding: --new-key "" binds only the first.
 `
 
 // Three details in these bindings are load-bearing.
 //
-// They go through `treemux popup` rather than calling display-popup directly,
+// They go through `treewright popup` rather than calling display-popup directly,
 // because tmux fixes a popup's size when it creates one and -w and -h take only
 // cells or a percentage of the terminal. A percentage is the wrong unit for a
 // picker — its height is the number of worktrees and its width the widest slug,
@@ -148,30 +148,30 @@ const header = `# treemux tmux integration. Load it from ~/.tmux.conf with eithe
 // The binding runs `resume` rather than `cd`, because a popup's shell exits with
 // the popup: moving it somewhere is an operation with nowhere to land.
 const reachHeader = `
-# --- reaching treemux from inside a worktree -----------------------------------
+# --- reaching treewright from inside a worktree -----------------------------------
 #
-# A window treemux opens runs the agent as the window's own command, so there is
-# no shell in it to type into. These open treemux in a popup over whatever is
+# A window treewright opens runs the agent as the window's own command, so there is
+# no shell in it to type into. These open treewright in a popup over whatever is
 # running, and close it again once you have chosen.
 #
-# The popup starts in the current pane's directory, which is how treemux knows
+# The popup starts in the current pane's directory, which is how treewright knows
 # which repository you mean.
 `
 
 const resumeBinding = `
 # prefix + {{key}} — switch to another worktree.
-bind-key {{key}} run-shell -b 'treemux popup -c "#{client_tty}" resume'
+bind-key {{key}} run-shell -b 'treewright popup -c "#{client_tty}" resume'
 `
 
 const newBinding = `
-# prefix + {{key}} — start one. tmux asks for the slug; treemux does the rest.
-bind-key {{key}} command-prompt -p "new worktree:" 'run-shell -b "treemux popup -c #{client_tty} new %1"'
+# prefix + {{key}} — start one. tmux asks for the slug; treewright does the rest.
+bind-key {{key}} command-prompt -p "new worktree:" 'run-shell -b "treewright popup -c #{client_tty} new %1"'
 `
 
 const titles = `
 # --- terminal and tab titles -------------------------------------------------
 #
-# The one part of this file that is not about treemux. tmux sets no title at all
+# The one part of this file that is not about treewright. tmux sets no title at all
 # by default, so attaching leaves your terminal tab named after the command line
 # that attached — "tmux attach -t myrepo" — until a prompt overwrites it, which
 # inside tmux never comes. Delete these two lines if you set your own format.
@@ -180,17 +180,17 @@ set -g set-titles-string "#S: #W"
 `
 
 const recorded = `
-# --- what treemux records on a window ----------------------------------------
+# --- what treewright records on a window ----------------------------------------
 #
-# Every window treemux opens carries the worktree it belongs to, so a status line
+# Every window treewright opens carries the worktree it belongs to, so a status line
 # can name it without shelling out to git on each interval:
 #
-#     @treemux_repo      the config's name
-#     @treemux_worktree  the checkout the window was opened on
-#     @treemux_slug      the worktree — unset on the base window, which is not one
-#     @treemux_branch    the branch that worktree is on
+#     @treewright_repo      the config's name
+#     @treewright_worktree  the checkout the window was opened on
+#     @treewright_slug      the worktree — unset on the base window, which is not one
+#     @treewright_branch    the branch that worktree is on
 #
 # For instance, to keep the repository in view while attached:
 #
-#     set -g status-right " #{@treemux_repo} "
+#     set -g status-right " #{@treewright_repo} "
 `

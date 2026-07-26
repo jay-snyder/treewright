@@ -1,6 +1,6 @@
-// Package tmux wraps the handful of tmux commands treemux drives.
+// Package tmux wraps the handful of tmux commands treewright drives.
 //
-// Every window treemux opens belongs to one repository, and each repository has
+// Every window treewright opens belongs to one repository, and each repository has
 // a session of its own — named after its config — so that windows for different
 // repositories never share a session. Two of tmux's own rules shape this API:
 //
@@ -13,13 +13,13 @@
 //
 // Window ids ("@3") are unique across the whole server, so a window can be
 // selected or killed by id without naming the session holding it — which is what
-// lets treemux act on a window that turns out to be in the wrong session.
+// lets treewright act on a window that turns out to be in the wrong session.
 //
 // Which worktree a window belongs to is recorded on the window itself, as the
-// user option @treemux_worktree, rather than read off the directory its shell
+// user option @treewright_worktree, rather than read off the directory its shell
 // happens to be standing in. A pane's directory moves with every cd, and two
 // windows can stand in one directory at once — the base window does exactly that
-// after `treemux cd` — so identity has to come from something the user cannot
+// after `treewright cd` — so identity has to come from something the user cannot
 // change by walking around.
 package tmux
 
@@ -35,7 +35,7 @@ import (
 )
 
 // Spec describes a window to open: where it goes, what runs in it, and what
-// treemux records on it.
+// treewright records on it.
 //
 // Slug and Branch are empty for the base window, which sits on a checkout rather
 // than on a worktree, and so has neither.
@@ -50,10 +50,10 @@ type Spec struct {
 	Branch string // the branch that worktree is on
 }
 
-// ErrNotFollowed reports that treemux could not move the calling client — to a
+// ErrNotFollowed reports that treewright could not move the calling client — to a
 // window it opened, or to a session it was asked to attach to. Its usual cause is
 // a $TMUX inherited from a client that has since detached: the variable outlives
-// the client, so treemux believes there is someone to move and tmux disagrees.
+// the client, so treewright believes there is someone to move and tmux disagrees.
 //
 // Where a window was opened, it is open either way, which is why that caller
 // reports this rather than failing on it.
@@ -74,18 +74,18 @@ func Available() bool {
 	return err == nil
 }
 
-// Inside reports whether treemux is running inside a tmux client. It decides
+// Inside reports whether treewright is running inside a tmux client. It decides
 // whether there is a client to move: outside one, windows can still be created
 // and selected, but nothing can be brought to the foreground.
 func Inside() bool { return os.Getenv("TMUX") != "" }
 
-// serverArgs points tmux at a particular server when TREEMUX_TMUX_LABEL names
+// serverArgs points tmux at a particular server when TREEWRIGHT_TMUX_LABEL names
 // one, for a user who runs `tmux -L work` rather than the default server.
 //
 // Inside a client no flag is needed: tmux reads the socket path out of $TMUX
-// itself, so calls already reach the server treemux is running under.
+// itself, so calls already reach the server treewright is running under.
 func serverArgs() []string {
-	if label := os.Getenv("TREEMUX_TMUX_LABEL"); label != "" {
+	if label := os.Getenv("TREEWRIGHT_TMUX_LABEL"); label != "" {
 		return []string{"-L", label}
 	}
 	return nil
@@ -148,18 +148,18 @@ func ServerRunning() bool {
 	return err == nil
 }
 
-// The user options treemux records on every window it opens. Windows treemux did
+// The user options treewright records on every window it opens. Windows treewright did
 // not open have none, and read as empty.
 //
 // Only the worktree is read back — it is what identifies a window, and it is the
 // one that rides in paneFormat below. The rest are written for the user's own
-// tmux.conf, where "#{@treemux_slug}" in a status line costs nothing to render
+// tmux.conf, where "#{@treewright_slug}" in a status line costs nothing to render
 // and the alternative is a shell-out to git on every status interval.
 const (
-	worktreeOption = "@treemux_worktree"
-	repoOption     = "@treemux_repo"
-	slugOption     = "@treemux_slug"
-	branchOption   = "@treemux_branch"
+	worktreeOption = "@treewright_worktree"
+	repoOption     = "@treewright_repo"
+	slugOption     = "@treewright_slug"
+	branchOption   = "@treewright_branch"
 )
 
 // paneFormat lists a pane as window id, session, window name, the worktree its
@@ -185,7 +185,7 @@ const paneFormat = "#{window_id}\t#{session_name}\t#{window_name}\t#{" + worktre
 // worktree that ended up in another session is a thing to report and to switch
 // to, and pretending it does not exist would open a duplicate beside it. Where
 // several panes share a directory — the base window standing in a worktree's
-// worktree after `treemux cd` is the everyday case — claim.beats decides between
+// worktree after `treewright cd` is the everyday case — claim.beats decides between
 // them.
 func Windows(prefer string) map[string]Window {
 	out, err := run("list-panes", "-a", "-F", paneFormat)
@@ -203,8 +203,8 @@ type claim struct {
 	worktree string
 }
 
-// rank scores how strong a claim on dir is. A window treemux opened on this very
-// worktree says so; a window treemux did not open says nothing; and a window
+// rank scores how strong a claim on dir is. A window treewright opened on this very
+// worktree says so; a window treewright did not open says nothing; and a window
 // opened on a different worktree is positive evidence against — its shell has
 // wandered in here, but it is still the other worktree's window, and closing it or
 // switching to it in this one's name would be wrong.
@@ -281,7 +281,7 @@ func parsePanes(out, prefer string) map[string]Window {
 			continue
 		}
 		stake(fields[4], c)
-		// A window treemux opened answers for its own worktree wherever its pane
+		// A window treewright opened answers for its own worktree wherever its pane
 		// is standing, so cd-ing a pane out of the directory no longer orphans the
 		// worktree's window and has a second one opened beside it.
 		stake(c.worktree, c)
@@ -298,7 +298,7 @@ func parsePanes(out, prefer string) map[string]Window {
 }
 
 // NewSession creates a repository's session, detached, holding one window. The
-// session is created detached even when treemux is running inside tmux, because
+// session is created detached even when treewright is running inside tmux, because
 // moving the client to it is Focus's job and a caller may not want to be moved.
 func NewSession(s Spec) (Window, error) {
 	args := []string{"new-session", "-d", "-s", s.Session, "-c", s.Dir, "-n", s.Name, "-P", "-F", "#{window_id}"}
@@ -357,7 +357,7 @@ func newWindow(s Spec, args []string) (Window, error) {
 //
 // An empty value is left unset rather than written as "": tmux answers with the
 // empty string either way, and an option that was never set is the honest record
-// of something treemux does not know — the base window's slug and branch.
+// of something treewright does not know — the base window's slug and branch.
 //
 // A value holding a tab goes unstamped, because the worktree comes back as one
 // tab-separated field of the pane listing, where only the last field, the path,
@@ -417,7 +417,7 @@ func Focus(w Window) error {
 // SwitchTo moves the calling client to a session, leaving whichever window is
 // current there current. That is what separates attaching to a repository from
 // selecting one of its windows: you arrive where you left off, not somewhere
-// treemux chose.
+// treewright chose.
 func SwitchTo(session string) error {
 	if _, err := run("switch-client", "-t", exact(session)); err != nil {
 		return fmt.Errorf("%w: %v", ErrNotFollowed, err)
@@ -428,7 +428,7 @@ func SwitchTo(session string) error {
 // AttachArgs is the argument list that attaches a terminal to a session, server
 // flags included.
 //
-// Returned rather than run, because attaching is the one tmux command treemux
+// Returned rather than run, because attaching is the one tmux command treewright
 // does not want the output of: tmux takes the terminal over for as long as the
 // client stays attached, so the caller has to hand it the streams it inherited
 // instead of the pipes run uses.
@@ -436,7 +436,7 @@ func AttachArgs(session string) []string {
 	return append(serverArgs(), "attach-session", "-t", exact(session))
 }
 
-// HasBindings reports whether any key binding runs treemux, which is how the
+// HasBindings reports whether any key binding runs treewright, which is how the
 // tmux-side integration announces itself. Unlike the shell integration, which
 // can only be inferred, a binding is a thing the server holds and can be asked
 // about.
@@ -448,7 +448,7 @@ func HasBindings() (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return strings.Contains(out, "treemux"), nil
+	return strings.Contains(out, "treewright"), nil
 }
 
 // Prefix is the key that introduces a tmux binding, as tmux spells it — "C-b"
@@ -467,7 +467,7 @@ func Prefix() string {
 // KeyBoundTo names the prefix key whose command mentions all of match, or ""
 // when none does.
 //
-// It exists so that treemux can tell a reader which key does the thing being
+// It exists so that treewright can tell a reader which key does the thing being
 // described, without knowing which key that is: the bindings are the user's to
 // move, and the ones printed by tmux-init can be renamed on the way in. Asking
 // the server is the only answer that stays true.
@@ -533,9 +533,9 @@ func unquoteKey(key string) string {
 //
 // tmux reads configuration from a file rather than from a pipe, so this writes a
 // temporary one and points source-file at it. The file is the same text
-// `treemux tmux-init` prints, so what a user reads is what a server gets.
+// `treewright tmux-init` prints, so what a user reads is what a server gets.
 func Source(conf string) error {
-	f, err := os.CreateTemp("", "treemux-*.tmux")
+	f, err := os.CreateTemp("", "treewright-*.tmux")
 	if err != nil {
 		return err
 	}
@@ -555,7 +555,7 @@ func Source(conf string) error {
 // offers nothing that distinguishes a popup from an ordinary pane, and the
 // difference matters to anything about to print a message the popup will hold on
 // screen afterwards.
-const PopupEnv = "TREEMUX_POPUP"
+const PopupEnv = "TREEWRIGHT_POPUP"
 
 // Popup runs a command in a tmux popup of an exact size, in dir, drawn on client.
 //

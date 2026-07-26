@@ -1,4 +1,4 @@
-// Package cli parses treemux's arguments and runs the requested subcommand.
+// Package cli parses treewright's arguments and runs the requested subcommand.
 //
 // Output follows one rule throughout: stdout carries the answer — the ls table,
 // completion candidates, the shell integration script — and stderr carries
@@ -14,7 +14,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/jay-snyder/treemux/internal/config"
+	"github.com/jay-snyder/treewright/internal/config"
 )
 
 // Sentinels main uses to choose an exit code. Both mean "already reported".
@@ -31,7 +31,7 @@ var (
 // usageError is a command invoked wrongly: a bad flag, a missing or extra
 // argument. Run turns it into a message plus that command's help.
 type usageError struct {
-	command string // "" for an error about treemux itself
+	command string // "" for an error about treewright itself
 	message string
 }
 
@@ -46,16 +46,20 @@ func usageErrorf(command, format string, args ...any) error {
 // point the streams at buffers and assert on exactly what each one received.
 type Env struct {
 	Args    []string  // arguments after the program name
-	Version string    // build version, for `treemux version`
+	Argv0   string    // the name the binary was invoked by: "treewright", or "tw"
+	Version string    // build version, for `treewright version`
 	Stdout  io.Writer // the answer
 	Stderr  io.Writer // progress, warnings, prompts
 
 	// EvalFile is a path the shell integration wants shell commands appended
-	// to, so treemux can affect the calling shell. From $TREEMUX_EVAL_FILE.
+	// to, so treewright can affect the calling shell. From $TREEWRIGHT_EVAL_FILE.
 	EvalFile string
 }
 
 func (e *Env) defaults() {
+	if e.Argv0 == "" {
+		e.Argv0 = "treewright"
+	}
 	if e.Stdout == nil {
 		e.Stdout = os.Stdout
 	}
@@ -63,11 +67,11 @@ func (e *Env) defaults() {
 		e.Stderr = os.Stderr
 	}
 	if e.EvalFile == "" {
-		e.EvalFile = os.Getenv("TREEMUX_EVAL_FILE")
+		e.EvalFile = os.Getenv("TREEWRIGHT_EVAL_FILE")
 	}
 }
 
-// progressf reports what treemux is doing. Unprefixed, on stderr.
+// progressf reports what treewright is doing. Unprefixed, on stderr.
 func (e *Env) progressf(format string, args ...any) {
 	fmt.Fprintf(e.Stderr, format+"\n", args...)
 }
@@ -122,7 +126,7 @@ window running the configured command.
 
 The window goes in this repository's own tmux session — named after its config —
 which is created if it is not running yet, so one repository's windows never mix
-with another's. Outside tmux the window is still created, detached, and treemux
+with another's. Outside tmux the window is still created, detached, and treewright
 prints the command to attach with.
 
 The branch always forks from origin/<base_branch>; there is deliberately no flag
@@ -153,7 +157,7 @@ The base checkout heads that menu, so the window you return to between worktrees
 is reachable from the same key as the rest — and after a reboot, which a checkout
 on disk survives and a tmux session does not, it is reopened along with them. Name
 it "base" or name the branch it is parked on. It runs resume_command like every
-other row; "treemux base" is the way in that opens it fresh.`,
+other row; "treewright base" is the way in that opens it fresh.`,
 			run: cmdResume,
 		},
 		{
@@ -165,7 +169,7 @@ menu when no slug is given. An unambiguous prefix of a slug is enough, and "base
 moves you to the main checkout.
 
 The path is also printed, so this works without the shell integration as
-cd "$(treemux cd <slug>)" — but with the integration loaded, treemux moves your
+cd "$(treewright cd <slug>)" — but with the integration loaded, treewright moves your
 shell for you.`,
 			run: cmdCd,
 		},
@@ -183,7 +187,7 @@ selected rather than a second one being opened beside it. Being the repository's
 session's first window, it is also what keeps that session alive as worktrees come
 and go.
 
-"treemux resume" reaches the same window, since the base checkout is a row of its
+"treewright resume" reaches the same window, since the base checkout is a row of its
 menu. The difference is only ever visible on the first open of the day: this runs
 command, for a general-purpose window, where resume runs resume_command.`,
 			run: cmdBase,
@@ -199,15 +203,15 @@ resume, that being a request for one particular worktree.
 Inside tmux the client is moved instead, since attaching a second client to a
 session the first one is already in is the nesting tmux warns about.
 
-The session has to exist. "treemux base" is what opens a repository's first
+The session has to exist. "treewright base" is what opens a repository's first
 window, and so what brings its session into being.`,
 			run: cmdAttach,
 		},
 		{
 			name:    "popup",
 			args:    "[-c <client>] <command> [arguments]",
-			summary: "run a treemux command in a tmux popup sized to its output",
-			long: `Opens a tmux popup and runs "treemux <command>" inside it, having
+			summary: "run a treewright command in a tmux popup sized to its output",
+			long: `Opens a tmux popup and runs "treewright <command>" inside it, having
 first worked out how big that popup needs to be.
 
 tmux sizes a popup when it is created and offers no way to fit one afterwards:
@@ -215,7 +219,7 @@ tmux sizes a popup when it is created and offers no way to fit one afterwards:
 unit for a picker, whose height is the number of worktrees and whose width is the
 widest slug — neither of which grows when the terminal does, so on a wide
 terminal most of the popup is empty. This is what the key bindings printed by
-"treemux tmux-init" go through.
+"treewright tmux-init" go through.
 
 --client names the terminal to draw on. It matters because a tmux command run
 from outside tmux has no association with the client that asked for it, so with
@@ -267,7 +271,7 @@ only as a squash merge is recognized as landed and does not trigger the refusal.
 An unambiguous prefix of a slug is enough to name it.
 
 The tmux window open on that worktree is now pointing at a directory that no
-longer exists, so treemux offers to close it — the window named after the worktree,
+longer exists, so treewright offers to close it — the window named after the worktree,
 not whichever one you happened to run this from.`,
 			flags: []flagDoc{
 				{"-f, --force", "remove even when unsaved work would be lost"},
@@ -327,7 +331,7 @@ which base branch a command would really fork from.`,
 		{
 			name:    "doctor",
 			summary: "check the installation and every registered config",
-			long: `Verifies the parts that have to line up for treemux to work: tmux
+			long: `Verifies the parts that have to line up for treewright to work: tmux
 installed, the shell integration loaded, the registry readable, and for each
 config its main checkout, origin remote, base branch, carry_files and command.
 
@@ -344,8 +348,8 @@ missing carry file, no tmux server running yet — do not fail the run.`,
 			summary: "print the shell integration for zsh, bash, or fish",
 			long: `Prints a snippet to load from your shell's startup file:
 
-    eval "$(treemux shell-init zsh)"     # or bash
-    treemux shell-init fish | source
+    eval "$(treewright shell-init zsh)"     # or bash
+    treewright shell-init fish | source
 
 It defines a wrapper function, so that cd can move your shell and rm can move it
 out of a directory it just deleted, and registers tab completion.`,
@@ -357,22 +361,22 @@ out of a directory it just deleted, and registers tab completion.`,
 			summary: "print the tmux integration: popup key bindings and titles",
 			long: `Prints tmux configuration to load from your tmux.conf:
 
-    run-shell 'treemux tmux-init --apply'
+    run-shell 'treewright tmux-init --apply'
 
-    treemux tmux-init > ~/.config/treemux/treemux.tmux
-    source-file ~/.config/treemux/treemux.tmux
+    treewright tmux-init > ~/.config/treewright/treewright.tmux
+    source-file ~/.config/treewright/treewright.tmux
 
 It binds prefix + T to switch worktrees and prefix + N to start one, both by
-opening treemux in a popup — which is the only way to reach it from a window
+opening treewright in a popup — which is the only way to reach it from a window
 whose pane is the agent itself and has no shell to type into. It also turns
-terminal titles on, and documents the window options treemux records for a
+terminal titles on, and documents the window options treewright records for a
 status line to read.
 
 Both keys are free in stock tmux, and their lowercase twins are harmless if you
 miss the shift: t is clock-mode and n is next-window. Where that is not true of
 your own config, move them:
 
-    treemux tmux-init --resume-key G --new-key C-n
+    treewright tmux-init --resume-key G --new-key C-n
 
 An empty key omits its binding, so --new-key "" binds only the picker. Anything
 more than the keys — the popup size, a binding of your own — is what printing to
@@ -476,7 +480,7 @@ func unknownCommand(env *Env, name string) error {
 	} else {
 		fmt.Fprintf(env.Stderr, "error: unknown command %q\n\n", name)
 	}
-	writeOverview(env.Stderr)
+	writeOverview(env.Stderr, env.Argv0)
 	return ErrUsage
 }
 
@@ -490,7 +494,7 @@ func Run(env Env) error {
 	if len(env.Args) == 0 {
 		// Invoked with nothing to do: help belongs on stderr here, because this
 		// is an error, and exit 2 says so.
-		writeOverview(env.Stderr)
+		writeOverview(env.Stderr, env.Argv0)
 		return ErrUsage
 	}
 
@@ -504,13 +508,13 @@ func Run(env Env) error {
 			if target == nil || target.hidden {
 				return unknownCommand(&env, rest[0])
 			}
-			writeCommandHelp(env.Stdout, target)
+			writeCommandHelp(env.Stdout, env.Argv0, target)
 			return nil
 		}
-		writeOverview(env.Stdout)
+		writeOverview(env.Stdout, env.Argv0)
 		return nil
 	case "-v", "--version", "version":
-		fmt.Fprintf(env.Stdout, "treemux %s\n", env.Version)
+		fmt.Fprintf(env.Stdout, "treewright %s\n", env.Version)
 		return nil
 	}
 
@@ -522,7 +526,7 @@ func Run(env Env) error {
 	// -h on a subcommand is a request for its help, not a flag it must accept.
 	for _, a := range rest {
 		if a == "-h" || a == "--help" {
-			writeCommandHelp(env.Stdout, cmd)
+			writeCommandHelp(env.Stdout, env.Argv0, cmd)
 			return nil
 		}
 	}
@@ -533,9 +537,9 @@ func Run(env Env) error {
 		// A wrong invocation is worth showing the right one for.
 		fmt.Fprintf(env.Stderr, "error: %s\n\n", ue.message)
 		if target := lookup(ue.command); target != nil {
-			writeCommandHelp(env.Stderr, target)
+			writeCommandHelp(env.Stderr, env.Argv0, target)
 		} else {
-			writeOverview(env.Stderr)
+			writeOverview(env.Stderr, env.Argv0)
 		}
 		return ErrUsage
 	}
@@ -544,10 +548,14 @@ func Run(env Env) error {
 
 // ---- help ------------------------------------------------------------------
 
-const tagline = "treemux - isolated git worktree, tmux, and agent sessions for parallel work"
+const tagline = "treewright - isolated git worktree, tmux, and agent sessions for parallel work"
 
-func writeOverview(w io.Writer) {
-	fmt.Fprintf(w, "%s\n\nusage: treemux <command> [arguments]\n\ncommands:\n", tagline)
+// The usage lines print argv0 — the name the user actually typed, "treewright"
+// or its installed shorthand "tw" — so that help never scolds a user with a
+// longer name than the one they are using. Prose and copy-pasteable snippets
+// keep the canonical name; only the structural lines follow the invocation.
+func writeOverview(w io.Writer, argv0 string) {
+	fmt.Fprintf(w, "%s\n\nusage: %s <command> [arguments]\n\ncommands:\n", tagline, argv0)
 
 	width := 0
 	for _, c := range commands {
@@ -565,13 +573,13 @@ func writeOverview(w io.Writer) {
 		fmt.Fprintf(w, "  %-*s  %s\n", width, strings.TrimSpace(c.name+" "+c.args), c.summary)
 	}
 
-	fmt.Fprintf(w, "\nrun \"treemux help <command>\" for detail on one command,\n")
-	fmt.Fprintf(w, "or \"treemux setup\" inside a repository to register it.\n")
+	fmt.Fprintf(w, "\nrun \"%s help <command>\" for detail on one command,\n", argv0)
+	fmt.Fprintf(w, "or \"%s setup\" inside a repository to register it.\n", argv0)
 	fmt.Fprintf(w, "\nconfig: %s/<name>.toml\n", config.Dir())
 }
 
-func writeCommandHelp(w io.Writer, c *command) {
-	fmt.Fprintf(w, "usage: treemux %s\n", strings.TrimSpace(c.name+" "+c.args))
+func writeCommandHelp(w io.Writer, argv0 string, c *command) {
+	fmt.Fprintf(w, "usage: %s %s\n", argv0, strings.TrimSpace(c.name+" "+c.args))
 	fmt.Fprintf(w, "\n%s\n", c.summary)
 	if c.long != "" {
 		fmt.Fprintf(w, "\n%s\n", c.long)

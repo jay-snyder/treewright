@@ -1,7 +1,7 @@
-// Package git wraps the git commands treemux needs.
+// Package git wraps the git commands treewright needs.
 //
 // Everything here shells out to the git binary rather than using a git library:
-// treemux's questions ("is this branch squash-merged?") are most precisely
+// treewright's questions ("is this branch squash-merged?") are most precisely
 // answered by the same plumbing commands a human would run, and staying close to
 // those commands keeps the behavior auditable.
 package git
@@ -69,7 +69,7 @@ func (r Repo) Name() string { return filepath.Base(r.Dir) }
 type Worktree struct {
 	Dir    string // absolute path on disk, as git reports it
 	Branch string // branch name without refs/heads/; empty when HEAD is detached
-	Slug   string // treemux slug; set only by Managed
+	Slug   string // treewright slug; set only by Managed
 }
 
 // Worktrees lists every worktree attached to the repo, main checkout first
@@ -124,7 +124,7 @@ func (r Repo) MainDir() (string, error) {
 	return list[0].Dir, nil
 }
 
-// Managed lists only the worktrees treemux created: the siblings of the main
+// Managed lists only the worktrees treewright created: the siblings of the main
 // checkout named "<repo>-<slug>". Anything else attached to the repo — the main
 // checkout itself, or a worktree made by hand elsewhere — is left alone.
 //
@@ -270,11 +270,11 @@ func (r Repo) Unpushed(branch string) int {
 // runs therefore write the identical object rather than a new one each time, and
 // the result does not depend on the user's configured git identity.
 var squashCheckEnv = []string{
-	"GIT_AUTHOR_NAME=treemux",
-	"GIT_AUTHOR_EMAIL=treemux@invalid",
+	"GIT_AUTHOR_NAME=treewright",
+	"GIT_AUTHOR_EMAIL=treewright@invalid",
 	"GIT_AUTHOR_DATE=@0 +0000",
-	"GIT_COMMITTER_NAME=treemux",
-	"GIT_COMMITTER_EMAIL=treemux@invalid",
+	"GIT_COMMITTER_NAME=treewright",
+	"GIT_COMMITTER_EMAIL=treewright@invalid",
 	"GIT_COMMITTER_DATE=@0 +0000",
 }
 
@@ -294,7 +294,7 @@ var squashCheckEnv = []string{
 //
 // The squash path writes one dangling commit object to the object database.
 // Nothing ever points a ref at it and git's normal gc reaps it, but this is the
-// reason treemux needs write access to .git even for read-only-looking commands.
+// reason treewright needs write access to .git even for read-only-looking commands.
 func (r Repo) IsMerged(branch, base string) bool {
 	if branch == "" {
 		return false
@@ -459,7 +459,7 @@ func (r Repo) AddWorktreeNewBranch(dir, branch, startPoint string) error {
 
 // RemoveWorktree deletes a worktree directory and detaches it from the repo.
 //
-// --force is needed for the ordinary case, not to override treemux's own safety
+// --force is needed for the ordinary case, not to override treewright's own safety
 // checks: every worktree carries untracked build output that git refuses to
 // delete without it. Whether the work is safe to lose is decided before this is
 // ever called.

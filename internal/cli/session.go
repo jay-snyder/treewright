@@ -4,12 +4,12 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/jay-snyder/treemux/internal/config"
-	"github.com/jay-snyder/treemux/internal/tmux"
+	"github.com/jay-snyder/treewright/internal/config"
+	"github.com/jay-snyder/treewright/internal/tmux"
 )
 
 // Each repository gets a tmux session of its own, named after its config, and
-// every window treemux opens goes into that session.
+// every window treewright opens goes into that session.
 //
 // The alternative — opening windows in whatever session the caller happens to be
 // attached to — mixes repositories together in one status line, where two windows
@@ -89,14 +89,14 @@ func openWindow(env *Env, cfg *config.Config, spec tmux.Spec) error {
 // found, so a client that could not be moved — or a window that has closed since
 // — is news to report rather than grounds for calling the whole thing a failure.
 //
-// The way out is given as `treemux attach <repo>` rather than as the tmux command
+// The way out is given as `treewright attach <repo>` rather than as the tmux command
 // it runs, because that spelling stays correct: it names the session exactly, and
-// it reaches the right server when TREEMUX_TMUX_LABEL has aimed treemux at one a
+// it reaches the right server when TREEWRIGHT_TMUX_LABEL has aimed treewright at one a
 // bare `tmux attach` would not find.
 func focusWindow(env *Env, cfg *config.Config, w tmux.Window, command string) error {
 	switch err := tmux.Focus(w); {
 	case errors.Is(err, tmux.ErrNotFollowed):
-		env.warnf("could not switch to session %s — attach with: treemux attach %s", w.Session, cfg.Name)
+		env.warnf("could not switch to session %s — attach with: treewright attach %s", w.Session, cfg.Name)
 	case err != nil:
 		// The window was there a moment ago, so what changed is that it closed:
 		// tmux closes a window as soon as its command exits, and a command that
@@ -104,7 +104,7 @@ func focusWindow(env *Env, cfg *config.Config, w tmux.Window, command string) er
 		// this. Naming the command is what makes that guessable.
 		env.warnf("window %s closed as soon as it opened — did %q exit straight away?", w.Name, command)
 	case !tmux.Inside():
-		env.progressf("window %s is open in tmux session %s — attach with: treemux attach %s",
+		env.progressf("window %s is open in tmux session %s — attach with: treewright attach %s",
 			w.Name, w.Session, cfg.Name)
 	}
 	return nil

@@ -12,7 +12,7 @@ import (
 func registry(t *testing.T, files map[string]string) string {
 	t.Helper()
 	dir := t.TempDir()
-	t.Setenv("TREEMUX_CONFIG_DIR", dir)
+	t.Setenv("TREEWRIGHT_CONFIG_DIR", dir)
 	for name, body := range files {
 		path := filepath.Join(dir, name+".toml")
 		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
@@ -363,7 +363,7 @@ func TestBranchAndDirFor(t *testing.T) {
 
 // ---- reporting -------------------------------------------------------------
 
-// TestExplicitDistinguishesSettingFromDefaulting is what lets `treemux config`
+// TestExplicitDistinguishesSettingFromDefaulting is what lets `treewright config`
 // say which values were chosen. A setting that happens to match its default is
 // the case that makes comparing values insufficient.
 func TestExplicitDistinguishesSettingFromDefaulting(t *testing.T) {

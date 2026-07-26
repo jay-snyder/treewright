@@ -8,13 +8,13 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/jay-snyder/treemux/internal/config"
-	"github.com/jay-snyder/treemux/internal/git"
-	"github.com/jay-snyder/treemux/internal/tmux"
-	"github.com/jay-snyder/treemux/internal/ui"
+	"github.com/jay-snyder/treewright/internal/config"
+	"github.com/jay-snyder/treewright/internal/git"
+	"github.com/jay-snyder/treewright/internal/tmux"
+	"github.com/jay-snyder/treewright/internal/ui"
 )
 
-// A working treemux is four things agreeing: the binary, a tmux server, a shell
+// A working treewright is four things agreeing: the binary, a tmux server, a shell
 // integration loaded into the current shell, and a config whose paths still point
 // at something. Any one of them can be wrong in a way that shows up much later as
 // behavior nobody asked for — a command that silently does nothing, a worktree
@@ -116,10 +116,10 @@ func checkTmux(r *report) {
 	}
 	r.add(levelOK, "tmux at %s", path)
 	// Worth stating whenever it is set, because it redirects every tmux command
-	// treemux runs at a different server, and a window that opened "nowhere" is
+	// treewright runs at a different server, and a window that opened "nowhere" is
 	// otherwise a mystery.
-	if label := os.Getenv("TREEMUX_TMUX_LABEL"); label != "" {
-		r.add(levelOK, "driving the tmux server %q, from TREEMUX_TMUX_LABEL", label)
+	if label := os.Getenv("TREEWRIGHT_TMUX_LABEL"); label != "" {
+		r.add(levelOK, "driving the tmux server %q, from TREEWRIGHT_TMUX_LABEL", label)
 	}
 
 	switch session := tmux.CurrentSession(); {
@@ -130,9 +130,9 @@ func checkTmux(r *report) {
 		// stale environment inherited from a dead session looks like.
 		r.add(levelWarn, "$TMUX is set but its server does not answer — windows may open on another server")
 	default:
-		// Not a fault: treemux is often run from a plain shell, and windows are
+		// Not a fault: treewright is often run from a plain shell, and windows are
 		// still opened, in the repository's own session, to attach to afterwards.
-		r.add(levelWarn, "not inside tmux — windows are created detached, and treemux says how to attach")
+		r.add(levelWarn, "not inside tmux — windows are created detached, and treewright says how to attach")
 	}
 }
 
@@ -141,7 +141,7 @@ func checkTmux(r *report) {
 // Unlike the shell one, which can only be inferred from the variable its wrapper
 // exports, this can simply be asked: a key binding is a thing the server holds.
 // It matters most in the case it is hardest to notice — a window running an agent
-// has no shell in it, so without a binding there is no way to reach treemux from
+// has no shell in it, so without a binding there is no way to reach treewright from
 // inside a worktree at all.
 func checkTmuxIntegration(r *report) {
 	if !tmux.Available() {
@@ -162,7 +162,7 @@ func checkTmuxIntegration(r *report) {
 	case bound:
 		r.add(levelOK, "tmux integration loaded")
 	default:
-		r.add(levelWarn, "tmux integration not loaded — add run-shell 'treemux tmux-init --apply' to your tmux.conf, or no key reaches treemux from a window running an agent")
+		r.add(levelWarn, "tmux integration not loaded — add run-shell 'treewright tmux-init --apply' to your tmux.conf, or no key reaches treewright from a window running an agent")
 	}
 }
 
@@ -215,11 +215,11 @@ func checkShellIntegration(env *Env, r *report) {
 	shell := filepath.Base(os.Getenv("SHELL"))
 	switch shell {
 	case "zsh", "bash":
-		r.add(levelWarn, "shell integration not loaded — add eval \"$(treemux shell-init %s)\" to your startup file, or cd and rm cannot move your shell", shell)
+		r.add(levelWarn, "shell integration not loaded — add eval \"$(treewright shell-init %s)\" to your startup file, or cd and rm cannot move your shell", shell)
 	case "fish":
-		r.add(levelWarn, "shell integration not loaded — add treemux shell-init fish | source to your config, or cd and rm cannot move your shell")
+		r.add(levelWarn, "shell integration not loaded — add treewright shell-init fish | source to your config, or cd and rm cannot move your shell")
 	default:
-		r.add(levelWarn, "shell integration not loaded — see \"treemux help shell-init\"; without it cd and rm cannot move your shell")
+		r.add(levelWarn, "shell integration not loaded — see \"treewright help shell-init\"; without it cd and rm cannot move your shell")
 	}
 }
 
@@ -232,12 +232,12 @@ func checkRegistry(r *report) []string {
 		return nil
 	}
 	if len(names) == 0 {
-		r.add(levelFail, "no configs in %s — run \"treemux setup\" inside a repository", dir)
+		r.add(levelFail, "no configs in %s — run \"treewright setup\" inside a repository", dir)
 		return nil
 	}
 	r.add(levelOK, "%d config(s) in %s: %s", len(names), dir, strings.Join(names, ", "))
 
-	// A file left in the registry that treemux does not read is nearly always a
+	// A file left in the registry that treewright does not read is nearly always a
 	// config the user believes is in force — a rename half-done, or a config from
 	// an older version in another format.
 	entries, err := os.ReadDir(dir)

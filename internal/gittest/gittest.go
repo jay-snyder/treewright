@@ -11,11 +11,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jay-snyder/treemux/internal/git"
+	"github.com/jay-snyder/treewright/internal/git"
 )
 
 // BranchPrefix is the prefix Worktree gives the branches it creates. Tests that
-// configure treemux must use the same value.
+// configure treewright must use the same value.
 const BranchPrefix = "x/"
 
 // Repo is a scratch repository.
@@ -60,7 +60,7 @@ func New(t *testing.T) *Repo {
 	r.Git(r.MainDir, "remote", "add", "origin", r.Origin)
 
 	r.Write(r.MainDir, "a.txt", "seed\n")
-	// Mirrors reality: the files treemux carries into a new worktree are
+	// Mirrors reality: the files treewright carries into a new worktree are
 	// gitignored, so carrying them must not make the worktree read as dirty.
 	r.Write(r.MainDir, ".gitignore", ".env\n")
 	r.Git(r.MainDir, "add", ".")

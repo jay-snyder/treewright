@@ -7,10 +7,10 @@ import (
 	"strings"
 )
 
-// A compiled treemux runs as its own process, so it cannot change the working
+// A compiled treewright runs as its own process, so it cannot change the working
 // directory of the shell that invoked it. The shell integration closes that gap:
 // the wrapper function creates a temporary file, passes its path in
-// $TREEMUX_EVAL_FILE, and sources it after treemux exits, so anything appended
+// $TREEWRIGHT_EVAL_FILE, and sources it after treewright exits, so anything appended
 // here runs in the user's own shell.
 //
 // The commands written are restricted to what zsh, bash and fish all parse the

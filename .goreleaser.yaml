@@ -2,7 +2,7 @@
 # Validate changes locally with: goreleaser check
 version: 2
 
-project_name: treemux
+project_name: treewright
 
 before:
   hooks:
@@ -16,7 +16,7 @@ builds:
     goos: [darwin, linux]
     goarch: [amd64, arm64]
     ldflags:
-      # Stamps `treemux --version`; main.version is "dev" for plain `go build`.
+      # Stamps `treewright --version`; main.version is "dev" for plain `go build`.
       - -s -w -X main.version={{ .Version }}
 
 archives:
@@ -42,20 +42,21 @@ release:
     ## Install
 
     ```sh
-    brew install jay-snyder/tap/treemux
+    brew install jay-snyder/tap/treewright
     ```
 
     Then add the shell integration to your shell's startup file:
 
     ```sh
-    eval "$(treemux shell-init zsh)"     # or bash
-    treemux shell-init fish | source
+    eval "$(treewright shell-init zsh)"     # or bash
+    treewright shell-init fish | source
     ```
 
-    And register a repository from inside it:
+    And register a repository from inside it — tw is the installed short name,
+    and everything answers to it:
 
     ```sh
-    treemux setup
+    tw setup
     ```
 
 # Publishes a Homebrew cask to a separate tap repository.
@@ -70,10 +71,14 @@ homebrew_casks:
     commit_author:
       name: Jay Snyder
       email: github@catch.fail
-    homepage: https://github.com/jay-snyder/treemux
+    homepage: https://github.com/jay-snyder/treewright
     description: Isolated git worktree + tmux + agent sessions for parallel work
     license: MIT
-    binaries: [treemux]
+    binaries: [treewright]
+    # tw is the everyday name: a second link to the same binary, so it works
+    # even before the shell integration (which also defines tw) is loaded.
+    custom_block: |
+      binary "treewright", target: "tw"
     dependencies:
       - formula: git
       - formula: tmux
@@ -83,11 +88,12 @@ homebrew_casks:
         # run them until the download's quarantine flag is cleared.
         install: |
           if system_command("/usr/bin/xattr", args: ["-h"]).exit_status == 0
-            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/treemux"]
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/treewright"]
           end
     caveats: |
       Add the shell integration to your shell's startup file:
-        eval "$(treemux shell-init zsh)"     # or bash
-        treemux shell-init fish | source
+        eval "$(treewright shell-init zsh)"     # or bash
+        treewright shell-init fish | source
 
-      Then register a repository by running "treemux setup" inside it.
+      Then register a repository by running "tw setup" inside it.
+      (tw is the installed short name; every command answers to it.)

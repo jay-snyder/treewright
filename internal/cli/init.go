@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/jay-snyder/treemux/internal/config"
-	"github.com/jay-snyder/treemux/internal/shellinit"
-	"github.com/jay-snyder/treemux/internal/tmux"
-	"github.com/jay-snyder/treemux/internal/tmuxinit"
+	"github.com/jay-snyder/treewright/internal/config"
+	"github.com/jay-snyder/treewright/internal/shellinit"
+	"github.com/jay-snyder/treewright/internal/tmux"
+	"github.com/jay-snyder/treewright/internal/tmuxinit"
 )
 
 // cmdInit prints the shell integration for the named shell.
@@ -36,11 +36,11 @@ func cmdInit(env *Env, args []string) error {
 //
 // --apply exists because tmux has no eval "$(...)" — there is no way to write one
 // line in tmux.conf that both fetches the snippet and runs it. With it, the line
-// is `run-shell 'treemux tmux-init --apply'`, and what the server gets is byte for
+// is `run-shell 'treewright tmux-init --apply'`, and what the server gets is byte for
 // byte what printing produces.
 //
 // The keys are flags rather than settings in a repo's config, because a key
-// binding belongs to a tmux server and not to a repository: one treemux config
+// binding belongs to a tmux server and not to a repository: one treewright config
 // per repo would give several answers to a question that has one. As flags they
 // also work identically down both routes — a --apply line in tmux.conf can carry
 // them, where editing the printed file could not.
@@ -73,7 +73,7 @@ func cmdTmuxInit(env *Env, args []string) error {
 		// tmux.conf this cannot happen — the server is what is reading the file.
 		return fmt.Errorf("%w — is a tmux server running? key bindings live in one", err)
 	}
-	env.progressf("loaded the treemux key bindings into the running tmux server")
+	env.progressf("loaded the treewright key bindings into the running tmux server")
 	return nil
 }
 

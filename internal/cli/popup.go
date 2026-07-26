@@ -7,9 +7,9 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/jay-snyder/treemux/internal/git"
-	"github.com/jay-snyder/treemux/internal/tmux"
-	"github.com/jay-snyder/treemux/internal/ui"
+	"github.com/jay-snyder/treewright/internal/git"
+	"github.com/jay-snyder/treewright/internal/tmux"
+	"github.com/jay-snyder/treewright/internal/ui"
 )
 
 // A tmux popup is given its size when it is created, and tmux offers no way to
@@ -22,7 +22,7 @@ import (
 // So the size is worked out before the popup exists, by the one program that
 // knows what will be printed into it.
 
-// PopupHint says how to dismiss a popup, for a treemux that is running in one and
+// PopupHint says how to dismiss a popup, for a treewright that is running in one and
 // is about to exit non-zero — which is exactly when tmux leaves the popup on
 // screen, holding whatever was printed so it can be read.
 //
@@ -39,9 +39,9 @@ func PopupHint(w io.Writer) {
 	fmt.Fprintln(w, ui.Dim.Apply("press Esc to close", ui.ColorEnabled(w)))
 }
 
-// cmdPopup runs another treemux command inside a tmux popup sized for its output.
+// cmdPopup runs another treewright command inside a tmux popup sized for its output.
 //
-// It is what the key bindings in `treemux tmux-init` invoke, through run-shell,
+// It is what the key bindings in `treewright tmux-init` invoke, through run-shell,
 // which is the only way a binding can compute anything: display-popup would have
 // to be handed a literal size.
 //
@@ -73,10 +73,10 @@ func cmdPopup(env *Env, args []string) error {
 
 	// The binary by its own path rather than by name: the popup runs through a
 	// shell whose PATH is the tmux server's, which is inherited from whatever
-	// started it and need not be the one treemux was found on.
+	// started it and need not be the one treewright was found on.
 	self, err := os.Executable()
 	if err != nil {
-		self = "treemux"
+		self = "treewright"
 	}
 	inner := make([]string, 0, len(positional)+1)
 	inner = append(inner, shellQuote(self))
@@ -84,7 +84,7 @@ func cmdPopup(env *Env, args []string) error {
 		inner = append(inner, shellQuote(a))
 	}
 
-	// run-shell inherits the calling pane's directory, which is how treemux works
+	// run-shell inherits the calling pane's directory, which is how treewright works
 	// out which repository is meant — so the popup starts where this is standing
 	// rather than wherever the tmux server happens to be.
 	dir, _ := os.Getwd()
@@ -142,7 +142,7 @@ func sizeFor(command string) (width, height int) {
 	return width, height
 }
 
-// noWorktreesHint prints what treemux says about a repository nobody has started
+// noWorktreesHint prints what treewright says about a repository nobody has started
 // a worktree in yet, above the menu that follows it.
 //
 // The blank line is the point of having a function at all. Message and menu are
@@ -155,7 +155,7 @@ func noWorktreesHint(env *Env, repo string) {
 	fmt.Fprintln(env.Stderr)
 }
 
-// noWorktreesMessage is what treemux says about a repository nobody has started a
+// noWorktreesMessage is what treewright says about a repository nobody has started a
 // worktree in yet.
 //
 // It lives here, next to the popup sized to hold it, so the two cannot disagree
@@ -166,7 +166,7 @@ func noWorktreesHint(env *Env, repo string) {
 // most likely in a popup opened by that very key, and the keystroke is the nearer
 // of the two answers; the command is for the shell they will drop back to.
 func noWorktreesMessage(repo string) string {
-	const command = "treemux new <slug>"
+	const command = "treewright new <slug>"
 	if keys := newWorktreeKeys(); keys != "" {
 		return fmt.Sprintf("no worktrees for %s — start one with %s, or %q", repo, keys, command)
 	}
@@ -181,9 +181,9 @@ func noWorktreesMessage(repo string) string {
 // hand-written tmux.conf answers to nobody. A hint naming the wrong key is worse
 // than no hint.
 func newWorktreeKeys() string {
-	// Both, so that neither `bind n new-window` nor treemux's own resume binding
+	// Both, so that neither `bind n new-window` nor treewright's own resume binding
 	// is mistaken for this one.
-	key := tmux.KeyBoundTo("treemux", " new ")
+	key := tmux.KeyBoundTo("treewright", " new ")
 	if key == "" {
 		return ""
 	}

@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jay-snyder/treemux/internal/git"
-	"github.com/jay-snyder/treemux/internal/gittest"
+	"github.com/jay-snyder/treewright/internal/git"
+	"github.com/jay-snyder/treewright/internal/gittest"
 )
 
 // ---- discovery -------------------------------------------------------------
@@ -37,7 +37,7 @@ func TestManagedFindsSiblingsOnly(t *testing.T) {
 	f.Worktree("beta")
 
 	// A worktree that is not a "<repo>-<slug>" sibling belongs to somebody else
-	// and is not treemux's to list or remove.
+	// and is not treewright's to list or remove.
 	outside := filepath.Join(f.Root, "unrelated")
 	f.Git(f.MainDir, "worktree", "add", "--quiet", outside, "-b", "someone-else", "origin/main")
 
@@ -149,7 +149,7 @@ func TestInspectStatuses(t *testing.T) {
 	}
 }
 
-// TestSquashMergeReadsAsMerged covers the case treemux exists to get right.
+// TestSquashMergeReadsAsMerged covers the case treewright exists to get right.
 // Where a project squash-merges its pull requests, a landed branch's own commits
 // never appear on origin, and a naive "are these commits upstream?" check calls
 // that unpushed work and refuses to clean it up.

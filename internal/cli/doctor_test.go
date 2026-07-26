@@ -11,7 +11,7 @@ import (
 // Nothing here asserts on doctor's exit code for a healthy setup: whether tmux is
 // installed is a property of the machine running the tests, not of the code, and
 // CI deliberately has no tmux. The findings about configs are what these tests
-// pin, since those are the ones treemux computes.
+// pin, since those are the ones treewright computes.
 
 // finding is one line of doctor's report.
 type finding struct{ level, detail string }
@@ -118,7 +118,7 @@ func TestDoctorReportsMissingCarryFiles(t *testing.T) {
 	found := findings(t, f)
 	// A stale carry_files entry breaks the app inside a fresh worktree and says
 	// nothing until then, so it is worth a warning here — but not a failure, since
-	// treemux itself still works.
+	// treewright itself still works.
 	if got := has(t, found, "carry_files .env is missing"); got != "warn" {
 		t.Errorf("finding = %q, want a warning\nall: %v", got, found)
 	}
@@ -128,7 +128,7 @@ func TestDoctorReportsMissingCarryFiles(t *testing.T) {
 }
 
 // TestDoctorReportsStrayRegistryFiles covers a file left behind by a migration or
-// a rename: treemux ignores it, and the user believes it is in force.
+// a rename: treewright ignores it, and the user believes it is in force.
 func TestDoctorReportsStrayRegistryFiles(t *testing.T) {
 	f := newFixture(t, "")
 	if err := os.WriteFile(filepath.Join(f.registry, "proj.zsh"), []byte("# old\n"), 0o644); err != nil {

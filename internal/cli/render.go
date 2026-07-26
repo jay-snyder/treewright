@@ -7,10 +7,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/jay-snyder/treemux/internal/config"
-	"github.com/jay-snyder/treemux/internal/git"
-	"github.com/jay-snyder/treemux/internal/tmux"
-	"github.com/jay-snyder/treemux/internal/ui"
+	"github.com/jay-snyder/treewright/internal/config"
+	"github.com/jay-snyder/treewright/internal/git"
+	"github.com/jay-snyder/treewright/internal/tmux"
+	"github.com/jay-snyder/treewright/internal/ui"
 )
 
 // resolveConfig picks the config for this invocation. An explicit name wins;
@@ -78,7 +78,7 @@ func statusText(info git.Info) string {
 //
 // A worktree is named by its slug, which is also what you type at `resume` and
 // `cd`. The base checkout has no slug — it is a checkout rather than something
-// treemux created — so the column carries the branch it is parked on instead.
+// treewright created — so the column carries the branch it is parked on instead.
 // That is the more useful of the two things it could say: the row is always the
 // first one, so "base" would only repeat the position, while the branch is what
 // tells you whether your general-purpose window is sitting on staging, on main,
@@ -291,7 +291,7 @@ func writeJSON(env *Env, v any) error {
 // parseArgs splits args into recognized flags and positional values, rejecting
 // unknown flags and more positionals than the command accepts.
 //
-// Flags are accepted in any position, so `treemux rm slug -f` and `treemux rm -f
+// Flags are accepted in any position, so `treewright rm slug -f` and `treewright rm -f
 // slug` both work. Go's flag package stops at the first non-flag argument and
 // would read the former's -f as a positional, which is why this is hand-rolled.
 //

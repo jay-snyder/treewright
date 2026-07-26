@@ -58,7 +58,7 @@ func server(t *testing.T) func(args ...string) (string, error) {
 func TestScriptLoadsIntoARealServer(t *testing.T) {
 	tmux := server(t)
 
-	path := filepath.Join(t.TempDir(), "treemux.tmux")
+	path := filepath.Join(t.TempDir(), "treewright.tmux")
 	if err := os.WriteFile(path, []byte(Script(DefaultKeys())), 0o644); err != nil {
 		t.Fatalf("write the snippet: %v", err)
 	}
@@ -74,7 +74,7 @@ func TestScriptLoadsIntoARealServer(t *testing.T) {
 	// test exists for: the N binding nests a shell command inside a tmux command
 	// inside a command-prompt template, and a mistake there parses as something
 	// else rather than failing outright.
-	for _, want := range []string{"treemux popup", "resume", "new %1"} {
+	for _, want := range []string{"treewright popup", "resume", "new %1"} {
 		if !strings.Contains(keys, want) {
 			t.Errorf("no key binding mentions %q:\n%s", want, keys)
 		}
@@ -104,7 +104,7 @@ func TestBindingsDoNotOverwriteTmuxsOwn(t *testing.T) {
 		t.Fatalf("list the default bindings: %v\n%s", err, before)
 	}
 
-	path := filepath.Join(t.TempDir(), "treemux.tmux")
+	path := filepath.Join(t.TempDir(), "treewright.tmux")
 	if err := os.WriteFile(path, []byte(Script(DefaultKeys())), 0o644); err != nil {
 		t.Fatalf("write the snippet: %v", err)
 	}
@@ -118,7 +118,7 @@ func TestBindingsDoNotOverwriteTmuxsOwn(t *testing.T) {
 	}
 
 	// Every key tmux described before must still be described the same way. A
-	// binding treemux added is a new line, not a changed one.
+	// binding treewright added is a new line, not a changed one.
 	for _, line := range strings.Split(before, "\n") {
 		if strings.TrimSpace(line) == "" {
 			continue
@@ -138,7 +138,7 @@ func TestScriptDocumentsWhatItBinds(t *testing.T) {
 		"tmux-init --apply", // the one-line way to load it
 		"source-file",       // and the file way
 		"--resume-key",      // and how to move the keys
-		"@treemux_slug",     // the window options a status line can read
+		"@treewright_slug",  // the window options a status line can read
 	} {
 		if !strings.Contains(script, want) {
 			t.Errorf("the snippet never mentions %q", want)
@@ -149,7 +149,7 @@ func TestScriptDocumentsWhatItBinds(t *testing.T) {
 // TestDefaultKeysSurviveAMissedShift is the reason the defaults are what they
 // are. These keys get reached for in a hurry, and the first pair chosen — W for
 // the picker — had a lowercase twin that a great many configurations rebind to
-// kill-window, which in a treemux worktree destroys the running agent.
+// kill-window, which in a treewright worktree destroys the running agent.
 //
 // tmux's own lowercase bindings for t and n are clock-mode and next-window. This
 // pins the choice against a future edit that reintroduces the hazard by reaching
@@ -195,7 +195,7 @@ func TestScriptHonorsCustomKeys(t *testing.T) {
 // empty key is a deliberate "bind nothing", not a mistake to fall back from.
 func TestAnEmptyKeyOmitsItsBinding(t *testing.T) {
 	script := Script(Keys{Resume: "T"})
-	if !strings.Contains(script, `treemux popup -c "#{client_tty}" resume`) {
+	if !strings.Contains(script, `treewright popup -c "#{client_tty}" resume`) {
 		t.Errorf("the kept binding is missing:\n%s", script)
 	}
 	if strings.Contains(script, "new %1") {
@@ -208,7 +208,7 @@ func TestAnEmptyKeyOmitsItsBinding(t *testing.T) {
 	if strings.Contains(bare, "bind-key") {
 		t.Errorf("bindings were emitted with no keys asked for:\n%s", bare)
 	}
-	if !strings.Contains(bare, "set -g set-titles on") || !strings.Contains(bare, "@treemux_slug") {
+	if !strings.Contains(bare, "set -g set-titles on") || !strings.Contains(bare, "@treewright_slug") {
 		t.Errorf("dropping the bindings took the rest of the snippet with it:\n%s", bare)
 	}
 }
@@ -238,7 +238,7 @@ func TestValidateRejectsKeysThatWouldBreakTheConfig(t *testing.T) {
 func TestCustomKeysStillLoadIntoARealServer(t *testing.T) {
 	tmux := server(t)
 
-	path := filepath.Join(t.TempDir(), "treemux.tmux")
+	path := filepath.Join(t.TempDir(), "treewright.tmux")
 	if err := os.WriteFile(path, []byte(Script(Keys{Resume: "C-g", New: "F5"})), 0o644); err != nil {
 		t.Fatalf("write the snippet: %v", err)
 	}

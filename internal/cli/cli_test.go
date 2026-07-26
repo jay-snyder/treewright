@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay-snyder/treemux/internal/gittest"
-	"github.com/jay-snyder/treemux/internal/tmux"
+	"github.com/jay-snyder/treewright/internal/gittest"
+	"github.com/jay-snyder/treewright/internal/tmux"
 )
 
 // fixture is a scratch repository plus a config registry pointing at it, so the
@@ -34,12 +34,12 @@ func newFixture(t *testing.T, extraConfig string) *fixture {
 	}
 	f.setConfig("main_dir = '" + repo.MainDir + "'\n" + extraConfig)
 
-	t.Setenv("TREEMUX_CONFIG_DIR", f.registry)
+	t.Setenv("TREEWRIGHT_CONFIG_DIR", f.registry)
 	// Unset so every command runs as it does from a plain shell — no client to
 	// switch, no inherited eval file to write to.
 	t.Setenv("TMUX", "")
 	t.Setenv("TMUX_PANE", "")
-	t.Setenv("TREEMUX_EVAL_FILE", "")
+	t.Setenv("TREEWRIGHT_EVAL_FILE", "")
 	// Windows are still opened without a client, so every tmux command is aimed at
 	// a server private to this test. Nothing here can then open a window on, or
 	// kill a window in, the developer's own tmux — and a test that wants to assert
@@ -90,7 +90,7 @@ func waitForFile(t *testing.T, path, what string) {
 	t.Errorf("%s never produced %s", what, path)
 }
 
-// privateTmuxServer points treemux at a tmux server of this test's own, in a
+// privateTmuxServer points treewright at a tmux server of this test's own, in a
 // socket directory of its own, and takes both away afterwards. The server is not
 // started here: no test pays for one unless it runs a command that opens a window.
 //
@@ -112,7 +112,7 @@ func privateTmuxServer(t *testing.T) {
 	// Sanitized for the same reason a session name is: a subtest's name contains
 	// a "/", which tmux would read as a path.
 	label := tmux.SessionName(strings.ReplaceAll(t.Name(), "/", "-"))
-	t.Setenv("TREEMUX_TMUX_LABEL", label)
+	t.Setenv("TREEWRIGHT_TMUX_LABEL", label)
 
 	// Registered after both Setenvs, so it runs before either is undone and the
 	// kill still finds the server.
@@ -144,7 +144,7 @@ type result struct {
 // one carried the message.
 func (r result) both() string { return r.stdout + r.stderr }
 
-// exec invokes treemux with separate stdout and stderr.
+// exec invokes treewright with separate stdout and stderr.
 func (f *fixture) exec(args ...string) result {
 	f.t.Helper()
 	var out, errOut bytes.Buffer
@@ -152,7 +152,7 @@ func (f *fixture) exec(args ...string) result {
 	return result{stdout: out.String(), stderr: errOut.String(), err: err}
 }
 
-// run invokes treemux and returns its combined output plus the error.
+// run invokes treewright and returns its combined output plus the error.
 func (f *fixture) run(args ...string) (string, error) {
 	f.t.Helper()
 	r := f.exec(args...)
@@ -163,13 +163,13 @@ func (f *fixture) mustRun(args ...string) string {
 	f.t.Helper()
 	out, err := f.run(args...)
 	if err != nil {
-		f.t.Fatalf("treemux %s: %v\n%s", strings.Join(args, " "), err, out)
+		f.t.Fatalf("treewright %s: %v\n%s", strings.Join(args, " "), err, out)
 	}
 	return out
 }
 
-// runWithEvalFile invokes treemux with the shell integration's eval file wired
-// up, and returns whatever treemux asked the calling shell to run.
+// runWithEvalFile invokes treewright with the shell integration's eval file wired
+// up, and returns whatever treewright asked the calling shell to run.
 func (f *fixture) runWithEvalFile(args ...string) (shellCommands string, output string) {
 	f.t.Helper()
 	path := filepath.Join(f.Root, "evalfile")
@@ -177,7 +177,7 @@ func (f *fixture) runWithEvalFile(args ...string) (shellCommands string, output 
 
 	var out bytes.Buffer
 	if err := Run(Env{Args: args, Stdout: &out, Stderr: &out, EvalFile: path}); err != nil {
-		f.t.Fatalf("treemux %s: %v\n%s", strings.Join(args, " "), err, out.String())
+		f.t.Fatalf("treewright %s: %v\n%s", strings.Join(args, " "), err, out.String())
 	}
 	written, err := os.ReadFile(path)
 	if err != nil {
@@ -643,7 +643,7 @@ func TestResume(t *testing.T) {
 // TestResumeUsesConfiguredCommand pins that the window runs what the config says
 // — nothing hardcodes any particular agent — by having resume_command leave a
 // file behind. The file appearing is the window having actually run it, which is
-// worth more than treemux reporting that it would.
+// worth more than treewright reporting that it would.
 func TestResumeUsesConfiguredCommand(t *testing.T) {
 	requireTmux(t)
 	marker := filepath.Join(t.TempDir(), "resumed")
@@ -663,7 +663,7 @@ func TestResumeWithNoWorktrees(t *testing.T) {
 	f := newFixture(t, "")
 
 	r := f.exec("resume")
-	if !strings.Contains(r.stderr, "treemux new") {
+	if !strings.Contains(r.stderr, "treewright new") {
 		t.Errorf("stderr = %q, want it to name the way to start work", r.stderr)
 	}
 	// Dismissed, not failed: with no tty the picker cancels, and cancelling
@@ -771,7 +771,7 @@ func TestWorktreesAreVisibleThroughASymlinkedMainDir(t *testing.T) {
 func TestDispatch(t *testing.T) {
 	f := newFixture(t, "")
 
-	t.Run("bare treemux is a usage error", func(t *testing.T) {
+	t.Run("bare treewright is a usage error", func(t *testing.T) {
 		out, err := f.run()
 		if err == nil {
 			t.Error("want a non-zero exit")
@@ -932,7 +932,7 @@ func TestCompleteIsQuietAndUseful(t *testing.T) {
 	// Completion runs while the user is mid-keystroke: an unresolvable request
 	// must print nothing rather than a diagnostic into their prompt.
 	t.Chdir(f.Root)
-	t.Setenv("TREEMUX_CONFIG_DIR", filepath.Join(f.Root, "empty"))
+	t.Setenv("TREEWRIGHT_CONFIG_DIR", filepath.Join(f.Root, "empty"))
 	out, err := f.run("__complete", "slugs")
 	if err != nil || out != "" {
 		t.Errorf("completion with no config = (%q, %v), want silence", out, err)
@@ -1082,7 +1082,7 @@ func TestHelpGoesToStdoutAndUsageErrorsToStderr(t *testing.T) {
 		if r.err != nil {
 			t.Errorf("err = %v, want nil (exit 0)", r.err)
 		}
-		if !strings.Contains(r.stdout, "usage: treemux") {
+		if !strings.Contains(r.stdout, "usage: treewright") {
 			t.Errorf("stdout = %q, want the overview", r.stdout)
 		}
 		if r.stderr != "" {
@@ -1099,7 +1099,7 @@ func TestHelpGoesToStdoutAndUsageErrorsToStderr(t *testing.T) {
 			if r.err != nil {
 				t.Errorf("help %s: %v", c.name, r.err)
 			}
-			if !strings.Contains(r.stdout, "usage: treemux "+c.name) {
+			if !strings.Contains(r.stdout, "usage: treewright "+c.name) {
 				t.Errorf("help %s: stdout = %q", c.name, r.stdout)
 			}
 			// -h and --help must reach the same place as `help <command>`.
@@ -1119,7 +1119,7 @@ func TestHelpGoesToStdoutAndUsageErrorsToStderr(t *testing.T) {
 		if r.stdout != "" {
 			t.Errorf("stdout = %q, want nothing", r.stdout)
 		}
-		if !strings.Contains(r.stderr, "usage: treemux") {
+		if !strings.Contains(r.stderr, "usage: treewright") {
 			t.Errorf("stderr = %q, want the overview", r.stderr)
 		}
 	})
@@ -1144,7 +1144,7 @@ func TestMessagesShareOneVoice(t *testing.T) {
 		if line == "" {
 			continue
 		}
-		if strings.HasPrefix(line, "treemux:") || strings.HasPrefix(line, "note:") {
+		if strings.HasPrefix(line, "treewright:") || strings.HasPrefix(line, "note:") {
 			t.Errorf("message uses a retired prefix: %q", line)
 		}
 		if strings.HasSuffix(line, ".") {
