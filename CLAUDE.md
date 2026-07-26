@@ -1,0 +1,190 @@
+# treewright — orientation for Claude
+
+A Go CLI that gives each piece of work its own git worktree, tmux window, and
+agent session, created and torn down together. No runtime dependencies beyond
+the `git` and `tmux` binaries; two Go modules (`BurntSushi/toml`, `x/term`).
+
+This file is the map of the code and the rules that are easy to break. Two
+companions:
+
+- **`README.md`** — the user-facing tour: pitch, install, quickstart, command and
+  config reference. Deliberately short and non-technical. When user-visible
+  behavior changes, it changes with it — but keep new rationale out of it.
+- **`docs/design-notes.md`** — why the behavior is what it is: session per repo,
+  window identity, popup sizing, the base checkout, squash-merge detection, the
+  full output contract, safety rules, the eval-file protocol. Read the relevant
+  section before changing behavior in that area; add to it when you decide
+  something a future reader would otherwise re-litigate.
+
+## Build, test, lint
+
+```sh
+go build -o treewright .   # /treewright is gitignored; version stays "dev"
+go test ./... -count=1     # unit + end-to-end, against throwaway git repos
+go vet ./...
+gofmt -l .                 # must print nothing — CI fails on any output
+```
+
+CI (`.github/workflows/ci.yml`) runs all four on ubuntu and macOS. Tests need
+`git`; tests that assert about windows skip without `tmux` (`requireTmux`), and
+the fish shim's syntax check skips without `fish`. A full local run wants all
+three installed.
+
+Releases are tag-driven: push `v*`, GoReleaser builds the binaries, publishes a
+Homebrew cask to `jay-snyder/homebrew-tap`, and stamps `main.version` via
+ldflags. Validate config changes with `goreleaser check`.
+
+## Layout
+
+| Path | Owns |
+|---|---|
+| `main.go` | The only place errors become exit codes. Nothing else calls `os.Exit`. |
+| `internal/cli/cli.go` | `Env`, the command table, dispatch, help rendering. |
+| `internal/cli/commands.go` | `new`, `rm`, `ls`, `prune`, `resume`, `cd`, `base`, `attach`. |
+| `internal/cli/setup.go` | `setup` (config generation) and `config`. |
+| `internal/cli/doctor.go` | `doctor`: the four-way health check. |
+| `internal/cli/session.go` | One session per repo; `openWindow`/`focusWindow`. |
+| `internal/cli/render.go` | Tables, JSON, `parseArgs`, slug resolution. |
+| `internal/cli/popup.go` | `popup`, popup sizing, the no-worktrees message. |
+| `internal/cli/eval.go` | The eval-file protocol and shell quoting. |
+| `internal/cli/init.go` | `shell-init`, `tmux-init`, `__complete`. |
+| `internal/config` | TOML loading, defaults, and which config applies. |
+| `internal/git` | Every git call, including merged/unpushed/dirty logic. |
+| `internal/tmux` | Every tmux call, window identity, popups. |
+| `internal/ui` | Picker, table, color. |
+| `internal/shellinit` | zsh/bash/fish shims, as Go string constants. |
+| `internal/tmuxinit` | tmux key bindings and titles, as Go string constants. |
+| `internal/gittest` | Scratch-repo builder for tests (bare origin + checkout). |
+
+Package doc comments carry the design rationale — `internal/tmux`,
+`internal/shellinit`, and `internal/config` are worth reading before changing
+anything in them.
+
+## How a command runs
+
+`main` reads `TREEWRIGHT_ARGV0` and calls `cli.Run(cli.Env{...})` → dispatch
+looks the name up in the `commands` table → the command calls `resolveConfig("")`
+(explicit name wins, else the repo you are standing in) → talks to
+`internal/git` and `internal/tmux` → returns an error or nil. `main` translates:
+`ErrUsage` → exit 2, `ErrSilent` → exit 1 silently, any other error → printed as
+`error: ...` then exit 1.
+
+## Invariants that are easy to break
+
+**Output contract.** stdout carries the answer and nothing else — paths, tables,
+JSON, generated scripts. Progress, warnings, prompts, and errors go to stderr,
+prefixed `warning:` / `error:` or unprefixed for narration. `cd "$(tw new x)"`
+and `tw ls --json | jq` must both stay clean. Enforced by
+`TestStdoutCarriesOnlyTheAnswer`.
+
+**Errors, never exits.** Subcommands return errors; only `main` chooses an exit
+code. That is what makes every command testable through `Run`.
+
+**No globals for I/O.** Streams, args, and the eval file arrive on `Env`. Tests
+point them at buffers.
+
+**Argv0 vs. the canonical name.** Anything the user is told to *type* uses
+`env.Argv0` (`tw`, usually). Anything destined for a *file* a program reads —
+tmux.conf lines, shell startup evals, help prose — spells out `treewright`.
+
+**Everything works without the shell integration.** `emitEval` is a no-op when
+`TREEWRIGHT_EVAL_FILE` is unset, so every caller must also print what to run by
+hand.
+
+**tmux session targets are exact.** tmux matches session names as prefixes, so
+every session target goes through `exact()` → `=name`. Window targets are window
+ids (`@3`), which are server-unique.
+
+**Window identity comes from the `@treewright_worktree` option**, not from a
+pane's current directory — panes wander. See `claim.beats` in `tmux.go` for the
+resolution order.
+
+**Branches always fork from `origin/<base_branch>`.** No flag overrides this;
+offline falls back to the local base branch and says so.
+
+**The config is data, never code.** TOML, unknown keys rejected, no shelling out
+to read it.
+
+**Read-only-looking commands still write to `.git`.** Squash-merge detection
+synthesizes a dangling commit object (`IsMerged`), with fixed author/committer
+env so the hash is deterministic and repeat runs reuse the object.
+
+**Popup size is estimated, not measured** (`popupSize` in `render.go`). It
+mirrors `worktreeTable`'s layout; `TestPopupSizeCoversTheTable` renders a real
+table to check the estimate still covers it. Change one, check the other.
+
+**A key binding must hand `popup` the pane's directory.** `run-shell` runs in the
+tmux server's working directory, not the calling pane's, so a binding without
+`-d "#{pane_current_path}"` makes every popup answer about whichever repository
+the server was started from. One registered config hides it, because
+`config.Resolve` falls back to the only one. Guarded by
+`TestPopupAnswersAboutTheDirectoryItIsGiven` and by the two `pane_current_path`
+assertions in `tmuxinit_test.go`.
+
+## Adding a subcommand
+
+1. Add an entry to `commands` in `cli.go` — name, args, summary, `long`, flags,
+   `run`. Aliases are accepted but deliberately absent from help and completion.
+2. Implement it in `commands.go` (or its own file if substantial), parsing with
+   `parseArgs` and returning `usageErrorf` for bad invocations.
+3. Add completion: the candidate lists live in `cmdComplete` (`init.go`), and the
+   command name goes in all three shims in `shellinit.go` (zsh's `cmds`, bash's
+   `compgen -W`, and fish's `complete` lines) plus any per-flag fish completions.
+4. Add a row to the Commands table in `README.md`, and to the output-contract
+   table in `docs/design-notes.md` if it prints to stdout.
+
+`TestEveryFlagIsDocumented` will fail if a flag is in help but not the parser or
+completion; `TestHelpTextIsCleanlyIndented` will fail on stray whitespace in the
+raw-string help prose.
+
+## Conventions
+
+**Comments explain why, not what.** The prevailing style is prose paragraphs
+above a function or a tricky block, explaining the alternative that was tried and
+why it lost. Match the density of the surrounding file — this codebase is heavily
+commented on purpose, and a bare implementation will look out of place.
+
+**Message voice** (enforced by `TestMessagesShareOneVoice`): lowercase first
+word, no trailing period, em dashes rather than `->`, no `treewright:` or `note:`
+prefixes. Errors say what to do next and name it in the user's own vocabulary
+(`— open it with "tw resume eng-1"`).
+
+**Test names read as sentences** about behavior: `TestNewStripsAnAlreadyPrefixedSlug`,
+`TestTheWorktreesWindowIsFoundHoweverWindowsAreArranged`. Tests carry doc
+comments when the reason for the test is not obvious from the name.
+
+**Commit messages**: subject is a sentence describing the behavior change from
+the user's side, imperative and unprefixed ("Offer the base checkout in a
+repository with no worktrees yet"). The body explains the why at length —
+what was wrong, what was tried, what the tradeoff is. Non-user-facing work takes
+a `ci:`/`docs:`/`chore:` prefix (GoReleaser filters those out of the changelog).
+Commits are co-authored with the trailer.
+
+## Tests
+
+`newFixture(t, extraConfig)` in `internal/cli/cli_test.go` is the workhorse: a
+real git repo with a bare origin, a config registry pointing at it, an inert
+`claude` stub first on `PATH`, and a **private tmux server** (own socket dir, own
+`-L` label, killed on cleanup) so tests never touch your own sessions. Never call
+bare `tmux` in a test — go through the package, which honors
+`TREEWRIGHT_TMUX_LABEL`.
+
+Fixture helpers: `exec` (streams kept apart), `run`/`mustRun` (combined),
+`runWithEvalFile` (returns what treewright asked the shell to run), `statusOf`.
+`gittest` adds `Worktree`, `Commit`, `Push`, `SquashMerge`, `Symlink`,
+`LooseObjects`.
+
+The shims are checked by the shells themselves (`TestScriptsParse`), and the tmux
+snippet is loaded into a real server and read back — a snippet that does not
+parse would break the startup of whatever loads it.
+
+## Environment variables
+
+| Variable | Meaning |
+|---|---|
+| `TREEWRIGHT_CONFIG_DIR` | Registry directory; overrides `$XDG_CONFIG_HOME/treewright/repos`. |
+| `TREEWRIGHT_EVAL_FILE` | Set by the shell wrapper; commands append shell lines for it to source. |
+| `TREEWRIGHT_ARGV0` | The name the user typed (`tw`), since the wrapper erases it from argv[0]. |
+| `TREEWRIGHT_TMUX_LABEL` | Drive a non-default tmux server (`tmux -L <label>`). |
+| `TREEWRIGHT_POPUP` | Set inside a popup, so exit paths can say "press Esc to close". |
+| `NO_COLOR`, `TERM=dumb` | Turn color off; color is also off whenever stdout is not a terminal. |
