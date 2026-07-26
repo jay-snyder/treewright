@@ -124,6 +124,11 @@ func init() {
 configured carry_files, runs post_create in the background, and opens a tmux
 window running the configured command.
 
+A repo whose branch_prefixes lists several — "feature/", "bug/", "chore/" — picks
+between them by naming one: "new bug/eng-1" branches bug/eng-1, while the worktree
+stays repo-eng-1 and the slug stays eng-1. A bare slug gets the first in the list,
+and a prefix that is not in it is refused rather than guessed at.
+
 The window goes in this repository's own tmux session — named after its config —
 which is created if it is not running yet, so one repository's windows never mix
 with another's. Outside tmux the window is still created, detached, and treewright

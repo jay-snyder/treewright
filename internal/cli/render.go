@@ -349,15 +349,40 @@ func at(positional []string, n int) string {
 	return ""
 }
 
-// stripPrefix removes a branch prefix the user typed into the slug, reporting the
-// correction so it is visible rather than silent.
-func stripPrefix(env *Env, cfg *config.Config, slug string) string {
-	stripped, changed := cfg.StripPrefix(slug)
-	if changed {
+// splitPrefix resolves what the user typed into the branch prefix it names and
+// the slug that remains, reporting the split rather than applying it silently.
+//
+// What the report says depends on what the split meant. With one prefix
+// configured, typing it is redundant — the branch gets it either way — so this is
+// a correction, and reads as one. With several, typing it is how you choose, and
+// all that needs saying is which part was read as the name: the line that follows
+// on `new` ("creating branch feature/eng-1 off origin/main") already shows the
+// choice itself.
+func splitPrefix(env *Env, cfg *config.Config, typed string) (prefix, slug string) {
+	prefix, slug, matched := cfg.SplitPrefix(typed)
+	switch {
+	case !matched:
+	case len(cfg.Prefixes()) == 1:
 		env.progressf("stripped the %q prefix from the slug — the branch gets it automatically (using %q)",
-			cfg.BranchPrefix, stripped)
+			prefix, slug)
+	default:
+		env.progressf("%q reads as branch prefix %q and slug %q", typed, prefix, slug)
 	}
-	return stripped
+	return prefix, slug
+}
+
+// prefixList names the configured branch prefixes, for an error that has to say
+// what the choices are.
+//
+// Quoted, because an empty prefix is a legitimate entry — a repo where some
+// branches are namespaced and some are not lists "" among the rest — and it would
+// otherwise render as a gap between two commas.
+func prefixList(cfg *config.Config) string {
+	quoted := make([]string, 0, len(cfg.Prefixes()))
+	for _, p := range cfg.Prefixes() {
+		quoted = append(quoted, strconv.Quote(p))
+	}
+	return strings.Join(quoted, ", ")
 }
 
 // slugsOf lists worktree slugs, for naming the alternatives in an error.

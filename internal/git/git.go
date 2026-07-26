@@ -193,6 +193,36 @@ func (r Repo) DefaultBranch() string {
 	return "main"
 }
 
+// RemoteBranchNamespaces counts the leading namespace of every branch on a
+// remote: "feature/eng-1" and "feature/eng-2" make "feature/" worth 2. Branches
+// with no namespace contribute nothing.
+//
+// Read from refs/remotes/<remote>, which a clone fills in for every branch the
+// remote has, so this describes what the team does rather than what this checkout
+// happens to have fetched by hand.
+//
+// Only "/" delimits a namespace. A dashed convention ("feature-eng-1") is
+// indistinguishable from an ordinary ticket key ("eng-142-white-screen") without
+// already knowing the team's scheme, and reading "eng-" as a namespace would be
+// wrong far more often than right.
+func (r Repo) RemoteBranchNamespaces(remote string) map[string]int {
+	// strip=3 drops "refs/remotes/<remote>/", leaving the branch name as the remote
+	// spells it — including the slashes, which are the whole point here.
+	out, err := r.run("for-each-ref", "--format=%(refname:strip=3)", "refs/remotes/"+remote)
+	if err != nil || out == "" {
+		return nil
+	}
+	counts := make(map[string]int)
+	for _, name := range strings.Split(out, "\n") {
+		// "HEAD" is the remote's symbolic ref rather than a branch, and lands here
+		// with no namespace, so it drops out with the unnamespaced branches.
+		if ns, _, found := strings.Cut(name, "/"); found && ns != "" {
+			counts[ns+"/"]++
+		}
+	}
+	return counts
+}
+
 // UserEmail reports the git identity in force for this repo, respecting any
 // repo-local override of the global setting. Empty when none is configured.
 func (r Repo) UserEmail() string {

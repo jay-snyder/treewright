@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -87,6 +88,27 @@ tmux_session   = "work"
 	}
 }
 
+// TestLoadReadsBranchPrefixes covers the other spelling of the prefix setting,
+// which TestLoadReadsEveryField cannot: a config may set one or the other.
+func TestLoadReadsBranchPrefixes(t *testing.T) {
+	dir := registry(t, map[string]string{
+		"kinds": "main_dir = \"/tmp/repo\"\nbranch_prefixes = [\"feature/\", \"bug/\", \"chore/\"]\n",
+	})
+
+	c, err := Load(filepath.Join(dir, "kinds.toml"))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := strings.Join(c.Prefixes(), ","); got != "feature/,bug/,chore/" {
+		t.Errorf("Prefixes = %q, want the file's order preserved", got)
+	}
+	// Order is the setting, not an accident of it: the first entry is what a bare
+	// slug gets, so sorting the list would change which branch `new eng-1` creates.
+	if !c.Explicit("branch_prefixes") || c.Explicit("branch_prefix") {
+		t.Errorf("Explicit disagrees with the file: %+v", c)
+	}
+}
+
 func TestLoadRejectsBadConfigs(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -114,6 +136,23 @@ func TestLoadRejectsBadConfigs(t *testing.T) {
 			name:    "invalid ticket pattern",
 			body:    "main_dir = \"/tmp/repo\"\nticket_pattern = \"([unclosed\"\n",
 			wantErr: "not a valid regexp",
+		},
+		{
+			// Two spellings of one setting. Silently preferring either would leave
+			// the file no longer saying which prefix a branch actually gets.
+			name:    "both branch prefix spellings",
+			body:    "main_dir = \"/tmp/repo\"\nbranch_prefix = \"alice/\"\nbranch_prefixes = [\"feature/\"]\n",
+			wantErr: "not both",
+		},
+		{
+			name:    "empty branch_prefixes",
+			body:    "main_dir = \"/tmp/repo\"\nbranch_prefixes = []\n",
+			wantErr: "branch_prefixes is empty",
+		},
+		{
+			name:    "duplicate branch prefix",
+			body:    "main_dir = \"/tmp/repo\"\nbranch_prefixes = [\"feature/\", \"bug/\", \"feature/\"]\n",
+			wantErr: `lists "feature/" twice`,
 		},
 		{
 			name:    "malformed toml",
@@ -294,15 +333,16 @@ func TestNamesIsSorted(t *testing.T) {
 
 // ---- derived values --------------------------------------------------------
 
-func TestStripPrefix(t *testing.T) {
-	// Guards the recurring "alice/alice/foo" doubling: a slug that already carries
-	// the configured prefix must have exactly one leading copy removed.
+// TestSplitPrefixUnderOnePrefix guards the recurring "alice/alice/foo" doubling:
+// a slug that already carries the configured prefix must have exactly one leading
+// copy removed.
+func TestSplitPrefixUnderOnePrefix(t *testing.T) {
 	tests := []struct {
 		name        string
 		prefix      string
-		slug        string
+		typed       string
 		want        string
-		wantStopped bool
+		wantMatched bool
 	}{
 		{"strips leading prefix", "x/", "x/foo", "foo", true},
 		{"no prefix present", "x/", "foo", "foo", false},
@@ -312,10 +352,83 @@ func TestStripPrefix(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			c := &Config{BranchPrefix: tc.prefix}
-			got, stripped := c.StripPrefix(tc.slug)
-			if got != tc.want || stripped != tc.wantStopped {
-				t.Errorf("StripPrefix(%q) = (%q, %v), want (%q, %v)",
-					tc.slug, got, stripped, tc.want, tc.wantStopped)
+			prefix, slug, matched := c.SplitPrefix(tc.typed)
+			if slug != tc.want || matched != tc.wantMatched {
+				t.Errorf("SplitPrefix(%q) = (%q, %q, %v), want slug %q, matched %v",
+					tc.typed, prefix, slug, matched, tc.want, tc.wantMatched)
+			}
+			// The branch is the two halves rejoined, whichever way they split.
+			if prefix+slug != tc.prefix+tc.want {
+				t.Errorf("prefix+slug = %q, want %q", prefix+slug, tc.prefix+tc.want)
+			}
+		})
+	}
+}
+
+// TestSplitPrefixChoosesAmongSeveral covers the setting teams use when they
+// namespace by kind of work rather than by person: the prefix typed at `new` picks
+// which one the branch gets, and the slug that comes back is what names the
+// worktree.
+func TestSplitPrefixChoosesAmongSeveral(t *testing.T) {
+	tests := []struct {
+		name        string
+		prefixes    []string
+		typed       string
+		wantPrefix  string
+		wantSlug    string
+		wantMatched bool
+	}{
+		{"named prefix wins", []string{"feature/", "bug/"}, "bug/eng-1", "bug/", "eng-1", true},
+		{"bare slug gets the first", []string{"feature/", "bug/"}, "eng-1", "feature/", "eng-1", false},
+		// A prefix that is not configured stays in the slug, where `new` rejects it
+		// by name rather than inventing a namespace.
+		{"unknown prefix is left alone", []string{"feature/", "bug/"}, "feat/eng-1", "feature/", "feat/eng-1", false},
+		// List order must not decide this, so the more specific prefix is listed
+		// second — where a first-match loop would miss it.
+		{"longest match wins", []string{"feature/", "feature/exp/"}, "feature/exp/eng-1", "feature/exp/", "eng-1", true},
+		// Some branches namespaced and some not: the empty prefix is the default,
+		// and never reads as a match of its own.
+		{"empty prefix can be the default", []string{"", "feature/"}, "eng-1", "", "eng-1", false},
+		{"empty default does not shadow the rest", []string{"", "feature/"}, "feature/eng-1", "feature/", "eng-1", true},
+		// Rejected a step later, as "the slug is empty once the branch prefix is
+		// removed" — but the split itself has to survive it.
+		{"prefix with nothing after it", []string{"feature/", "bug/"}, "bug/", "bug/", "", true},
+		// A prefix need not end in "/": some teams use "feature-".
+		{"dashed prefixes split too", []string{"feature-", "bug-"}, "bug-eng-1", "bug-", "eng-1", true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			c := &Config{BranchPrefixes: tc.prefixes}
+			prefix, slug, matched := c.SplitPrefix(tc.typed)
+			if prefix != tc.wantPrefix || slug != tc.wantSlug || matched != tc.wantMatched {
+				t.Errorf("SplitPrefix(%q) = (%q, %q, %v), want (%q, %q, %v)",
+					tc.typed, prefix, slug, matched, tc.wantPrefix, tc.wantSlug, tc.wantMatched)
+			}
+		})
+	}
+}
+
+// TestPrefixesAlwaysHoldsOne is what lets every caller treat "no prefix" and "one
+// prefix" alike: the create path prepends Prefixes()[0] without asking whether
+// this repo namespaces anything.
+func TestPrefixesAlwaysHoldsOne(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  *Config
+		want string
+	}{
+		{"nothing configured", &Config{}, `[""]`},
+		{"singular spelling", &Config{BranchPrefix: "alice/"}, `["alice/"]`},
+		{"list spelling", &Config{BranchPrefixes: []string{"feature/", "bug/"}}, `["feature/" "bug/"]`},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := tc.cfg.Prefixes()
+			if len(got) == 0 {
+				t.Fatal("Prefixes is empty, so the create path has no prefix to prepend")
+			}
+			if fmt.Sprintf("%q", got) != tc.want {
+				t.Errorf("Prefixes = %q, want %s", got, tc.want)
 			}
 		})
 	}
@@ -351,11 +464,8 @@ func TestWindowName(t *testing.T) {
 	}
 }
 
-func TestBranchAndDirFor(t *testing.T) {
+func TestDirFor(t *testing.T) {
 	c := &Config{MainDir: "/home/u/code/myrepo", BranchPrefix: "alice/"}
-	if got, want := c.BranchFor("proj-1"), "alice/proj-1"; got != want {
-		t.Errorf("BranchFor = %q, want %q", got, want)
-	}
 	if got, want := c.DirFor("proj-1"), "/home/u/code/myrepo-proj-1"; got != want {
 		t.Errorf("DirFor = %q, want %q", got, want)
 	}

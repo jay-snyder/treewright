@@ -252,10 +252,81 @@ announced what it was about to do. A slug may not contain `/`, because a nested
 one leaves a stray parent directory behind when the worktree is removed; the rest
 of the rules are `git check-ref-format`'s.
 
-A slug that already carries your `branch_prefix` has one copy stripped, and
-treewright says so, rather than producing `john/john/eng-2318`. Only one copy:
-if you really do want a slug named `john/eng-2318` under prefix `john/`,
-stripping repeatedly would make it unreachable.
+## Branch prefixes
+
+What you type is `[prefix]slug`: a leading run matching a configured prefix names
+that prefix, and the rest is the slug. Under a single `branch_prefix` that is just
+the correction it always was — `tw new john/eng-2318` gives `john/eng-2318` rather
+than `john/john/eng-2318`, and treewright says it stripped a copy. Only one copy:
+if you really do want a slug named `john/eng-2318` under prefix `john/`, stripping
+repeatedly would make it unreachable.
+
+Under `branch_prefixes`, the same rule is how you choose. Teams that namespace by
+kind of work rather than by person list several — `["feature/", "bug/", "chore/"]`
+— and `tw new bug/eng-2318` branches `bug/eng-2318`. A bare slug takes the first
+in the list, which is why the list's order is the setting and not an accident of
+it. The longest match wins, so `feature/` and `feature/exp/` can coexist. A prefix
+the list does not contain is an error naming the ones it does, rather than a new
+namespace invented on the spot: a branch pushed under a misspelled prefix looks
+fine locally and is invisible to whatever the team's tooling watches.
+
+One flat list, and no composition: someone who wants `alice/feature/` writes that
+literally. Composing a personal prefix with a kind-of-work prefix would be a rule
+to learn in a file whose whole point is that it is data.
+
+The prefix reaches the branch and stops there. The worktree stays
+`<repo>-eng-2318`, the window stays `ENG-2318`, and `resume`, `cd` and `rm` still
+take the slug alone. Folding the kind of work into the directory name was the
+alternative, and it loses on all three of its own terms: `ticket_pattern` stops
+matching (`feature-eng-142-white-screen` has no `[a-z]+-[0-9]+` at its head, so
+every window would be called `FEATURE-EN...`), every row of the table grows a word
+that repeats down the column, and you would have to remember which kind of work
+something was to reopen it — a question git already answers. Two worktrees whose
+slugs are both `auth` therefore collide whatever their prefixes, and `new` says so
+and names the command that opens the one that exists. Slugs that carry a ticket
+key never reach that case, and two pieces of work that really are both called
+`auth` are ambiguous to the person reading the list too.
+
+Because the prefix is only ever *written* at `new` — every other command reads the
+branch back from git — a worktree's branch does not have to match what its slug
+would produce today. Renaming a prefix in the config leaves the worktrees created
+under the old one working, listed, and removable.
+
+The two spellings are one setting, and a config may not use both. Any precedence
+we picked would be a rule to learn, and the file itself would no longer say which
+prefix a branch gets. `config` reports the row under whichever spelling the file
+used, so the line it names is the line that is there.
+
+### Guessing them at setup
+
+`setup` counts the leading namespace of every branch on origin — not of the local
+branches, so a fresh clone with none of its own still sees the convention — and
+proposes the ones that name a kind of work, most used first. The most used becomes
+the default a bare slug gets, and the counts are printed beside the list so the
+ordering the config depends on is visible rather than asserted. Two branches make
+a namespace worth proposing; one is an incident.
+
+Only names from a built-in vocabulary (`feature`, `bug`, `hotfix`, `chore`, …)
+qualify, and that is the load-bearing decision. `alice/x, alice/y, bob/z` and
+`feature/x, feature/y, bug/z` are the same shape, so counting alone cannot tell a
+per-person scheme from a per-kind one — and mistaking the first for the second
+writes colleagues' names into your config as kinds of work, then sends every branch
+you make into somebody else's namespace. The opposite mistake costs nothing: an
+unrecognized scheme leaves the git-email guess and a commented example, which is
+where this started. So the vocabulary is a floor, not a filter — a team using
+`squad-a/` writes it in, once.
+
+Only `/` delimits a namespace. `feature-eng-1` and `eng-142-white-screen` are the
+same shape too, and reading `eng-` as a namespace would be wrong far more often
+than right. A dashed convention is a one-line edit; a wrong guess is a branch
+pushed somewhere nobody is looking.
+
+What origin says beats what the git email says, including when origin yields a
+single prefix — a repo where every branch is a `feature/` means new work is a
+`feature/` too. The email guess exists to make branches attributable on a shared
+remote, and a repo that already namespaces has answered that question its own way.
+
+## Creating a branch
 
 `new` reuses a branch that already exists rather than recreating it, which is
 also how you get a worktree onto a colleague's pull request after fetching it.

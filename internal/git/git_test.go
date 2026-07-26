@@ -327,6 +327,29 @@ func TestUserEmailAndRemote(t *testing.T) {
 	}
 }
 
+// TestRemoteBranchNamespacesCountsWhatOriginUses is what lets setup guess a
+// team's branch prefixes. It counts against origin rather than the local branches,
+// so a fresh clone that has none of its own still sees the convention.
+func TestRemoteBranchNamespacesCountsWhatOriginUses(t *testing.T) {
+	f := gittest.New(t)
+	for _, branch := range []string{"feature/a", "feature/b", "bug/c", "release-2.0"} {
+		f.Git(f.MainDir, "push", "--quiet", "origin", "HEAD:refs/heads/"+branch)
+	}
+	f.Git(f.MainDir, "fetch", "--quiet", "origin")
+
+	got := (git.Repo{Dir: f.MainDir}).RemoteBranchNamespaces("origin")
+	if got["feature/"] != 2 || got["bug/"] != 1 {
+		t.Errorf("namespaces = %v, want feature/ twice and bug/ once", got)
+	}
+	// main and release-2.0 have no namespace at all, and a dash is not a delimiter:
+	// "eng-142-white-screen" is a ticket key, not a namespace called "eng-".
+	for _, absent := range []string{"main/", "release-2.0/", "release-", "eng-"} {
+		if _, ok := got[absent]; ok {
+			t.Errorf("namespaces = %v, want no %q", got, absent)
+		}
+	}
+}
+
 // TestIgnoredFilesCollapsesIgnoredDirectories is why setup can propose carry
 // files at all: without the collapse, a repo with node_modules reports thousands
 // of paths and nothing useful can be filtered out of them.

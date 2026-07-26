@@ -126,10 +126,31 @@ func privateTmuxServer(t *testing.T) {
 // are always included so callers only supply what they are varying.
 func (f *fixture) setConfig(body string) {
 	f.t.Helper()
-	full := "base_branch = 'main'\nbranch_prefix = '" + gittest.BranchPrefix + "'\n" + body
-	if err := os.WriteFile(filepath.Join(f.registry, "proj.toml"), []byte(full), 0o644); err != nil {
+	f.writeConfig("base_branch = 'main'\nbranch_prefix = '" + gittest.BranchPrefix + "'\n" + body)
+}
+
+// writeConfig writes the sole config verbatim, for the tests whose subject is one
+// of the keys setConfig supplies itself.
+func (f *fixture) writeConfig(body string) {
+	f.t.Helper()
+	if err := os.WriteFile(filepath.Join(f.registry, "proj.toml"), []byte(body), 0o644); err != nil {
 		f.t.Fatalf("write config: %v", err)
 	}
+}
+
+// newPrefixFixture is newFixture for a repo that namespaces branches by kind of
+// work. It writes the config itself because the standard fixture always sets the
+// singular branch_prefix, and no config may set both spellings.
+func newPrefixFixture(t *testing.T, prefixes ...string) *fixture {
+	t.Helper()
+	f := newFixture(t, "")
+	quoted := make([]string, 0, len(prefixes))
+	for _, p := range prefixes {
+		quoted = append(quoted, strconv.Quote(p))
+	}
+	f.writeConfig("main_dir = '" + f.MainDir + "'\nbase_branch = 'main'\n" +
+		"branch_prefixes = [" + strings.Join(quoted, ", ") + "]\n")
+	return f
 }
 
 // result is one invocation's output, kept per stream so tests can assert on the
@@ -371,6 +392,115 @@ func TestNewRejectsSlugWithPathSeparator(t *testing.T) {
 	if _, statErr := os.Stat(f.MainDir + "-a"); statErr == nil {
 		t.Errorf("a stray %s-a directory was created\n%s", f.MainDir, out)
 	}
+}
+
+// ---- new, under several branch prefixes ------------------------------------
+
+// TestNewPicksTheBranchPrefixTheSlugNames is what branch_prefixes is for: a team
+// that namespaces by kind of work chooses the namespace by typing it, and the
+// worktree is still named after the work.
+func TestNewPicksTheBranchPrefixTheSlugNames(t *testing.T) {
+	f := newPrefixFixture(t, "feature/", "bug/")
+
+	out := f.mustRun("new", "bug/eng-1")
+	if !strings.Contains(out, "creating branch bug/eng-1 off origin/main") {
+		t.Errorf("output = %q, want the named prefix in the branch", out)
+	}
+	if !f.Exists("eng-1") {
+		t.Fatalf("worktree %s was not created\n%s", f.DirFor("eng-1"), out)
+	}
+	if got := f.Git(f.DirFor("eng-1"), "branch", "--show-current"); got != "bug/eng-1" {
+		t.Errorf("branch = %q, want bug/eng-1", got)
+	}
+	// The prefix reached the branch and stopped there: the slug is what the table
+	// lists and what the user types back at resume and rm.
+	if got := f.statusOf("eng-1"); got == "" {
+		t.Errorf("ls does not list eng-1 by its slug:\n%s", f.mustRun("ls"))
+	}
+}
+
+func TestNewFallsBackToTheFirstBranchPrefix(t *testing.T) {
+	f := newPrefixFixture(t, "feature/", "bug/")
+
+	f.mustRun("new", "eng-2")
+	if got := f.Git(f.DirFor("eng-2"), "branch", "--show-current"); got != "feature/eng-2" {
+		t.Errorf("branch = %q, want feature/eng-2 — a bare slug takes the first prefix", got)
+	}
+}
+
+// TestNewRejectsAnUnconfiguredBranchPrefix guards the case where guessing would
+// cost the most: a misspelled prefix pushed as a namespace of its own is outside
+// whatever the team's tooling watches, and nothing about it looks wrong locally.
+func TestNewRejectsAnUnconfiguredBranchPrefix(t *testing.T) {
+	f := newPrefixFixture(t, "feature/", "bug/")
+
+	out, err := f.run("new", "feat/eng-3")
+	if err == nil {
+		t.Fatal("want an error for a prefix that is not configured")
+	}
+	if !errors.Is(err, ErrUsage) {
+		t.Errorf("err = %v, want ErrUsage (exit 2)", err)
+	}
+	// The one that was typed, and the ones that would have worked.
+	for _, want := range []string{`"feat/"`, `"feature/"`, `"bug/"`} {
+		if combined := out + err.Error(); !strings.Contains(combined, want) {
+			t.Errorf("error = %q, want it to name %s", combined, want)
+		}
+	}
+	if f.Exists("eng-3") {
+		t.Error("a worktree was created under a refused prefix")
+	}
+}
+
+// TestTheLongestBranchPrefixWins pins that list order does not decide between two
+// nested prefixes. The more specific one is listed second here, where a
+// first-match loop would never reach it.
+func TestTheLongestBranchPrefixWins(t *testing.T) {
+	f := newPrefixFixture(t, "feature/", "feature/exp/")
+
+	f.mustRun("new", "feature/exp/eng-4")
+	if !f.Exists("eng-4") {
+		t.Fatalf("worktree %s was not created", f.DirFor("eng-4"))
+	}
+	if got := f.Git(f.DirFor("eng-4"), "branch", "--show-current"); got != "feature/exp/eng-4" {
+		t.Errorf("branch = %q, want feature/exp/eng-4", got)
+	}
+}
+
+// TestAPrefixedNameStillFindsTheWorktree: worktrees are named by slug, so the
+// branch name — what you read off `git branch` or a pull request — has to resolve
+// to one as well.
+func TestAPrefixedNameStillFindsTheWorktree(t *testing.T) {
+	f := newPrefixFixture(t, "feature/", "bug/")
+	f.mustRun("new", "bug/eng-5")
+
+	out := f.mustRun("cd", "bug/eng-5")
+	if !strings.Contains(out, f.DirFor("eng-5")) {
+		t.Errorf("output = %q, want the path of %s", out, f.DirFor("eng-5"))
+	}
+	if !strings.Contains(out, `reads as branch prefix "bug/" and slug "eng-5"`) {
+		t.Errorf("output = %q, want the split reported", out)
+	}
+}
+
+// TestCompletionOffersTheBranchPrefixes covers the only place the configured set
+// is discoverable without opening the config file.
+func TestCompletionOffersTheBranchPrefixes(t *testing.T) {
+	t.Run("several are a choice worth offering", func(t *testing.T) {
+		f := newPrefixFixture(t, "feature/", "bug/")
+		if got := f.mustRun("__complete", "prefixes"); got != "feature/\nbug/\n" {
+			t.Errorf("candidates = %q, want the configured prefixes in order", got)
+		}
+	})
+
+	t.Run("one is not", func(t *testing.T) {
+		// Offering the single prefix would put a word in front of every new slug
+		// that the user never has to type.
+		f := newFixture(t, "")
+		if got := f.mustRun("__complete", "prefixes"); got != "" {
+			t.Errorf("candidates = %q, want nothing offered", got)
+		}
+	})
 }
 
 func TestNewCarriesConfiguredFiles(t *testing.T) {

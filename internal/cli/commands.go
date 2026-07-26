@@ -32,14 +32,19 @@ func cmdNew(env *Env, args []string) error {
 	if err != nil {
 		return err
 	}
-	slug = stripPrefix(env, cfg, slug)
-	if err := validateSlug(slug); err != nil {
+	prefix, slug := splitPrefix(env, cfg, slug)
+	if err := validateSlug(cfg, slug); err != nil {
 		return err
 	}
 
+	// The prefix reaches the branch and stops there. The directory, the window
+	// name, and every later resume or rm are the slug alone: which kind of work
+	// this is matters while the branch is being made, and afterwards git holds the
+	// answer — so carrying it into the slug would only lengthen every row of the
+	// table and every name the user has to type back.
 	repo := repoFor(cfg)
 	dir := cfg.DirFor(slug)
-	branch := cfg.BranchFor(slug)
+	branch := prefix + slug
 
 	// Checked before anything is reported, because git's own refusal arrives
 	// several steps in — after "reusing existing branch" has already been printed
@@ -111,11 +116,19 @@ func cmdNew(env *Env, args []string) error {
 // rather than delegated to git so that the answer is one sentence naming the
 // slug, instead of git's several lines about ref syntax arriving from three steps
 // deeper — by which point treewright has already announced what it was about to do.
-func validateSlug(slug string) error {
+func validateSlug(cfg *config.Config, slug string) error {
 	if slug == "" {
 		return usageErrorf("new", "the slug is empty once the branch prefix is removed")
 	}
 	if strings.Contains(slug, "/") {
+		// Where several prefixes are configured, a leading "feature/" is meaningful,
+		// so one treewright does not recognize is far likelier to be the scheme
+		// misspelled than a slug with a slash in it. Naming the configured set
+		// answers both readings at once.
+		if leading, _, found := strings.Cut(slug, "/"); found && len(cfg.Prefixes()) > 1 {
+			return usageErrorf("new", "%q does not name a configured branch prefix — this repo uses %s",
+				leading+"/", prefixList(cfg))
+		}
 		return usageErrorf("new", "slug %q cannot contain %q — it would nest the worktree inside a stray directory", slug, "/")
 	}
 	if strings.ContainsAny(slug, " \t\n") {
@@ -237,7 +250,9 @@ func cmdRm(env *Env, args []string) error {
 	if err != nil {
 		return err
 	}
-	slug = stripPrefix(env, cfg, slug)
+	// Only the slug is wanted here: a worktree is named by its slug, and the prefix
+	// the user may have typed is the branch's, which git already knows.
+	_, slug = splitPrefix(env, cfg, slug)
 
 	repo := repoFor(cfg)
 	managed, err := repo.Managed()
@@ -524,7 +539,7 @@ func cmdResume(env *Env, args []string) error {
 	}
 	slug := at(positional, 0)
 	if slug != "" {
-		slug = stripPrefix(env, cfg, slug)
+		_, slug = splitPrefix(env, cfg, slug)
 	}
 
 	repo := repoFor(cfg)
@@ -690,7 +705,7 @@ func cmdCd(env *Env, args []string) error {
 	}
 	slug := at(positional, 0)
 	if slug != "" {
-		slug = stripPrefix(env, cfg, slug)
+		_, slug = splitPrefix(env, cfg, slug)
 	}
 
 	repo := repoFor(cfg)

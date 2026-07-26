@@ -110,6 +110,28 @@ func cmdComplete(env *Env, args []string) error {
 		for _, wt := range managed {
 			fmt.Fprintln(env.Stdout, wt.Slug)
 		}
+	// What `new` completes, in a repo that namespaces branches by kind of work: the
+	// prefixes are a convention nothing else surfaces, and a list you cannot see is
+	// one you misspell. The slugs are deliberately not offered — `new`'s argument is
+	// a name that does not exist yet, and completing the ones that do would suggest
+	// the opposite.
+	case "prefixes":
+		cfg, err := resolveConfig("")
+		if err != nil {
+			return nil
+		}
+		// A single prefix is not a choice, and offering it would put a word the user
+		// never has to type in front of every new slug.
+		if prefixes := cfg.Prefixes(); len(prefixes) > 1 {
+			for _, p := range prefixes {
+				// The empty prefix is a legitimate entry and completes to nothing:
+				// a blank candidate is a blank row in the menu.
+				if p == "" {
+					continue
+				}
+				fmt.Fprintln(env.Stdout, p)
+			}
+		}
 	case "repos":
 		names, err := config.Names()
 		if err != nil {

@@ -110,6 +110,7 @@ _treewright() {
     return
   fi
   case "$words[2]" in
+    new)                         compadd -S '' -- ${(f)"$(command treewright __complete prefixes 2>/dev/null)"} ;;
     rm)                          compadd -- ${(f)"$(command treewright __complete slugs 2>/dev/null)"} ;;
     resume|cd)                   compadd -- ${(f)"$(command treewright __complete targets 2>/dev/null)"} ;;
     ls|prune|base|config|attach) compadd -- ${(f)"$(command treewright __complete repos 2>/dev/null)"} ;;
@@ -149,6 +150,13 @@ _treewright_completions() {
   fi
   local candidates=""
   case "${COMP_WORDS[1]}" in
+    new)
+      candidates="$(command treewright __complete prefixes 2>/dev/null)"
+      # A branch prefix is half a word — the slug is typed straight onto it — so the
+      # space bash appends would have to be deleted again. compopt arrived in bash 4;
+      # under the 3.2 that macOS ships, the space simply stays.
+      type compopt >/dev/null 2>&1 && compopt -o nospace
+      ;;
     rm)                          candidates="$(command treewright __complete slugs 2>/dev/null)" ;;
     resume|cd)                   candidates="$(command treewright __complete targets 2>/dev/null)" ;;
     ls|prune|base|config|attach) candidates="$(command treewright __complete repos 2>/dev/null)" ;;
@@ -200,6 +208,7 @@ complete -c treewright -n __fish_use_subcommand -a config     -d 'print the sett
 complete -c treewright -n __fish_use_subcommand -a doctor     -d 'check the installation and every registered config'
 complete -c treewright -n __fish_use_subcommand -a shell-init -d 'print the shell integration'
 complete -c treewright -n __fish_use_subcommand -a tmux-init  -d 'print the tmux integration'
+complete -c treewright -n '__fish_seen_subcommand_from new' -a '(command treewright __complete prefixes)' -d 'branch prefix'
 complete -c treewright -n '__fish_seen_subcommand_from rm' -a '(command treewright __complete slugs)'
 complete -c treewright -n '__fish_seen_subcommand_from resume cd' -a '(command treewright __complete targets)'
 complete -c treewright -n '__fish_seen_subcommand_from ls prune base config attach' -a '(command treewright __complete repos)'

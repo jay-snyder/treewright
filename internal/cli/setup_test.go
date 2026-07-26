@@ -84,6 +84,101 @@ func TestSetupReportsWhatItGuessed(t *testing.T) {
 	}
 }
 
+// pushBranches puts branches on origin under the given names, that being where
+// setup reads a team's naming convention from.
+func pushBranches(f *fixture, names ...string) {
+	f.t.Helper()
+	for _, name := range names {
+		f.Git(f.MainDir, "push", "--quiet", "origin", "HEAD:refs/heads/"+name)
+	}
+	// The namespaces are counted off refs/remotes/origin, which a push alone does
+	// not create for a branch this checkout does not track.
+	f.Git(f.MainDir, "fetch", "--quiet", "origin")
+}
+
+// TestSetupProposesThePrefixesOriginUses is the guess that saves a new user from
+// reading their own branch list: a repo that namespaces by kind of work gets those
+// prefixes, ordered by how much it uses each.
+func TestSetupProposesThePrefixesOriginUses(t *testing.T) {
+	f := unregistered(t)
+	pushBranches(f, "feature/a", "feature/b", "feature/c", "bug/d", "bug/e", "chore/f")
+
+	r := f.exec("setup")
+	if r.err != nil {
+		t.Fatalf("setup: %v\n%s", r.err, r.both())
+	}
+	cfg, err := config.Load(filepath.Join(f.registry, "repo.toml"))
+	if err != nil {
+		t.Fatalf("the generated config does not load: %v", err)
+	}
+	// Ordered by use, and chore/ left out: one branch is an incident, two is a
+	// convention.
+	if got := strings.Join(cfg.Prefixes(), ","); got != "feature/,bug/" {
+		t.Errorf("Prefixes = %q, want feature/,bug/ in that order", got)
+	}
+	// The counts are what chose the order, so the report has to show them.
+	if !strings.Contains(r.stderr, "feature/ (3), bug/ (2)") {
+		t.Errorf("stderr = %q, want the prefixes and their branch counts", r.stderr)
+	}
+
+	// And the config works both ways round: the default, and a named prefix.
+	f.mustRun("new", "eng-1")
+	if got := f.Git(f.DirFor("eng-1"), "branch", "--show-current"); got != "feature/eng-1" {
+		t.Errorf("branch = %q, want feature/eng-1 from the detected default", got)
+	}
+	f.mustRun("new", "bug/eng-2")
+	if got := f.Git(f.DirFor("eng-2"), "branch", "--show-current"); got != "bug/eng-2" {
+		t.Errorf("branch = %q, want bug/eng-2", got)
+	}
+}
+
+// TestSetupPrefersOriginsSchemeOverTheEmail: where every branch on origin is a
+// feature/, new work is a feature/ too, whatever this user's git email says. The
+// email guess exists to make branches attributable on a shared remote, and a repo
+// that already namespaces has answered that question its own way.
+func TestSetupPrefersOriginsSchemeOverTheEmail(t *testing.T) {
+	f := unregistered(t)
+	pushBranches(f, "feature/a", "feature/b")
+
+	r := f.exec("setup")
+	if r.err != nil {
+		t.Fatalf("setup: %v\n%s", r.err, r.both())
+	}
+	cfg, err := config.Load(filepath.Join(f.registry, "repo.toml"))
+	if err != nil {
+		t.Fatalf("the generated config does not load: %v", err)
+	}
+	// One prefix is the singular setting, not a list of one.
+	if cfg.BranchPrefix != "feature/" || cfg.Explicit("branch_prefixes") {
+		t.Errorf("prefixes = %+v, want branch_prefix = feature/", cfg.Prefixes())
+	}
+	if !strings.Contains(r.stderr, "from the 2 branches on origin") {
+		t.Errorf("stderr = %q, want where the prefix came from", r.stderr)
+	}
+}
+
+// TestSetupDoesNotMistakePeopleForKindsOfWork is the failure this detection is
+// built to avoid. "alice/x, alice/y, bob/z" and "feature/x, feature/y, bug/z" are
+// the same shape, so counting alone would write colleagues' names into the config
+// as though they were kinds of work — and send every branch this user makes into
+// somebody else's namespace.
+func TestSetupDoesNotMistakePeopleForKindsOfWork(t *testing.T) {
+	f := unregistered(t)
+	pushBranches(f, "alice/a", "alice/b", "bob/c", "bob/d")
+
+	if r := f.exec("setup"); r.err != nil {
+		t.Fatalf("setup: %v\n%s", r.err, r.both())
+	}
+	cfg, err := config.Load(filepath.Join(f.registry, "repo.toml"))
+	if err != nil {
+		t.Fatalf("the generated config does not load: %v", err)
+	}
+	// The fixture's git identity is test@example.com.
+	if got := strings.Join(cfg.Prefixes(), ","); got != "test/" {
+		t.Errorf("Prefixes = %q, want the git-email guess test/", got)
+	}
+}
+
 func TestSetupDryRunWritesNothing(t *testing.T) {
 	f := unregistered(t)
 

@@ -63,15 +63,31 @@ func cmdSetup(env *Env, args []string) error {
 	}
 
 	baseBranch := repo.DefaultBranch()
-	prefix := branchPrefixFor(repo.UserEmail())
 	carry := carryCandidates(repo.IgnoredFiles())
+
+	// What the repository's own branches say beats what this user's email says: a
+	// team that namespaces by kind of work has already decided, and a personal
+	// prefix would put new branches outside the scheme. The email is the fallback,
+	// which is what an origin with no recognizable scheme leaves in place.
+	detected := detectedPrefixes(repo)
+	prefixes := prefixNames(detected)
+	if len(prefixes) == 0 {
+		prefixes = []string{branchPrefixFor(repo.UserEmail())}
+	}
 
 	env.progressf("main checkout %s", mainDir)
 	env.progressf("base branch %s, from origin/HEAD", baseBranch)
-	if prefix == "" {
+	switch {
+	case len(detected) > 1:
+		env.progressf("branch prefixes from origin: %s — a bare slug gets %s",
+			describePrefixes(detected), detected[0].name)
+	case len(detected) == 1:
+		env.progressf("branch prefix %q, from the %d branches on origin using it",
+			detected[0].name, detected[0].count)
+	case prefixes[0] == "":
 		env.progressf("no branch prefix — git has no user.email configured here")
-	} else {
-		env.progressf("branch prefix %q, from your git email — branches will be %seng-1", prefix, prefix)
+	default:
+		env.progressf("branch prefix %q, from your git email — branches will be %seng-1", prefixes[0], prefixes[0])
 	}
 	switch len(carry) {
 	case 0:
@@ -80,7 +96,7 @@ func cmdSetup(env *Env, args []string) error {
 		env.progressf("carrying %d gitignored file(s): %s", len(carry), strings.Join(carry, ", "))
 	}
 
-	body := renderConfig(name, mainDir, baseBranch, prefix, carry)
+	body := renderConfig(name, mainDir, baseBranch, prefixes, carry)
 	if dryRun {
 		fmt.Fprint(env.Stdout, body)
 		env.progressf("nothing written — remove --dry-run to save this to %s", path)
@@ -111,6 +127,92 @@ func validateConfigName(name string) error {
 		return usageErrorf("setup", "config name %q cannot start with %q — it would be a hidden file", name, ".")
 	}
 	return nil
+}
+
+// workKinds are the branch namespaces that name a kind of work rather than a
+// person, in the order that settles ties: ordinary work first, then fixes, then
+// upkeep. The first entry of a detected list is what a bare slug gets, so where
+// two namespaces are used equally often, this is what picks the default.
+//
+// A vocabulary rather than a frequency heuristic, because the two schemes are
+// otherwise the same shape: "alice/x, alice/y, bob/z" and "feature/x, feature/y,
+// bug/z" are indistinguishable by counting, and proposing the first as a list of
+// prefixes would write colleagues' names into your config as though they were
+// kinds of work. That failure is much worse than not guessing — an unrecognized
+// scheme just leaves the git-email guess and the commented example, which is
+// where this started.
+var workKinds = []string{
+	"feature", "feat", "features", "story", "task", "epic",
+	"bug", "bugs", "bugfix", "fix", "fixes", "hotfix", "patch",
+	"chore", "chores", "refactor", "perf", "docs", "doc",
+	"test", "tests", "ci", "build", "deps", "style",
+	"release", "revert", "spike", "exp", "experiment", "wip",
+	"security", "support",
+}
+
+// branchPrefix is one namespace origin's branches use, and how many use it.
+type branchPrefix struct {
+	name  string
+	count int
+}
+
+// detectedPrefixes reads the branch prefixes a repository's own origin suggests,
+// most used first.
+//
+// A namespace has to appear on two branches to count: one is an incident, two is
+// a convention. Ordering by use means the prefix a bare slug gets is the one most
+// work already goes into, which is the guess most likely to be right and the
+// easiest to check against the list printed beside it.
+func detectedPrefixes(repo git.Repo) []branchPrefix {
+	counts := repo.RemoteBranchNamespaces("origin")
+	if len(counts) == 0 {
+		return nil
+	}
+	rank := make(map[string]int, len(workKinds))
+	for i, kind := range workKinds {
+		rank[kind] = i
+	}
+
+	type candidate struct {
+		branchPrefix
+		rank int
+	}
+	found := make([]candidate, 0, len(counts))
+	for ns, n := range counts {
+		r, known := rank[strings.ToLower(strings.TrimSuffix(ns, "/"))]
+		if !known || n < 2 {
+			continue
+		}
+		found = append(found, candidate{branchPrefix{ns, n}, r})
+	}
+	// Sorted rather than left in map order, which Go randomizes: the same repo has
+	// to produce the same config twice, and the first entry is a setting.
+	sort.Slice(found, func(i, j int) bool {
+		if found[i].count != found[j].count {
+			return found[i].count > found[j].count
+		}
+		return found[i].rank < found[j].rank
+	})
+	// Long enough for a real scheme, short enough that the list stays something a
+	// reader checks rather than skims past.
+	if len(found) > 6 {
+		found = found[:6]
+	}
+
+	prefixes := make([]branchPrefix, 0, len(found))
+	for _, c := range found {
+		prefixes = append(prefixes, c.branchPrefix)
+	}
+	return prefixes
+}
+
+// prefixNames drops the counts, which are for the report rather than the file.
+func prefixNames(prefixes []branchPrefix) []string {
+	names := make([]string, 0, len(prefixes))
+	for _, p := range prefixes {
+		names = append(names, p.name)
+	}
+	return names
 }
 
 // branchPrefixFor derives a branch namespace from a git email, so that branches
@@ -179,7 +281,7 @@ func carryCandidates(ignored []string) []string {
 // is where every later question about treewright's behavior gets answered, and
 // because the values it holds are guesses that deserve to be reviewed rather than
 // inherited silently.
-func renderConfig(name, mainDir, baseBranch, prefix string, carry []string) string {
+func renderConfig(name, mainDir, baseBranch string, prefixes []string, carry []string) string {
 	var b strings.Builder
 
 	fmt.Fprintf(&b, "# treewright config for %s, generated by \"treewright setup\".\n", name)
@@ -192,13 +294,22 @@ func renderConfig(name, mainDir, baseBranch, prefix string, carry []string) stri
 	fmt.Fprintf(&b, "# New branches fork from origin/%s, and every status is measured against it.\n", baseBranch)
 	fmt.Fprintf(&b, "base_branch = %s\n\n", tomlString(baseBranch))
 
-	if prefix == "" {
+	switch {
+	case len(prefixes) > 1:
+		fmt.Fprintf(&b, "# Branch names are <prefix><slug>, and these are the prefixes origin's own\n")
+		fmt.Fprintf(&b, "# branches use, most used first. Pick one by naming it — \"treewright new\n")
+		fmt.Fprintf(&b, "# %seng-1\" branches %seng-1 — or leave it off and get %s.\n",
+			prefixes[1], prefixes[1], prefixes[0])
+		fmt.Fprintf(&b, "branch_prefixes = [%s]\n\n", tomlList(prefixes))
+	case len(prefixes) == 0 || prefixes[0] == "":
 		fmt.Fprintf(&b, "# Prepended to a slug to form the branch name, e.g. \"alice/\" gives\n")
 		fmt.Fprintf(&b, "# alice/eng-1. Left empty: git has no user.email configured for this repo.\n")
-		fmt.Fprintf(&b, "# branch_prefix = \"alice/\"\n\n")
-	} else {
-		fmt.Fprintf(&b, "# Prepended to a slug to form the branch name: %seng-1.\n", prefix)
-		fmt.Fprintf(&b, "branch_prefix = %s\n\n", tomlString(prefix))
+		fmt.Fprintf(&b, "# branch_prefix = \"alice/\"\n")
+		writePrefixesHint(&b)
+	default:
+		fmt.Fprintf(&b, "# Prepended to a slug to form the branch name: %seng-1.\n", prefixes[0])
+		fmt.Fprintf(&b, "branch_prefix = %s\n", tomlString(prefixes[0]))
+		writePrefixesHint(&b)
 	}
 
 	fmt.Fprintf(&b, "# Files git ignores, like your .env. A new worktree starts without them,\n")
@@ -234,9 +345,41 @@ func renderConfig(name, mainDir, baseBranch, prefix string, carry []string) stri
 	return b.String()
 }
 
+// writePrefixesHint mentions the list form in a config that got a single prefix,
+// because a team convention treewright could not read off origin is exactly the
+// thing the user has to write in themselves — and would not know it could.
+func writePrefixesHint(b *strings.Builder) {
+	fmt.Fprintf(b, "# Instead of one prefix, a repo can list several and pick between them by\n")
+	fmt.Fprintf(b, "# naming one: \"treewright new bug/eng-1\" branches bug/eng-1. A bare slug\n")
+	fmt.Fprintf(b, "# gets the first. Set this or branch_prefix, not both.\n")
+	fmt.Fprintf(b, "# branch_prefixes = [\"feature/\", \"bug/\", \"chore/\"]\n\n")
+}
+
 // tomlString quotes a value as a TOML basic string. Go's escaping rules coincide
 // with TOML's for everything that can appear in a path or a branch name.
 func tomlString(s string) string { return strconv.Quote(s) }
+
+// tomlList renders values as a TOML inline array's contents. Inline rather than
+// one per line, as carry_files is: prefixes are short, and the order is the
+// setting — a list on one line is one glance to check.
+func tomlList(values []string) string {
+	quoted := make([]string, 0, len(values))
+	for _, v := range values {
+		quoted = append(quoted, tomlString(v))
+	}
+	return strings.Join(quoted, ", ")
+}
+
+// describePrefixes names the detected prefixes with the branch counts that got
+// them chosen, so the ordering the config depends on is visible rather than
+// asserted.
+func describePrefixes(prefixes []branchPrefix) string {
+	parts := make([]string, 0, len(prefixes))
+	for _, p := range prefixes {
+		parts = append(parts, fmt.Sprintf("%s (%d)", p.name, p.count))
+	}
+	return strings.Join(parts, ", ")
+}
 
 // abbreviateHome writes a path under the home directory back as "~/...", which
 // config expands again on the way in. A generated file then reads the way a
@@ -293,7 +436,7 @@ func cmdConfig(env *Env, args []string) error {
 	table.Add(ui.Text("file"), ui.Text(cfg.Path()))
 	add("main_dir", cfg.MainDir, true)
 	add("base_branch", cfg.BaseBranch, cfg.Explicit("base_branch"))
-	add("branch_prefix", cfg.BranchPrefix, cfg.Explicit("branch_prefix"))
+	addPrefixes(add, cfg)
 	add("carry_files", strings.Join(cfg.CarryFiles, ", "), cfg.Explicit("carry_files"))
 	add("command", cfg.Command, cfg.Explicit("command"))
 	add("resume_command", cfg.ResumeCommand, cfg.Explicit("resume_command"))
@@ -306,4 +449,25 @@ func cmdConfig(env *Env, args []string) error {
 
 	table.Render(env.Stdout, ui.ColorEnabled(env.Stdout))
 	return nil
+}
+
+// addPrefixes reports the branch prefixes as one row, named after whichever of
+// the setting's two spellings the file used — the point of this command being to
+// explain a file, a row keyed to a name that is not in it would send the reader
+// looking for the wrong line.
+//
+// A single prefix prints as the bare value it is, and an empty one as the dim
+// "(none)" that every unset value gets. Several print quoted, because an empty
+// prefix listed among namespaced ones is a legitimate setting and would otherwise
+// be an invisible gap between two commas.
+func addPrefixes(add func(key, value string, explicit bool), cfg *config.Config) {
+	key, explicit := "branch_prefix", cfg.Explicit("branch_prefix")
+	if cfg.Explicit("branch_prefixes") {
+		key, explicit = "branch_prefixes", true
+	}
+	if prefixes := cfg.Prefixes(); len(prefixes) == 1 {
+		add(key, prefixes[0], explicit)
+		return
+	}
+	add(key, prefixList(cfg), explicit)
 }

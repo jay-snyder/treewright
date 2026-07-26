@@ -102,8 +102,19 @@ resolution order.
 **Branches always fork from `origin/<base_branch>`.** No flag overrides this;
 offline falls back to the local base branch and says so.
 
+**The branch prefix lives in the branch, never in the slug.**
+`config.SplitPrefix` turns what the user typed into a prefix plus a slug — that is
+how `branch_prefixes` picks between `feature/` and `bug/` — and the slug alone
+names the directory, the window, and everything typed back at `resume`/`rm`.
+`cmdNew` is the *only* place a branch name is constructed; everywhere else reads
+it from `git.Worktree.Branch`, which is what lets a prefix be renamed without
+orphaning the worktrees created under the old one. Never rebuild a branch name
+from a slug.
+
 **The config is data, never code.** TOML, unknown keys rejected, no shelling out
-to read it.
+to read it. `branch_prefix` and `branch_prefixes` are two spellings of one
+setting: read them through `Prefixes()`, and a file setting both is a load error
+rather than a precedence rule.
 
 **Read-only-looking commands still write to `.git`.** Squash-merge detection
 synthesizes a dangling commit object (`IsMerged`), with fixed author/committer

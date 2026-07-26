@@ -122,7 +122,8 @@ tw doctor     # tells you if anything's missing
 ```
 
 `setup` works out most of it for you: where your main checkout is, which branch
-to fork from (it reads `origin/HEAD`), a branch prefix from your git email, and
+to fork from (it reads `origin/HEAD`), your branch prefixes — read off the
+branches already on origin, or your git email if they say nothing — and
 which gitignored `.env` files to carry into new worktrees. It prints every guess
 and writes them to a commented TOML file, so fixing a bad one is a two-second
 edit. Use `--dry-run` if you'd rather look before it writes anything.
@@ -219,6 +220,12 @@ commands that take a `[repo]`.
 main_dir      = "~/code/storefront"  # required: your main checkout
 base_branch   = "staging"            # fork from and compare against this (default: main)
 branch_prefix = "john/"              # branch name is <prefix><slug> (default: none)
+
+# Or, if your team namespaces by kind of work rather than by person, list them
+# instead and pick one by naming it: `tw new bug/eng-1` branches bug/eng-1, and
+# the worktree is still repo-eng-1. A bare slug gets the first. One key or the
+# other, not both.
+# branch_prefixes = ["feature/", "bug/", "chore/"]
 
 # Files git ignores, like your .env. A new worktree starts without them,
 # so treewright copies them in from your main checkout.

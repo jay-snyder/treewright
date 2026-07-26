@@ -55,7 +55,18 @@ type Config struct {
 	BaseBranch string `toml:"base_branch"`
 
 	// BranchPrefix is prepended to a slug to form the branch name, e.g. "alice/".
+	// The singular spelling of BranchPrefixes, and the one every config written
+	// before a repo could have several says.
 	BranchPrefix string `toml:"branch_prefix"`
+
+	// BranchPrefixes are the prefixes this repository's branches may carry, most
+	// preferred first, for teams that namespace by kind of work rather than by
+	// person: ["feature/", "bug/", "chore/"]. Which one a branch gets is chosen
+	// by naming it at `new`; a bare slug gets the first.
+	//
+	// Read through Prefixes rather than directly, which folds the singular
+	// spelling into the same list.
+	BranchPrefixes []string `toml:"branch_prefixes"`
 
 	// CarryFiles are paths, relative to MainDir, copied into each new worktree.
 	// Git ignores these files, so a new worktree starts without them, and the
@@ -148,6 +159,29 @@ func Load(path string) (*Config, error) {
 	// would never match what git says and its worktrees would be invisible.
 	c.MainDir = canonical(expandPath(c.MainDir))
 
+	// branch_prefix and branch_prefixes are two spellings of one setting, and
+	// Prefixes reads either. Setting both is refused rather than resolved:
+	// whichever precedence we picked would be a rule to learn, and the file itself
+	// would no longer say which value was in force.
+	if c.Explicit("branch_prefix") && c.Explicit("branch_prefixes") {
+		return nil, fmt.Errorf("%s: set branch_prefix or branch_prefixes, not both", filepath.Base(path))
+	}
+	if c.Explicit("branch_prefixes") {
+		if len(c.BranchPrefixes) == 0 {
+			return nil, fmt.Errorf("%s: branch_prefixes is empty — list at least one prefix, or remove the key", filepath.Base(path))
+		}
+		// A duplicate changes nothing about which prefix a slug resolves to, and is
+		// always a mistake — usually half of a rename. Cheap to catch here, and
+		// invisible otherwise.
+		seen := make(map[string]bool, len(c.BranchPrefixes))
+		for _, p := range c.BranchPrefixes {
+			if seen[p] {
+				return nil, fmt.Errorf("%s: branch_prefixes lists %q twice", filepath.Base(path), p)
+			}
+			seen[p] = true
+		}
+	}
+
 	if c.BaseBranch == "" {
 		c.BaseBranch = DefaultBaseBranch
 	}
@@ -223,25 +257,54 @@ func (c *Config) Path() string { return filepath.Join(Dir(), c.Name+".toml") }
 // to its default. Keys are the TOML spellings, e.g. "base_branch".
 func (c *Config) Explicit(key string) bool { return c.explicit[key] }
 
-// BranchFor returns the branch name a slug maps to.
-func (c *Config) BranchFor(slug string) string { return c.BranchPrefix + slug }
-
 // DirFor returns the worktree directory a slug maps to.
 func (c *Config) DirFor(slug string) string { return c.MainDir + "-" + slug }
 
-// StripPrefix removes a branch prefix the user accidentally typed into the
-// slug, so that `treewright new alice/foo` under prefix "alice/" yields branch
-// "alice/foo" rather than "alice/alice/foo". It reports whether it stripped
-// anything, so the caller can say so instead of silently correcting the input.
+// Prefixes returns the branch prefixes in force, most preferred first.
 //
-// Only one leading copy is removed: if a user really does want a slug named
-// "alice/foo" under prefix "alice/", stripping repeatedly would make that
-// unreachable.
-func (c *Config) StripPrefix(slug string) (string, bool) {
-	if c.BranchPrefix == "" || !strings.HasPrefix(slug, c.BranchPrefix) {
-		return slug, false
+// Always at least one element, so nothing downstream has to special-case a repo
+// that namespaces nothing: with neither key set, the one prefix is the empty
+// string, which prepends nothing. The singular branch_prefix is exactly the
+// one-element case, which is why Load never rewrites one spelling into the other.
+func (c *Config) Prefixes() []string {
+	if len(c.BranchPrefixes) > 0 {
+		return c.BranchPrefixes
 	}
-	return strings.TrimPrefix(slug, c.BranchPrefix), true
+	return []string{c.BranchPrefix}
+}
+
+// SplitPrefix splits what the user typed into the branch prefix it names and the
+// slug that remains, reporting whether it found a prefix at all.
+//
+// This is the whole of how a repo with several prefixes picks between them:
+// "feature/eng-1" makes branch feature/eng-1, and the worktree is still named
+// after the slug alone. The longest match wins, so nested prefixes ("feature/"
+// and "feature/exp/") resolve to the more specific one rather than to whichever
+// happens to come first in the list.
+//
+// A leading word naming no configured prefix stays in the slug, where the caller
+// rejects it: guessing that "feat/" meant "feature/" would create a branch nobody
+// asked for, and accepting it as written would namespace one outside the scheme
+// the repo agreed on.
+//
+// Only one copy is taken. If a user really does want a slug named "alice/foo"
+// under prefix "alice/", stripping repeatedly would make that unreachable.
+func (c *Config) SplitPrefix(typed string) (prefix, slug string, matched bool) {
+	best := ""
+	for _, p := range c.Prefixes() {
+		// The empty prefix matches every word, and reporting that as a match would
+		// make each bare slug arrive as a prefix having been found.
+		if p == "" || !strings.HasPrefix(typed, p) {
+			continue
+		}
+		if len(p) > len(best) {
+			best = p
+		}
+	}
+	if best == "" {
+		return c.Prefixes()[0], typed, false
+	}
+	return best, strings.TrimPrefix(typed, best), true
 }
 
 // WindowName derives the tmux window name for a slug, uppercased.
