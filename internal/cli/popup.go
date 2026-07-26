@@ -118,33 +118,41 @@ func sizeFor(command string) (width, height int) {
 	// The rows the picker will show, in the cheap form popupSize measures: the
 	// base checkout at the head, as chooseWorktree puts it, and nothing inspected
 	// — the columns that cost a git call are not the ones the data can stretch.
+	branch, _ := git.CurrentBranch(cfg.MainDir)
 	rows := make([]git.Info, 0, len(managed)+1)
-	if len(managed) > 0 {
-		branch, _ := git.CurrentBranch(cfg.MainDir)
-		rows = append(rows, git.Info{
-			Worktree: git.Worktree{Dir: cfg.MainDir, Branch: branch},
-			Status:   git.StatusBase,
-		})
-	}
+	rows = append(rows, git.Info{
+		Worktree: git.Worktree{Dir: cfg.MainDir, Branch: branch},
+		Status:   git.StatusBase,
+	})
 	for _, wt := range managed {
 		rows = append(rows, git.Info{Worktree: wt})
 	}
 
+	width, height = popupSize(rows, tmux.Windows(sessionFor(cfg)))
 	if len(managed) == 0 {
-		// Nothing to pick from, so the popup holds one sentence and the hint
-		// under it — and sizing it for a picker that will not appear is the same
-		// wasted space this whole exercise is about.
-		//
-		// The cursor is the part that is easy to forget. Every one of those lines
-		// ends in a newline, which leaves the cursor on the row below the last of
-		// them, so three lines need four rows: in three the terminal scrolls, and
-		// what goes over the top is the first line — the only one that says
-		// anything. The picker needs no such allowance, its last line being a
-		// prompt the cursor sits on rather than passes.
-		const border, lines, cursor = 2, 3, 1 // message, blank, hint
-		return utf8.RuneCountInString(noWorktreesMessage(repo.Name())) + border, lines + cursor + border
+		// Two extra lines, for the sentence resume and cd print above the menu in
+		// a repository nobody has forked yet, and the blank line under it. The
+		// sentence is usually the widest thing in the popup — the menu beneath it
+		// is a single short row — and a message that outgrew its popup would wrap,
+		// which is precisely what a hand-tuned size exists to stop.
+		const border, hint = 2, 2 // the sentence, and the gap below it
+		width = max(width, utf8.RuneCountInString(noWorktreesMessage(repo.Name()))+border)
+		height += hint
 	}
-	return popupSize(rows, tmux.Windows(sessionFor(cfg)))
+	return width, height
+}
+
+// noWorktreesHint prints what treemux says about a repository nobody has started
+// a worktree in yet, above the menu that follows it.
+//
+// The blank line is the point of having a function at all. Message and menu are
+// different kinds of thing — one is prose about what to do next, the other is a
+// list to answer — and run together the header reads as a second line of the
+// sentence rather than as the top of a table. Both callers need the gap and both
+// need it the same, and the popup is sized for it.
+func noWorktreesHint(env *Env, repo string) {
+	env.progressf("%s", noWorktreesMessage(repo))
+	fmt.Fprintln(env.Stderr)
 }
 
 // noWorktreesMessage is what treemux says about a repository nobody has started a

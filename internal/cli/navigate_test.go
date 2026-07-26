@@ -41,15 +41,22 @@ func TestCdWorksWithoutTheIntegration(t *testing.T) {
 	}
 }
 
+// TestCdWithNoWorktrees covers the empty repository, where cd differs from
+// resume in what a dismissal costs. The menu and its hint are the same — the one
+// row is the base checkout — but cd's answer is a path, and succeeding with
+// nothing to print would send the shell home, so a cancel stays a failure here.
 func TestCdWithNoWorktrees(t *testing.T) {
 	f := newFixture(t, "")
 
-	_, err := f.run("cd")
-	if err == nil {
-		t.Fatal("want an error")
+	r := f.exec("cd")
+	if !strings.Contains(r.stderr, "treemux new") {
+		t.Errorf("stderr = %q, want it to point at the command that makes one", r.stderr)
 	}
-	if !strings.Contains(err.Error(), "treemux new") {
-		t.Errorf("err = %v, want it to point at the command that makes one", err)
+	if r.err == nil {
+		t.Error("cd succeeded with nothing chosen; the shell would be sent home")
+	}
+	if r.stdout != "" {
+		t.Errorf("stdout = %q, want nothing — nothing was chosen", r.stdout)
 	}
 }
 

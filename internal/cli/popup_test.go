@@ -134,11 +134,15 @@ func TestPopupRefusesWhatItCannotRun(t *testing.T) {
 // TestNoWorktreesReadsAsAMessage covers a repository nobody has started a worktree
 // in yet, which is an ordinary state and not a fault.
 //
-// It still exits non-zero, and that is not a contradiction: the exit status is
-// what holds the popup open under -EE, and with nothing to choose from that
-// sentence is the only thing on screen. What makes it a message rather than an
-// error is that treemux prints it itself, unprefixed — an error returned from a
-// command comes back through main wearing "error:".
+// What makes it a message rather than an error is that treemux prints it itself,
+// unprefixed — an error returned from a command comes back through main wearing
+// "error:".
+//
+// It no longer needs a non-zero exit to hold the popup open, and that is the
+// point of the change: the sentence used to be the only thing on screen, so the
+// popup had to be kept up to be read. Now the menu is under it, holding the base
+// checkout, and the popup stays up because the picker is waiting rather than
+// because the command failed.
 func TestNoWorktreesReadsAsAMessage(t *testing.T) {
 	f := newFixture(t, "")
 
@@ -149,12 +153,9 @@ func TestNoWorktreesReadsAsAMessage(t *testing.T) {
 	if !strings.Contains(r.stderr, "no worktrees for repo") {
 		t.Errorf("stderr = %q, want it to say there is nothing to resume", r.stderr)
 	}
-	// And it has to say what to do next, being the whole of what the popup shows.
+	// And it has to say what to do next, that being why it is printed at all.
 	if !strings.Contains(r.stderr, "treemux new") {
 		t.Errorf("stderr = %q, want it to name the way out", r.stderr)
-	}
-	if r.err == nil {
-		t.Error("err = nil; the popup would close before the message could be read")
 	}
 }
 
@@ -177,9 +178,10 @@ func TestPopupHintOnlyAppearsInAPopup(t *testing.T) {
 	}
 }
 
-// TestTheEmptyRepoPopupFitsItsMessage keeps the one case with no picker in it
-// honest. Sizing it for a menu that will not appear is the same wasted space the
-// rest of this replaced, and sizing it too tight wraps the only sentence there is.
+// TestTheEmptyRepoPopupFitsItsMessage keeps the empty repository honest. Its
+// popup holds two things of quite different widths — a long sentence over a menu
+// of one short row — and sizing it to either alone gets it wrong: to the menu and
+// the sentence wraps, to the sentence and the menu is fine but only by luck.
 func TestTheEmptyRepoPopupFitsItsMessage(t *testing.T) {
 	f := newFixture(t, "")
 
@@ -191,12 +193,12 @@ func TestTheEmptyRepoPopupFitsItsMessage(t *testing.T) {
 	if w > want+10 {
 		t.Errorf("width = %d for a %d-wide message — too much slack", w, want)
 	}
-	// The message, a blank line, the hint, the row the cursor lands on after the
-	// last newline, and a border. Sized without that cursor row the terminal
-	// scrolled by one and the message — the only line that says anything — went
-	// over the top, leaving a popup that showed nothing but "press Esc to close".
-	if h != 6 {
-		t.Errorf("height = %d, want 6: three lines, the cursor's row, and a border", h)
+	// The message and the blank line under it, then the picker's own four lines —
+	// header, the base row, a blank, and the prompt the cursor sits on — and a
+	// border. The picker needs no allowance for the cursor, its last line being
+	// one the cursor rests on rather than passes.
+	if h != 8 {
+		t.Errorf("height = %d, want 8: the message, a gap, a four-line picker, and a border", h)
 	}
 	_ = f
 }

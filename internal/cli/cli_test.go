@@ -656,16 +656,24 @@ func TestResumeUsesConfiguredCommand(t *testing.T) {
 	waitForFile(t, marker, "resume_command")
 }
 
+// TestResumeWithNoWorktrees covers the empty repository. The menu still appears,
+// holding the one row there is, with the sentence that says how to start work
+// above it — so resume can no longer fail here, only be dismissed.
 func TestResumeWithNoWorktrees(t *testing.T) {
 	f := newFixture(t, "")
 
-	out, err := f.run("resume")
-	if err == nil {
-		t.Fatal("want an error when there is nothing to resume")
+	r := f.exec("resume")
+	if !strings.Contains(r.stderr, "treemux new") {
+		t.Errorf("stderr = %q, want it to name the way to start work", r.stderr)
+	}
+	// Dismissed, not failed: with no tty the picker cancels, and cancelling
+	// resume is not an error — that is what closes the popup on one Escape.
+	if r.err != nil {
+		t.Errorf("err = %v, want nil so the popup closes on the Escape that dismissed the menu", r.err)
 	}
 	// An empty target path must never reach a command line.
-	if strings.Contains(out, "cd  ") {
-		t.Errorf("output = %q, want no empty-path command", out)
+	if strings.Contains(r.both(), "cd  ") {
+		t.Errorf("output = %q, want no empty-path command", r.both())
 	}
 }
 

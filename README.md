@@ -353,6 +353,13 @@ every other row gets — which after a reboot is the point. The difference shows
 only on the first open, since every later call finds the window by its directory
 and switches to it.
 
+In a repository with no worktrees yet, the menu is that one row with "start one
+with `prefix + N`" printed above it. `ls` prints nothing there — the listing and
+the menu part company in that one state, because they are for different things: a
+menu is a way through, and must offer the base checkout exactly when there is
+nothing else to offer, while a listing is an answer, and "no worktrees" is the
+answer.
+
 ### Naming a worktree
 
 `rm`, `resume` and `cd` take an unambiguous prefix of a slug, because a slug

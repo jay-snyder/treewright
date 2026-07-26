@@ -402,6 +402,11 @@ func cmdLs(env *Env, args []string) error {
 	// the row that is always there says nothing a repository with no worktrees
 	// needs to hear, and a JSON consumer counting what it can work on should not
 	// have to subtract the one row it can never remove.
+	//
+	// This is the one state where the listing and the menu differ, and they
+	// differ because they are for different things. The menu is a way through, so
+	// it must offer the base checkout precisely when there is nothing else to
+	// offer. A listing is an answer, and "no worktrees" is the answer.
 	infos := make([]git.Info, 0, len(managed)+1)
 	if len(managed) > 0 {
 		infos = append(infos, repo.BaseCheckout(cfg.BaseBranch))
@@ -527,21 +532,21 @@ func cmdResume(env *Env, args []string) error {
 	if err != nil {
 		return err
 	}
+	// A repository nobody has started a worktree in yet is an ordinary state and
+	// not a fault, so this is a message rather than an error — and it is printed
+	// above the menu rather than instead of it.
+	//
+	// Instead of it was the first attempt, on the reasoning that the base
+	// checkout would be the session's only window and offering it would answer a
+	// question nobody asked. That holds only while you are sitting in that
+	// window. Attached elsewhere, or freshly rebooted with no session at all, the
+	// menu refused to offer the base window exactly when it was the only thing
+	// there was to reach — which is the opposite of why it is in the list.
+	//
+	// So both: the sentence that says how to start work, and under it the one row
+	// there is.
 	if len(managed) == 0 && slug == "" {
-		// A message rather than an error, because a repository with no worktrees
-		// yet is an ordinary state and not a fault — `ls` says the same thing the
-		// same way. It is still reported through the non-zero exit that keeps a
-		// popup open, though: with nothing to choose from there is nothing else
-		// on screen, and a popup that closed on success would take the only
-		// sentence explaining itself with it.
-		//
-		// The base checkout is not offered as the lone row here, though it is a
-		// row everywhere else. With no worktrees it is the session's only window,
-		// so a menu whose one entry is "the window you are already in" answers a
-		// question nobody asked, and it would cost the sentence that says how to
-		// start work — the only thing worth putting on that screen.
-		env.progressf("%s", noWorktreesMessage(repo.Name()))
-		return ErrSilent
+		noWorktreesHint(env, repo.Name())
 	}
 
 	target, err := chooseWorktree(env, cfg, repo, managed, slug)
@@ -693,11 +698,11 @@ func cmdCd(env *Env, args []string) error {
 	if err != nil {
 		return err
 	}
-	// As in resume, and for the same reason: with no worktrees the base checkout
-	// is not worth a menu of its own. Named outright it still works, which is
-	// what keeps "cd base" answerable in a repository nobody has forked yet.
+	// As in resume, and for the same reason: the hint goes above the menu rather
+	// than in place of it, so the base checkout stays reachable in a repository
+	// nobody has forked yet.
 	if len(managed) == 0 && slug == "" {
-		return fmt.Errorf("%s", noWorktreesMessage(repo.Name()))
+		noWorktreesHint(env, repo.Name())
 	}
 
 	target, err := chooseWorktree(env, cfg, repo, managed, slug)
