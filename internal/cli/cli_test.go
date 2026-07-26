@@ -14,6 +14,7 @@ import (
 
 	"github.com/jay-snyder/treewright/internal/config"
 	"github.com/jay-snyder/treewright/internal/gittest"
+	"github.com/jay-snyder/treewright/internal/testenv"
 	"github.com/jay-snyder/treewright/internal/tmux"
 )
 
@@ -67,14 +68,12 @@ func stubDefaultCommand(t *testing.T) {
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
-// requireTmux skips a test whose assertions need a real tmux server. CI installs
-// tmux, so a skip here means a developer's machine lacks it rather than that the
-// behavior is unverified.
+// requireTmux stands aside from a test whose assertions need a real tmux server.
+// A developer without tmux gets a skip; CI, which installs it, gets a failure —
+// see internal/testenv, since a skipped tmux test in CI is an unverified one.
 func requireTmux(t *testing.T) {
 	t.Helper()
-	if _, err := exec.LookPath("tmux"); err != nil {
-		t.Skip("tmux is not installed")
-	}
+	testenv.RequireTool(t, "tmux")
 }
 
 // waitForFile polls for a file a background process is expected to create, since

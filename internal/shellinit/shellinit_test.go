@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/jay-snyder/treewright/internal/testenv"
 )
 
 func TestScriptRejectsUnknownShells(t *testing.T) {
@@ -74,7 +76,7 @@ func TestScriptsParse(t *testing.T) {
 		t.Run(shell, func(t *testing.T) {
 			bin, err := exec.LookPath(shell)
 			if err != nil {
-				t.Skipf("%s is not installed", shell)
+				testenv.Unavailable(t, "%s is not installed", shell)
 			}
 			script, err := Script(shell)
 			if err != nil {
@@ -155,7 +157,7 @@ func TestShortNameReachesTheBinary(t *testing.T) {
 		t.Run(shell, func(t *testing.T) {
 			bin, err := exec.LookPath(shell)
 			if err != nil {
-				t.Skipf("%s is not installed", shell)
+				testenv.Unavailable(t, "%s is not installed", shell)
 			}
 			script, err := Script(shell)
 			if err != nil {
@@ -195,7 +197,7 @@ func TestWrapperSurvivesAnRmAlias(t *testing.T) {
 		t.Run(shell, func(t *testing.T) {
 			bin, err := exec.LookPath(shell)
 			if err != nil {
-				t.Skipf("%s is not installed", shell)
+				testenv.Unavailable(t, "%s is not installed", shell)
 			}
 			script, err := Script(shell)
 			if err != nil {

@@ -23,12 +23,23 @@ go build -o treewright .   # /treewright is gitignored; version stays "dev"
 go test ./... -count=1     # unit + end-to-end, against throwaway git repos
 go vet ./...
 gofmt -l .                 # must print nothing — CI fails on any output
+
+# The linter, pinned to the version CI runs and .golangci.yaml was written
+# against. Not a module dependency: it would put dozens of indirect requirements
+# in go.sum for a project whose whole build is two.
+go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2 run ./...
 ```
 
-CI (`.github/workflows/ci.yml`) runs all four on ubuntu and macOS. Tests need
-`git`; tests that assert about windows skip without `tmux` (`requireTmux`), and
-the fish shim's syntax check skips without `fish`. A full local run wants all
-three installed.
+CI (`.github/workflows/ci.yaml`) runs all of it on ubuntu and macOS, plus
+golangci-lint and a coverage floor of 80% (the suite sits near 87%; the number is
+a ratchet against a collapse, not a target). Every YAML file in the repo is
+`.yaml`, including the workflows.
+
+Tests drive `git`, `tmux`, and each shell the shims target. Missing one is a skip
+locally and a **failure under `CI`** — see `internal/testenv`, and note that this
+makes the workflow's install steps load-bearing: a skipped tmux test in CI would
+mean the whole integration silently left the run. A full local run wants `git`,
+`tmux`, `zsh`, `bash` and `fish` installed.
 
 Releases are tag-driven: push `v*`, GoReleaser builds the binaries, publishes a
 Homebrew cask to `jay-snyder/homebrew-tap`, and stamps `main.version` via
@@ -56,6 +67,7 @@ ldflags. Validate config changes with `goreleaser check`.
 | `internal/shellinit` | zsh/bash/fish shims, as Go string constants. |
 | `internal/tmuxinit` | tmux key bindings and titles, as Go string constants. |
 | `internal/gittest` | Scratch-repo builder for tests (bare origin + checkout). |
+| `internal/testenv` | Whether a missing tool is a skip or, under `CI`, a failure. |
 
 Package doc comments carry the design rationale — `internal/tmux`,
 `internal/shellinit`, and `internal/config` are worth reading before changing

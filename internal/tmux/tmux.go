@@ -420,7 +420,9 @@ func Focus(w Window) error {
 // treewright chose.
 func SwitchTo(session string) error {
 	if _, err := run("switch-client", "-t", exact(session)); err != nil {
-		return fmt.Errorf("%w: %v", ErrNotFollowed, err)
+		// Both wrapped: callers match on ErrNotFollowed, and tmux's own refusal is
+		// the half that says why, so neither should be flattened into text.
+		return fmt.Errorf("%w: %w", ErrNotFollowed, err)
 	}
 	return nil
 }
@@ -539,9 +541,9 @@ func Source(conf string) error {
 	if err != nil {
 		return err
 	}
-	defer os.Remove(f.Name())
+	defer func() { _ = os.Remove(f.Name()) }()
 	if _, err := f.WriteString(conf); err != nil {
-		f.Close()
+		_ = f.Close()
 		return err
 	}
 	if err := f.Close(); err != nil {

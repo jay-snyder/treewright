@@ -1,0 +1,50 @@
+version: "2"
+
+# The linters here are the ones that catch mistakes, not the ones that have
+# opinions about style: this codebase's style is argued for in prose above each
+# function, and a linter that disagreed with it would be wrong. gofmt is the whole
+# of the formatting rule, and CI enforces it separately as well, so a contributor
+# who has not installed golangci-lint still cannot land unformatted code.
+linters:
+  enable:
+    # Beyond the default set (errcheck, govet, ineffassign, staticcheck, unused):
+    - errorlint # %v where %w was meant loses the wrapped error
+    - misspell # this repo is mostly prose; a typo in it is the likeliest defect
+    - predeclared # a variable named len or copy reads as the builtin it shadows
+    - unconvert # a conversion that does nothing is usually a leftover
+    - usetesting # t.TempDir and t.Setenv over hand-rolled equivalents
+    - whitespace # a stray blank line at the top or bottom of a block
+
+  settings:
+    errcheck:
+      # A deliberate ignore is written `_ =` throughout — every best-effort tmux
+      # call is one — and errcheck accepts that, so what is left to configure is
+      # the handful of calls where there is no error to handle in the first place.
+      check-type-assertions: true
+      exclude-functions:
+        # Writing the answer to a stream treewright does not own. There is nowhere
+        # to report a failed write to except the stream that just failed.
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+        # Closing a file already read, or already flushed by a checked Close on the
+        # success path. The Closes that can lose data — copyFile's destination,
+        # tmux.Source's temp file — are returned rather than dropped.
+        - (*os.File).Close
+
+    usetesting:
+      # os.MkdirTemp stays: the tmux tests need a socket path short enough for a
+      # unix socket, and t.TempDir's is not on macOS. The reason is written above
+      # each call, and a linter cannot see it.
+      os-mkdir-temp: false
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      # Local imports go in their own group after the standard library and the two
+      # third-party modules, which is how every file in the repo is already written.
+      local-prefixes:
+        - github.com/jay-snyder/treewright

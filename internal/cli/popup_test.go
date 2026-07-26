@@ -244,7 +244,8 @@ func TestHintsSpeakTheInvokedName(t *testing.T) {
 	_ = f
 
 	var out, errOut bytes.Buffer
-	Run(Env{Args: []string{"resume"}, Argv0: "tw", Stdout: &out, Stderr: &errOut})
+	// The status is beside the point: what is under test is the wording on stderr.
+	_ = Run(Env{Args: []string{"resume"}, Argv0: "tw", Stdout: &out, Stderr: &errOut})
 	if !strings.Contains(errOut.String(), `"tw new <slug>"`) {
 		t.Errorf("stderr = %q, want the way out spelled as tw, the name that was typed", errOut.String())
 	}

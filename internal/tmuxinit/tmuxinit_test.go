@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/jay-snyder/treewright/internal/testenv"
 )
 
 // The test that matters in this package is the one below: the snippet is loaded
@@ -19,9 +21,7 @@ import (
 // commands against it.
 func server(t *testing.T) func(args ...string) (string, error) {
 	t.Helper()
-	if _, err := exec.LookPath("tmux"); err != nil {
-		t.Skip("tmux is not installed")
-	}
+	testenv.RequireTool(t, "tmux")
 	// Under /tmp rather than t.TempDir(), because a unix socket path is limited to
 	// little over a hundred characters and a macOS temp path approaches that alone.
 	dir, err := os.MkdirTemp("/tmp", "tmx")
@@ -47,7 +47,7 @@ func server(t *testing.T) func(args ...string) (string, error) {
 	// would see the suite fail. The socket is private; the configuration has to be
 	// too.
 	if out, err := tmux("-f", "/dev/null", "new-session", "-d", "-s", "probe", "-c", "/tmp", "sleep 300"); err != nil {
-		t.Skipf("cannot start a tmux server here: %v\n%s", err, out)
+		testenv.Unavailable(t, "cannot start a tmux server here: %v\n%s", err, out)
 	}
 	return tmux
 }

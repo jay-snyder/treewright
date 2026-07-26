@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/jay-snyder/treewright/internal/testenv"
 )
 
 // registry points config lookups at a temp directory and writes the given
@@ -250,7 +252,7 @@ func TestLoadRejectsBadConfigs(t *testing.T) {
 func TestLoadExpandsHomeAndEnv(t *testing.T) {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		t.Skip("no home directory")
+		testenv.Unavailable(t, "no home directory: %v", err)
 	}
 	dir := registry(t, map[string]string{
 		"tilde":  `main_dir = "~/code/repo"`,
@@ -276,8 +278,8 @@ func TestLoadExpandsHomeAndEnv(t *testing.T) {
 // the repo's worktrees became invisible to ls, prune, resume, and completion.
 func TestLoadResolvesSymlinkedMainDir(t *testing.T) {
 	root := t.TempDir()
-	real := filepath.Join(root, "real", "repo")
-	if err := os.MkdirAll(real, 0o755); err != nil {
+	onDisk := filepath.Join(root, "real", "repo")
+	if err := os.MkdirAll(onDisk, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Symlink(filepath.Join(root, "real"), filepath.Join(root, "link")); err != nil {
@@ -290,7 +292,7 @@ func TestLoadResolvesSymlinkedMainDir(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	want, err := filepath.EvalSymlinks(real)
+	want, err := filepath.EvalSymlinks(onDisk)
 	if err != nil {
 		t.Fatal(err)
 	}

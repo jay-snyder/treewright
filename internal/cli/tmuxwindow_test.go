@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/jay-snyder/treewright/internal/testenv"
 )
 
 // The tests here drive a real tmux server, because the behavior they cover exists
@@ -41,7 +43,7 @@ func startSession(t *testing.T, session, window, dir string) {
 	t.Helper()
 	requireTmux(t)
 	if out, err := tmuxctl(t, "-f", "/dev/null", "new-session", "-d", "-s", session, "-n", window, "-c", dir, "sleep 300"); err != nil {
-		t.Skipf("cannot start a tmux server here: %v\n%s", err, out)
+		testenv.Unavailable(t, "cannot start a tmux server here: %v\n%s", err, out)
 	}
 }
 
@@ -52,7 +54,7 @@ func startShellSession(t *testing.T, session, window, dir string) {
 	t.Helper()
 	requireTmux(t)
 	if out, err := tmuxctl(t, "-f", "/dev/null", "new-session", "-d", "-s", session, "-n", window, "-c", dir, "/bin/sh"); err != nil {
-		t.Skipf("cannot start a tmux server here: %v\n%s", err, out)
+		testenv.Unavailable(t, "cannot start a tmux server here: %v\n%s", err, out)
 	}
 }
 
@@ -184,9 +186,7 @@ func TestRmClosesTheWindowOnTheRemovedWorktree(t *testing.T) {
 	}
 
 	// Deliberately run from the main checkout, not from inside the worktree.
-	if err := os.Chdir(f.MainDir); err != nil {
-		t.Fatal(err)
-	}
+	t.Chdir(f.MainDir)
 	r := f.exec("rm", "--yes", "winsome")
 	if r.err != nil {
 		t.Fatalf("rm: %v\n%s", r.err, r.both())
@@ -212,9 +212,7 @@ func TestRmLeavesOtherWindowsAlone(t *testing.T) {
 	openWindowOn(t, "proj", "DOOMED", doomed.Dir)
 	openWindowOn(t, "proj", "KEEPER", keeper.Dir)
 
-	if err := os.Chdir(f.MainDir); err != nil {
-		t.Fatal(err)
-	}
+	t.Chdir(f.MainDir)
 	if r := f.exec("rm", "--yes", "doomed"); r.err != nil {
 		t.Fatalf("rm: %v\n%s", r.err, r.both())
 	}
@@ -244,9 +242,7 @@ func TestRmClosesTheWorktreesWindowNotAVisitor(t *testing.T) {
 
 	twoWindowsInOneWorktree(t, f)
 
-	if err := os.Chdir(f.MainDir); err != nil {
-		t.Fatal(err)
-	}
+	t.Chdir(f.MainDir)
 	r := f.exec("rm", "--yes", "eng-1")
 	if r.err != nil {
 		t.Fatalf("rm: %v\n%s", r.err, r.both())
@@ -272,9 +268,7 @@ func TestRmWithNoWindowOpenSaysNothing(t *testing.T) {
 
 	startSession(t, "proj", "MAIN", f.MainDir)
 
-	if err := os.Chdir(f.MainDir); err != nil {
-		t.Fatal(err)
-	}
+	t.Chdir(f.MainDir)
 	r := f.exec("rm", "--yes", "quiet")
 	if r.err != nil {
 		t.Fatalf("rm: %v\n%s", r.err, r.both())
@@ -297,9 +291,7 @@ func TestRmClosesAWindowInAnotherSession(t *testing.T) {
 
 	startSession(t, "someone-elses-session", "ASTRAY", wt.Dir)
 
-	if err := os.Chdir(f.MainDir); err != nil {
-		t.Fatal(err)
-	}
+	t.Chdir(f.MainDir)
 	r := f.exec("rm", "--yes", "astray")
 	if r.err != nil {
 		t.Fatalf("rm: %v\n%s", r.err, r.both())

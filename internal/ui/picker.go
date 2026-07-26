@@ -116,7 +116,7 @@ func pick(w io.Writer, header string, items []string, nextKey func() (byte, erro
 
 		case key >= '0' && key <= '9':
 			typed += string(key)
-			w.Write([]byte{key})
+			_, _ = w.Write([]byte{key})
 			switch d, v := decide(n, typed); d {
 			case decideCommit:
 				fmt.Fprint(w, "\r\n")
@@ -158,7 +158,7 @@ func Pick(w io.Writer, header string, items []string) (int, error) {
 	if err != nil {
 		return 0, ErrCancelled
 	}
-	defer term.Restore(fd, state)
+	defer func() { _ = term.Restore(fd, state) }()
 
 	one := make([]byte, 1)
 	nextKey := func() (byte, error) {

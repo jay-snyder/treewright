@@ -1,0 +1,153 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    # Both platforms matter: the tests drive the real git binary, and git's
+    # behavior around worktrees and refs is where a portability problem would
+    # show up first.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+          cache: true
+
+      # Every tool the suite drives, on both platforms, because a test that cannot
+      # find one no longer skips here — internal/testenv turns a skip into a
+      # failure whenever CI is set. That is the point: an absent tmux used to take
+      # the whole tmux integration out of the run, and the fish shim's only syntax
+      # check with it, while the run stayed green.
+      - name: Install shells and tmux
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y zsh fish tmux
+
+      - name: Install shells and tmux
+        if: runner.os == 'macOS'
+        run: |
+          for tool in fish tmux; do
+            command -v "$tool" || brew install "$tool"
+          done
+
+      - name: gofmt
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "These files need gofmt:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      # -coverpkg=./... credits a package for the code its tests actually reach,
+      # which for this repo is most of the point: the end-to-end tests in
+      # internal/cli drive git, tmux, config and ui, and per-package coverage would
+      # report all four as barely tested.
+      - name: go test
+        run: go test ./... -count=1 -covermode=atomic -coverpkg=./... -coverprofile=coverage.out
+
+      # Read off the profile rather than from `go tool cover -func`, whose per-function
+      # percentages cannot be averaged into a package's — a block counts for the
+      # statements in it, which is the profile's second column.
+      #
+      # Blocks are merged by their own key before anything is added up, because
+      # -coverpkg=./... writes every package's blocks once per test binary that
+      # could reach them: the same statement appears covered in the run that
+      # exercised it and uncovered in the ones that did not, and counting each line
+      # separately buries the real figure (86.9% read as 13.7%).
+      - name: Coverage
+        run: |
+          awk '
+            NR == 1 { next }
+            { stmts[$1] = $2; hits[$1] += $3 }
+            END {
+              for (block in stmts) {
+                split(block, parts, ":")
+                path = parts[1]
+                sub(/\/[^\/]*$/, "", path)
+                sub(/^github\.com\/jay-snyder\/treewright\/?/, "", path)
+                if (path == "") path = "(main)"
+                pkg[path] += stmts[block]
+                total += stmts[block]
+                if (hits[block] > 0) { covered[path] += stmts[block]; hit += stmts[block] }
+              }
+              for (p in pkg) printf "| %s | %.1f%% |\n", p, 100 * covered[p] / pkg[p]
+              printf "%.1f\n", 100 * hit / total > "coverage.total"
+            }
+          ' coverage.out | sort > coverage.rows
+
+          total="$(cat coverage.total)"
+          # Sorted rows under a header the shell writes, rather than one awk prints
+          # into the same stream: sort would put "| package |" among the packages.
+          {
+            echo "### Coverage on ${{ matrix.os }}: $total%"
+            echo
+            echo "| package | coverage |"
+            echo "|---|---|"
+            cat coverage.rows
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          # A floor, not a target. It sits below where the suite actually is (86.9%
+          # when this was written) so that ordinary movement does not fail a build,
+          # while a change that guts the tests still cannot land quietly.
+          floor=80
+          if [ "${total%.*}" -lt "$floor" ]; then
+            echo "coverage $total% is below the $floor% floor"
+            exit 1
+          fi
+
+      # Kept per platform: the two runs differ, and the difference is usually a
+      # branch only one operating system takes.
+      - name: Upload coverage profile
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-${{ matrix.os }}
+          path: coverage.out
+          retention-days: 14
+
+  lint:
+    # One platform is enough: nothing here is built per operating system, so the
+    # findings would be identical twice over.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+          cache: true
+      # Pinned rather than floating, so a new release of the linter does not fail a
+      # build nobody changed. The version here is the one .golangci.yaml was
+      # written against; raise both together.
+      - uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.12.2
+
+  release-config:
+    # Catches a broken .goreleaser.yaml at pull-request time rather than on the
+    # tag push, when a bad config would fail the release itself.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+      - uses: goreleaser/goreleaser-action@v7
+        with:
+          version: "~> v2"
+          args: check

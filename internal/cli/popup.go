@@ -87,7 +87,7 @@ func cmdPopup(env *Env, args []string) error {
 	// next one thinks it is.
 	if dir != "" {
 		if prev, err := os.Getwd(); err == nil {
-			defer os.Chdir(prev)
+			defer func() { _ = os.Chdir(prev) }()
 		}
 		if err := os.Chdir(dir); err != nil {
 			return fmt.Errorf("cannot open a popup for %s: %w", dir, err)

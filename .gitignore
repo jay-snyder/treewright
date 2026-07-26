@@ -4,4 +4,9 @@
 # GoReleaser build output.
 /dist/
 
+# Coverage, from `go test -coverprofile` and what CI derives from it.
+/coverage.out
+/coverage.rows
+/coverage.total
+
 .DS_Store

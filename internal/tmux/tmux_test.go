@@ -7,6 +7,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/jay-snyder/treewright/internal/testenv"
 )
 
 // pane renders one line of the listing parsePanes reads, so the tests below say
@@ -366,9 +368,7 @@ func TestPopupArgs(t *testing.T) {
 // headless test gets: tmux refuses for its own reason and says so on stderr, so
 // this also pins the other half — that tmux's own refusals are still reported.
 func TestPopupIgnoresTheInnerCommandsExitStatus(t *testing.T) {
-	if _, err := exec.LookPath("tmux"); err != nil {
-		t.Skip("tmux is not installed")
-	}
+	testenv.RequireTool(t, "tmux")
 	dir, err := os.MkdirTemp("/tmp", "tmx")
 	if err != nil {
 		t.Fatalf("make a tmux socket directory: %v", err)
@@ -383,7 +383,7 @@ func TestPopupIgnoresTheInnerCommandsExitStatus(t *testing.T) {
 	})
 	if out, err := exec.Command("tmux", "-L", label, "-f", "/dev/null",
 		"new-session", "-d", "-s", "probe", "-c", "/tmp", "sleep 300").CombinedOutput(); err != nil {
-		t.Skipf("cannot start a tmux server here: %v\n%s", err, out)
+		testenv.Unavailable(t, "cannot start a tmux server here: %v\n%s", err, out)
 	}
 
 	// No client is attached, so tmux declines to draw — and says why, which is

@@ -203,9 +203,7 @@ func TestReposDoNotShareASession(t *testing.T) {
 	if r := f.exec("new", "eng-1"); r.err != nil {
 		t.Fatalf("new in proj: %v\n%s", r.err, r.both())
 	}
-	if err := os.Chdir(other.MainDir); err != nil {
-		t.Fatal(err)
-	}
+	t.Chdir(other.MainDir)
 	if r := f.exec("new", "eng-2"); r.err != nil {
 		t.Fatalf("new in other: %v\n%s", r.err, r.both())
 	}
