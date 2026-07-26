@@ -1,5 +1,6 @@
-// Command treewright manages isolated git worktree + tmux + agent sessions: one
-// command per worktree, torn down together when the work is done.
+// Command treewright gives every ticket its own git worktree, tmux window, and
+// agent session: one command to make all three, one to take them away when the
+// work is done.
 //
 // Translating errors into exit codes happens only here, so that every other
 // package can report failure by returning an error rather than exiting. That is

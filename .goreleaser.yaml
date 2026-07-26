@@ -72,7 +72,7 @@ homebrew_casks:
       name: Jay Snyder
       email: github@catch.fail
     homepage: https://github.com/jay-snyder/treewright
-    description: Isolated git worktree + tmux + agent sessions for parallel work
+    description: Give every ticket its own git worktree, tmux window, and agent session
     license: MIT
     binaries: [treewright]
     # tw is the everyday name: a second link to the same binary, so it works

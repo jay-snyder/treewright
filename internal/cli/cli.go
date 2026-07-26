@@ -555,7 +555,7 @@ func Run(env Env) error {
 
 // ---- help ------------------------------------------------------------------
 
-const tagline = "treewright - isolated git worktree, tmux, and agent sessions for parallel work"
+const tagline = "treewright - give every ticket its own git worktree, tmux window, and agent session"
 
 // The usage lines print argv0 — the name the user actually typed, "treewright"
 // or its installed shorthand "tw" — so that help never scolds a user with a
