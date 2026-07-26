@@ -74,7 +74,11 @@ func TestNewOpensItsWindowInTheRepoSession(t *testing.T) {
 	if !strings.Contains(r.stderr, "created tmux session proj") {
 		t.Errorf("stderr = %q, want the new session reported", r.stderr)
 	}
-	if !strings.Contains(r.stderr, "attach with: tmux attach -t proj") {
+	// The way back in is given as treemux's own command rather than as a
+	// tmux attach for the user to copy: it names the session exactly, and it
+	// reaches the right server when TREEMUX_TMUX_LABEL has aimed treemux at one —
+	// which, in this test, it has.
+	if !strings.Contains(r.stderr, "attach with: treemux attach proj") {
 		t.Errorf("stderr = %q, want the attach command", r.stderr)
 	}
 
@@ -89,12 +93,58 @@ func TestNewOpensItsWindowInTheRepoSession(t *testing.T) {
 	// identifies it later however its shell wanders and wherever it is dragged to.
 	// Checked here because this is the call that creates the session, the other of
 	// the two paths a window is opened by.
-	if got, want := worktreeStampOn(t, "proj", "ENG-142"), f.DirFor("eng-142-white-screen"); got != want {
+	if got, want := windowStamp(t, "proj", "ENG-142", "@treemux_worktree"), f.DirFor("eng-142-white-screen"); got != want {
 		t.Errorf("window ENG-142 records worktree %q, want %q", got, want)
 	}
 }
 
-// TestNewJoinsTheSessionAlreadyRunning is the other half: a second stream is a
+// TestNewRecordsTheWorktreeOnItsWindow covers the rest of what a window carries.
+// Only the worktree is read back by treemux; the others exist so that a status
+// line can name the worktree with "#{@treemux_slug}" instead of shelling out to git
+// on every interval, and an option that is never written is one nobody can use.
+func TestNewRecordsTheWorktreeOnItsWindow(t *testing.T) {
+	requireTmux(t)
+	f := newFixture(t, "command = 'sleep 300'\n")
+
+	f.mustRun("new", "eng-142-white-screen")
+
+	want := map[string]string{
+		"@treemux_worktree": f.DirFor("eng-142-white-screen"),
+		"@treemux_repo":     "proj",
+		"@treemux_slug":     "eng-142-white-screen",
+		"@treemux_branch":   f.BranchFor("eng-142-white-screen"),
+	}
+	for option, value := range want {
+		if got := windowStamp(t, "proj", "ENG-142", option); got != value {
+			t.Errorf("window ENG-142 has %s = %q, want %q", option, got, value)
+		}
+	}
+}
+
+// TestTheBaseWindowRecordsNoWorktree is the other half: the base window sits on a
+// checkout rather than on a worktree, so it has no slug, and the branch it is
+// parked on is the one thing here a user can change from inside the window —
+// recording it would be recording something that goes stale as soon as they do.
+func TestTheBaseWindowRecordsNoWorktree(t *testing.T) {
+	requireTmux(t)
+	f := newFixture(t, "command = 'sleep 300'\n")
+
+	f.mustRun("base")
+
+	if got, want := windowStamp(t, "proj", "MAIN", "@treemux_worktree"), f.MainDir; got != want {
+		t.Errorf("base window records worktree %q, want the main checkout %q", got, want)
+	}
+	if got := windowStamp(t, "proj", "MAIN", "@treemux_repo"); got != "proj" {
+		t.Errorf("base window records repo %q, want proj", got)
+	}
+	for _, option := range []string{"@treemux_slug", "@treemux_branch"} {
+		if got := windowStamp(t, "proj", "MAIN", option); got != "" {
+			t.Errorf("base window has %s = %q, want it left unset", option, got)
+		}
+	}
+}
+
+// TestNewJoinsTheSessionAlreadyRunning is the other half: a second worktree is a
 // second window in the same session, not a second session.
 func TestNewJoinsTheSessionAlreadyRunning(t *testing.T) {
 	requireTmux(t)
@@ -157,10 +207,10 @@ func TestReposDoNotShareASession(t *testing.T) {
 	}
 
 	if got := windowsIn(t, "proj"); len(got) != 1 || got[0] != "ENG-1" {
-		t.Errorf("windows in session proj = %v, want only its own stream", got)
+		t.Errorf("windows in session proj = %v, want only its own worktree", got)
 	}
 	if got := windowsIn(t, "other"); len(got) != 1 || got[0] != "ENG-2" {
-		t.Errorf("windows in session other = %v, want only its own stream", got)
+		t.Errorf("windows in session other = %v, want only its own worktree", got)
 	}
 }
 
@@ -270,13 +320,13 @@ func TestLsReportsTheOpenWindow(t *testing.T) {
 	}
 }
 
-// TestTheStreamsWindowIsFoundHoweverWindowsAreArranged covers the reported bug
-// end to end. Two windows stand in one worktree — the stream's own, and a base
+// TestTheWorktreesWindowIsFoundHoweverWindowsAreArranged covers the reported bug
+// end to end. Two windows stand in one worktree — the worktree's own, and a base
 // window whose shell followed a `treemux cd` into it — and which one treemux
 // named used to depend on where they sat, because the pane listing walks windows
 // in index order. Rearranging them renamed the window in `ls` and sent `resume`
 // somewhere else.
-func TestTheStreamsWindowIsFoundHoweverWindowsAreArranged(t *testing.T) {
+func TestTheWorktreesWindowIsFoundHoweverWindowsAreArranged(t *testing.T) {
 	requireTmux(t)
 	f := newFixture(t, "command = 'sleep 300'\nresume_command = 'sleep 300'\n")
 
@@ -292,7 +342,7 @@ func TestTheStreamsWindowIsFoundHoweverWindowsAreArranged(t *testing.T) {
 	}
 	for _, row := range rows {
 		if row.Slug == "eng-1" && row.Window != "ENG-1" {
-			t.Errorf("window for eng-1 = %q, want the stream's own window ENG-1", row.Window)
+			t.Errorf("window for eng-1 = %q, want the worktree's own window ENG-1", row.Window)
 		}
 	}
 

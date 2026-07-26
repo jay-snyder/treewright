@@ -738,6 +738,87 @@ func TestDispatch(t *testing.T) {
 	})
 }
 
+// TestParseArgs covers the shared parser directly, because every subcommand
+// routes through it and the value-taking flags added for tmux-init changed how
+// it walks the arguments — from one pass over each word to one that can consume
+// the word after it.
+func TestParseArgs(t *testing.T) {
+	// untouched is what the value holds when the flag never appears, standing in
+	// for the caller's own default — which has to survive a run that does not
+	// mention it. Every case says which it expects, so nothing is implied.
+	const untouched = "«untouched»"
+
+	tests := []struct {
+		name       string
+		args       []string
+		wantFlag   bool
+		wantValue  string
+		wantPos    []string
+		wantErr    string
+		maxAllowed int
+	}{
+		{name: "a switch on its own", args: []string{"-f"}, wantFlag: true, wantValue: untouched},
+		{name: "a value, spaced", args: []string{"--key", "G"}, wantValue: "G"},
+		{name: "a value, joined", args: []string{"--key=G"}, wantValue: "G"},
+		{
+			// The spelling that lets someone drop a binding rather than move it.
+			name: "an empty value is a value", args: []string{"--key="}, wantValue: "",
+		},
+		{
+			name: "flags mix with positionals in any order",
+			args: []string{"one", "-f", "--key", "G"}, maxAllowed: 1,
+			wantFlag: true, wantValue: "G", wantPos: []string{"one"},
+		},
+		{
+			// The failure this ordering is written to avoid: reading the next flag
+			// as the value, which drops it silently.
+			name: "a value flag does not swallow the next flag",
+			args: []string{"--key", "-f"}, wantErr: "needs a value",
+		},
+		{name: "a value flag at the end", args: []string{"--key"}, wantErr: "needs a value"},
+		{name: "a switch given a value", args: []string{"-f=yes"}, wantErr: "takes no value"},
+		{name: "an unknown flag", args: []string{"--nope"}, wantErr: "unknown flag"},
+		{
+			name: "a lone dash is a positional, not a flag",
+			args: []string{"-"}, maxAllowed: 1, wantPos: []string{"-"}, wantValue: untouched,
+		},
+		{name: "too many positionals", args: []string{"a"}, wantErr: "unexpected argument"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var flag bool
+			value := untouched
+			pos, err := parseArgs("test", tc.args,
+				map[string]*bool{"-f": &flag},
+				map[string]*string{"--key": &value},
+				tc.maxAllowed)
+
+			if tc.wantErr != "" {
+				if err == nil {
+					t.Fatalf("want an error mentioning %q, got positionals %v", tc.wantErr, pos)
+				}
+				if !strings.Contains(err.Error(), tc.wantErr) {
+					t.Errorf("error = %q, want it to mention %q", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("parseArgs: %v", err)
+			}
+			if flag != tc.wantFlag {
+				t.Errorf("flag = %v, want %v", flag, tc.wantFlag)
+			}
+			if value != tc.wantValue {
+				t.Errorf("value = %q, want %q", value, tc.wantValue)
+			}
+			if strings.Join(pos, ",") != strings.Join(tc.wantPos, ",") {
+				t.Errorf("positionals = %v, want %v", pos, tc.wantPos)
+			}
+		})
+	}
+}
+
 // TestRejectsExtraArguments guards against silently discarding an argument,
 // which would make a typo — a slug with a stray space, say — look accepted.
 func TestRejectsExtraArguments(t *testing.T) {
@@ -808,7 +889,7 @@ func TestStdoutCarriesOnlyTheAnswer(t *testing.T) {
 		if got, want := r.stdout, f.DirFor("feature")+"\n"; got != want {
 			t.Errorf("stdout = %q, want exactly %q", got, want)
 		}
-		// The narration and the warning both belong on the other stream.
+		// The narration and the warning both belong on the other worktree.
 		if !strings.Contains(r.stderr, "creating branch") {
 			t.Errorf("stderr = %q, want the progress line", r.stderr)
 		}

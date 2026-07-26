@@ -1,0 +1,196 @@
+// Package tmuxinit produces the tmux-side integration, the way shellinit
+// produces the shell-side one.
+//
+// The gap it closes is particular to how treemux opens a window. The configured
+// command is the window's own command, so a worktree's pane is the agent itself and
+// there is no shell in it to type "treemux resume" into: switching worktrees meant
+// splitting a pane or going to find a window that has a prompt. A key binding
+// that opens treemux in a popup reaches it from anywhere, including from inside a
+// running agent, and closes again afterwards.
+//
+// tmux has no equivalent of eval "$(...)", so the snippet is loaded one of two
+// ways, both of which come from this one text:
+//
+//	run-shell 'treemux tmux-init --apply'   # the binary loads it into the server
+//
+//	treemux tmux-init > ~/.config/treemux/treemux.tmux
+//	source-file ~/.config/treemux/treemux.tmux
+//
+// Printing is the default because a file of key bindings is worth reading before
+// it is loaded, and because it is then yours to edit.
+package tmuxinit
+
+import (
+	"fmt"
+	"strings"
+)
+
+// Keys are the prefix keys the integration binds. An empty key omits its binding
+// entirely, for someone who wants one of them and not the other.
+type Keys struct {
+	Resume string // switch to another worktree
+	New    string // start one
+}
+
+// DefaultKeys are what the snippet binds when the caller asks for nothing else.
+//
+// Both are unbound in stock tmux, whose own uppercase keys are C, D, E, L and M.
+// But being free is the smaller half of the test: the larger half is what a
+// missed shift does, because these are keys reached for in a hurry. Here the
+// twins are t, clock-mode, and n, next-window — both harmless and both dismissed
+// by carrying on.
+//
+// W was the first choice, for the mnemonic with tmux's own w window picker, and
+// it is the reason these are configurable at all. A great many configurations
+// rebind lowercase w to kill-window, and there the slip destroys the very window
+// the binding exists to reach — a treemux worktree being a window with an agent
+// running in it and nothing else.
+func DefaultKeys() Keys { return Keys{Resume: "T", New: "N"} }
+
+// Validate rejects a key that would not survive being written into a config file.
+//
+// The permitted set is letters, digits, dash and underscore, which covers a plain
+// key, a modified one such as C-t or M-Left, and the named keys — F5, Space,
+// PageUp. It excludes quotes, semicolons, hashes and whitespace, every one of
+// which is punctuation in tmux's own config syntax and would end the binding
+// somewhere other than where it looked like it ended.
+//
+// tmux does bind some of those characters by default, so this does turn away keys
+// that would in principle work. Anyone who wants prefix + ; can print the snippet
+// and write that line themselves, which is a documented route rather than a
+// workaround.
+func (k Keys) Validate() error {
+	for _, named := range []struct{ flag, value string }{
+		{"--resume-key", k.Resume},
+		{"--new-key", k.New},
+	} {
+		if named.value == "" {
+			continue // asked for deliberately: bind nothing to this one
+		}
+		if len(named.value) > 12 {
+			return fmt.Errorf("%s %q is too long to be a tmux key", named.flag, named.value)
+		}
+		for _, r := range named.value {
+			switch {
+			case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_':
+			default:
+				return fmt.Errorf("%s %q contains %q, which is punctuation in tmux's config syntax — "+
+					"print the snippet and write that binding by hand instead", named.flag, named.value, r)
+			}
+		}
+	}
+	return nil
+}
+
+// Script returns the tmux configuration treemux suggests, binding keys.
+func Script(k Keys) string {
+	var b strings.Builder
+	b.WriteString(header)
+
+	if k.Resume != "" || k.New != "" {
+		b.WriteString(reachHeader)
+		if k.Resume != "" {
+			b.WriteString(fill(resumeBinding, k.Resume))
+		}
+		if k.New != "" {
+			b.WriteString(fill(newBinding, k.New))
+		}
+	}
+
+	b.WriteString(titles)
+	b.WriteString(recorded)
+	return b.String()
+}
+
+// fill substitutes the key into a binding.
+//
+// By replacement rather than by formatting, because these lines are dense with
+// characters a format string reads as verbs: "70%", "60%", and the "%1" that
+// carries what tmux's prompt collected.
+func fill(template, key string) string {
+	return strings.ReplaceAll(template, "{{key}}", key)
+}
+
+const header = `# treemux tmux integration. Load it from ~/.tmux.conf with either:
+#
+#     run-shell 'treemux tmux-init --apply'
+#
+#     treemux tmux-init > ~/.config/treemux/treemux.tmux
+#     source-file ~/.config/treemux/treemux.tmux
+#
+# The first is always in step with the installed binary; the second is a file you
+# can read and edit. Both load exactly what "treemux tmux-init" prints.
+#
+# To move the keys, pass them through rather than editing after the fact, so the
+# two ways of loading this stay identical:
+#
+#     treemux tmux-init --resume-key G --new-key C-n
+#
+# An empty key omits its binding: --new-key "" binds only the first.
+`
+
+// Three details in these bindings are load-bearing.
+//
+// They go through `treemux popup` rather than calling display-popup directly,
+// because tmux fixes a popup's size when it creates one and -w and -h take only
+// cells or a percentage of the terminal. A percentage is the wrong unit for a
+// picker — its height is the number of worktrees and its width the widest slug,
+// neither of which grows when the terminal does — so on a wide terminal the popup
+// came out mostly empty. Working the size out needs a program, and run-shell is
+// the only way a binding can run one.
+//
+// That indirection costs the client, which #{client_tty} buys back: a tmux
+// command run from a backgrounded process has no association with the client that
+// asked for it, so tmux falls back to the most recently active one and the popup
+// opens over whichever terminal has been busier. run-shell expands formats in the
+// command it runs, so the binding can say which client it means.
+//
+// The binding runs `resume` rather than `cd`, because a popup's shell exits with
+// the popup: moving it somewhere is an operation with nowhere to land.
+const reachHeader = `
+# --- reaching treemux from inside a worktree -----------------------------------
+#
+# A window treemux opens runs the agent as the window's own command, so there is
+# no shell in it to type into. These open treemux in a popup over whatever is
+# running, and close it again once you have chosen.
+#
+# The popup starts in the current pane's directory, which is how treemux knows
+# which repository you mean.
+`
+
+const resumeBinding = `
+# prefix + {{key}} — switch to another worktree.
+bind-key {{key}} run-shell -b 'treemux popup -c "#{client_tty}" resume'
+`
+
+const newBinding = `
+# prefix + {{key}} — start one. tmux asks for the slug; treemux does the rest.
+bind-key {{key}} command-prompt -p "new worktree:" 'run-shell -b "treemux popup -c #{client_tty} new %1"'
+`
+
+const titles = `
+# --- terminal and tab titles -------------------------------------------------
+#
+# The one part of this file that is not about treemux. tmux sets no title at all
+# by default, so attaching leaves your terminal tab named after the command line
+# that attached — "tmux attach -t myrepo" — until a prompt overwrites it, which
+# inside tmux never comes. Delete these two lines if you set your own format.
+set -g set-titles on
+set -g set-titles-string "#S: #W"
+`
+
+const recorded = `
+# --- what treemux records on a window ----------------------------------------
+#
+# Every window treemux opens carries the worktree it belongs to, so a status line
+# can name it without shelling out to git on each interval:
+#
+#     @treemux_repo      the config's name
+#     @treemux_worktree  the checkout the window was opened on
+#     @treemux_slug      the worktree — unset on the base window, which is not one
+#     @treemux_branch    the branch that worktree is on
+#
+# For instance, to keep the repository in view while attached:
+#
+#     set -g status-right " #{@treemux_repo} "
+`

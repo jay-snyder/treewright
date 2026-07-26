@@ -2,6 +2,8 @@ package tmux
 
 import (
 	"maps"
+	"os"
+	"os/exec"
 	"slices"
 	"strings"
 	"testing"
@@ -101,8 +103,8 @@ func TestParsePanes(t *testing.T) {
 		},
 		{
 			// The everyday collision: `treemux cd eng-1` leaves the base window's
-			// shell standing in the stream's worktree, so MAIN and ENG-1 both report
-			// the same directory. The window treemux opened there is the stream's,
+			// shell standing in the worktree, so MAIN and ENG-1 both report
+			// the same directory. The window treemux opened there is the worktree's,
 			// whichever of them the listing reaches first.
 			name: "the window opened on the worktree wins over one standing in it",
 			out: pane("@1", "myrepo", "MAIN", "/wt/eng-1") + "\n" +
@@ -124,7 +126,7 @@ func TestParsePanes(t *testing.T) {
 			},
 		},
 		{
-			// A stream's window is still its own after its shell walks off, so
+			// A worktree's window is still its own after its shell walks off, so
 			// nothing opens a second window on a worktree that already has one.
 			name:   "a window opened on a worktree answers for it after its pane moves",
 			out:    stamped("@2", "myrepo", "ENG-1", "/wt/eng-1", "/somewhere/else"),
@@ -137,7 +139,7 @@ func TestParsePanes(t *testing.T) {
 		{
 			// The other half of that: a window known to belong to another worktree
 			// loses to one that claims nothing, since closing or switching to the
-			// other stream's window in this one's name is the damaging mistake.
+			// other worktree's window in this one's name is the damaging mistake.
 			name: "a window opened on another worktree loses to an unstamped one",
 			out: stamped("@1", "myrepo", "ENG-2", "/wt/eng-2", "/wt/eng-1") + "\n" +
 				pane("@5", "myrepo", "VISITOR", "/wt/eng-1"),
@@ -203,7 +205,7 @@ func TestParsePanesIgnoresWindowOrder(t *testing.T) {
 
 	want := parsePanes(strings.Join(lines, "\n"), "proj")
 	if got := want["/wt/eng-1"].Name; got != "ENG-1" {
-		t.Fatalf("window for /wt/eng-1 = %q, want the stream's own window ENG-1", got)
+		t.Fatalf("window for /wt/eng-1 = %q, want the worktree's own window ENG-1", got)
 	}
 
 	// Every arrangement of the same windows has to answer the same way, so this
@@ -262,5 +264,152 @@ func TestSessionName(t *testing.T) {
 func TestExactTargets(t *testing.T) {
 	if got := exact("api"); got != "=api" {
 		t.Errorf("exact(%q) = %q, want %q", "api", got, "=api")
+	}
+}
+
+// TestParseBoundKey covers reading a key back out of list-keys.
+//
+// It is parsed from text because list-keys has no format variable for the key
+// itself — #{key} renders empty and #{command} says "list-keys" — so the shape of
+// that output is load-bearing, and this is where it is pinned. The lines below
+// are verbatim from tmux 3.7, quirks included.
+func TestParseBoundKey(t *testing.T) {
+	const listing = `bind-key    -T prefix Space   next-layout
+bind-key -r -T prefix \;      select-pane -D
+bind-key -r -T prefix \'      select-pane -R
+bind-key    -T prefix n       new-window -c "#{pane_current_path}"
+bind-key    -T prefix b       command-prompt -p "new worktree:" "run-shell -b \"treemux popup -c #{client_tty} new %1\""
+bind-key    -T prefix g       run-shell -b "treemux popup -c \"#{client_tty}\" resume"
+bind-key -r -T prefix "C-;"   resize-pane -D 5`
+
+	tests := []struct {
+		name  string
+		match []string
+		want  string
+	}{
+		{
+			// Both terms, because either alone catches the wrong line: "treemux"
+			// also matches the resume binding, and " new " would match any
+			// treemux-ish command that mentioned it.
+			name: "the binding that starts a worktree", match: []string{"treemux", " new "}, want: "b",
+		},
+		{name: "the binding that switches", match: []string{"treemux", "resume"}, want: "g"},
+		{
+			// The trap this spacing avoids: new-window is not starting a worktree.
+			name: "new-window is not a match", match: []string{"treemux", " new "}, want: "b",
+		},
+		{name: "nothing bound to it", match: []string{"treemux", "prune"}, want: ""},
+		{
+			// list-keys escapes a key that would be ambiguous in its own output,
+			// and a reader has to press the key, not the escaping.
+			name: "an escaped key is unescaped", match: []string{"select-pane -D"}, want: ";",
+		},
+		{name: "a quoted key is unquoted", match: []string{"resize-pane -D 5"}, want: "C-;"},
+		{name: "a repeatable binding, whose -r shifts the fields", match: []string{"select-pane -R"}, want: "'"},
+		{name: "empty listing", match: []string{"treemux"}, want: ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			in := listing
+			if tc.name == "empty listing" {
+				in = ""
+			}
+			if got := parseBoundKey(in, tc.match...); got != tc.want {
+				t.Errorf("parseBoundKey(%v) = %q, want %q", tc.match, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestPopupArgs pins the flags a popup is opened with. Opening one needs a client
+// to draw on, which a headless test has none of, so this is where they get
+// checked.
+func TestPopupArgs(t *testing.T) {
+	got := strings.Join(popupArgs("/dev/ttys005", "/code/repo", "treemux resume", 78, 9), " ")
+	want := "display-popup -EE -w 78 -h 9 -e TREEMUX_POPUP=1 -c /dev/ttys005 -d /code/repo treemux resume"
+	if got != want {
+		t.Errorf("popupArgs = %q, want %q", got, want)
+	}
+
+	// The command inside has no other way to know where it is running, and tmux
+	// marks a popup with nothing of its own. Without this a failure holds the
+	// popup on screen with nothing saying how to dismiss it.
+	if !strings.Contains(got, "-e "+PopupEnv+"=1") {
+		t.Errorf("popupArgs = %q, want the popup marked for what runs in it", got)
+	}
+
+	// -EE, doubled, is what leaves a failed command on screen: with a single -E
+	// tmux closes the popup however it exited, and "no worktrees to resume"
+	// vanished before it could be read.
+	if !strings.Contains(got, " -EE ") {
+		t.Errorf("popupArgs = %q, want -EE so a failure stays readable", got)
+	}
+
+	// Both are optional, and an empty one must not become a flag with no value —
+	// tmux would read the command that follows as the flag's argument.
+	bare := strings.Join(popupArgs("", "", "treemux ls", 80, 12), " ")
+	if strings.Contains(bare, "-c") || strings.Contains(bare, "-d") {
+		t.Errorf("popupArgs with no client or directory = %q, want neither flag", bare)
+	}
+}
+
+// TestPopupIgnoresTheInnerCommandsExitStatus is the regression test for a second
+// overlay appearing on Escape.
+//
+// display-popup exits with the status of whatever ran inside it, and under -EE
+// the popup has already stayed up, shown the message and been dismissed by the
+// time that status comes back. Returning it made the caller fail too, and a key
+// binding running through run-shell then had tmux announce "returned 1" over the
+// top — reporting in the abstract what the popup had just said plainly.
+//
+// Driven against a real server with no client attached, which is the closest a
+// headless test gets: tmux refuses for its own reason and says so on stderr, so
+// this also pins the other half — that tmux's own refusals are still reported.
+func TestPopupIgnoresTheInnerCommandsExitStatus(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux is not installed")
+	}
+	dir, err := os.MkdirTemp("/tmp", "tmx")
+	if err != nil {
+		t.Fatalf("make a tmux socket directory: %v", err)
+	}
+	t.Setenv("TMUX_TMPDIR", dir)
+	t.Setenv("TMUX", "")
+	label := strings.ReplaceAll(t.Name(), "/", "-")
+	t.Setenv("TREEMUX_TMUX_LABEL", label)
+	t.Cleanup(func() {
+		_ = exec.Command("tmux", "-L", label, "kill-server").Run()
+		_ = os.RemoveAll(dir)
+	})
+	if out, err := exec.Command("tmux", "-L", label, "-f", "/dev/null",
+		"new-session", "-d", "-s", "probe", "-c", "/tmp", "sleep 300").CombinedOutput(); err != nil {
+		t.Skipf("cannot start a tmux server here: %v\n%s", err, out)
+	}
+
+	// No client is attached, so tmux declines to draw — and says why, which is
+	// exactly the case that must still surface.
+	err = Popup("", "/tmp", "true", 40, 10)
+	if err == nil {
+		t.Fatal("Popup returned nil when tmux itself refused; its message would be lost")
+	}
+	if !strings.Contains(err.Error(), "no current client") {
+		t.Errorf("err = %v, want tmux's own complaint passed through", err)
+	}
+}
+
+// TestAttachArgs pins the two things `treemux attach` exists to get right, and
+// that a person copying "tmux attach -t myrepo" out of a progress line cannot:
+// the session is named exactly, and the server flag survives.
+func TestAttachArgs(t *testing.T) {
+	t.Setenv("TREEMUX_TMUX_LABEL", "")
+	if got, want := strings.Join(AttachArgs("api"), " "), "attach-session -t =api"; got != want {
+		t.Errorf("AttachArgs(%q) = %q, want %q", "api", got, want)
+	}
+
+	// Without this, attaching would reach the default server while every window
+	// treemux opened went to another one — and report no session at all.
+	t.Setenv("TREEMUX_TMUX_LABEL", "work")
+	if got, want := strings.Join(AttachArgs("api"), " "), "-L work attach-session -t =api"; got != want {
+		t.Errorf("AttachArgs under a label = %q, want %q", got, want)
 	}
 }

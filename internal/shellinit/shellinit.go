@@ -84,6 +84,8 @@ _treemux() {
     'resume:reopen a window on an existing worktree'
     'cd:move your shell into a worktree'
     'base:open a window on the main checkout'
+    'popup:run a treemux command in a tmux popup sized to its output'
+    'attach:attach this terminal to the repository tmux session'
     'ls:list worktrees with their status'
     'rm:tear down a worktree and its branch'
     'prune:remove every merged, clean worktree'
@@ -91,6 +93,7 @@ _treemux() {
     'config:print the settings in force, defaults included'
     'doctor:check the installation and every registered config'
     'shell-init:print the shell integration'
+    'tmux-init:print the tmux integration'
   )
   if (( CURRENT == 2 )); then
     _describe -t commands 'treemux command' cmds
@@ -103,9 +106,9 @@ _treemux() {
     return
   fi
   case "$words[2]" in
-    rm|resume|cd)         compadd -- ${(f)"$(command treemux __complete slugs 2>/dev/null)"} ;;
-    ls|prune|base|config) compadd -- ${(f)"$(command treemux __complete repos 2>/dev/null)"} ;;
-    shell-init)           compadd -- ${(f)"$(command treemux __complete shells 2>/dev/null)"} ;;
+    rm|resume|cd)                compadd -- ${(f)"$(command treemux __complete slugs 2>/dev/null)"} ;;
+    ls|prune|base|config|attach) compadd -- ${(f)"$(command treemux __complete repos 2>/dev/null)"} ;;
+    shell-init)                  compadd -- ${(f)"$(command treemux __complete shells 2>/dev/null)"} ;;
   esac
 }
 (( $+functions[compdef] )) && compdef _treemux treemux
@@ -127,7 +130,7 @@ treemux() {
 _treemux_completions() {
   local cur="${COMP_WORDS[COMP_CWORD]}"
   if [[ $COMP_CWORD -eq 1 ]]; then
-    COMPREPLY=($(compgen -W "new resume cd base ls rm prune setup config doctor shell-init" -- "$cur"))
+    COMPREPLY=($(compgen -W "new resume cd base attach popup ls rm prune setup config doctor shell-init tmux-init" -- "$cur"))
     return
   fi
   if [[ "$cur" == -* ]]; then
@@ -136,9 +139,9 @@ _treemux_completions() {
   fi
   local candidates=""
   case "${COMP_WORDS[1]}" in
-    rm|resume|cd)         candidates="$(command treemux __complete slugs 2>/dev/null)" ;;
-    ls|prune|base|config) candidates="$(command treemux __complete repos 2>/dev/null)" ;;
-    shell-init)           candidates="$(command treemux __complete shells 2>/dev/null)" ;;
+    rm|resume|cd)                candidates="$(command treemux __complete slugs 2>/dev/null)" ;;
+    ls|prune|base|config|attach) candidates="$(command treemux __complete repos 2>/dev/null)" ;;
+    shell-init)                  candidates="$(command treemux __complete shells 2>/dev/null)" ;;
   esac
   COMPREPLY=($(compgen -W "$candidates" -- "$cur"))
 }
@@ -171,6 +174,8 @@ complete -c treemux -n __fish_use_subcommand -a new        -d 'create a worktree
 complete -c treemux -n __fish_use_subcommand -a resume     -d 'reopen a window on an existing worktree'
 complete -c treemux -n __fish_use_subcommand -a cd         -d 'move your shell into a worktree'
 complete -c treemux -n __fish_use_subcommand -a base       -d 'open a window on the main checkout'
+complete -c treemux -n __fish_use_subcommand -a attach     -d 'attach this terminal to the repository tmux session'
+complete -c treemux -n __fish_use_subcommand -a popup      -d 'run a treemux command in a tmux popup sized to its output'
 complete -c treemux -n __fish_use_subcommand -a ls         -d 'list worktrees with their status'
 complete -c treemux -n __fish_use_subcommand -a rm         -d 'tear down a worktree and its branch'
 complete -c treemux -n __fish_use_subcommand -a prune      -d 'remove every merged, clean worktree'
@@ -178,12 +183,16 @@ complete -c treemux -n __fish_use_subcommand -a setup      -d 'write a config fo
 complete -c treemux -n __fish_use_subcommand -a config     -d 'print the settings in force, defaults included'
 complete -c treemux -n __fish_use_subcommand -a doctor     -d 'check the installation and every registered config'
 complete -c treemux -n __fish_use_subcommand -a shell-init -d 'print the shell integration'
+complete -c treemux -n __fish_use_subcommand -a tmux-init  -d 'print the tmux integration'
 complete -c treemux -n '__fish_seen_subcommand_from rm resume cd' -a '(command treemux __complete slugs)'
-complete -c treemux -n '__fish_seen_subcommand_from ls prune base config' -a '(command treemux __complete repos)'
+complete -c treemux -n '__fish_seen_subcommand_from ls prune base config attach' -a '(command treemux __complete repos)'
 complete -c treemux -n '__fish_seen_subcommand_from shell-init' -a '(command treemux __complete shells)'
 complete -c treemux -n '__fish_seen_subcommand_from rm' -s f -l force -d 'remove even when unsaved work would be lost'
 complete -c treemux -n '__fish_seen_subcommand_from rm' -s y -l yes -d 'do not ask before closing the tmux window'
 complete -c treemux -n '__fish_seen_subcommand_from prune' -s y -l yes -d 'actually remove them, instead of listing'
 complete -c treemux -n '__fish_seen_subcommand_from ls' -l json -d 'print machine-readable output'
 complete -c treemux -n '__fish_seen_subcommand_from setup' -s n -l dry-run -d 'print the config instead of writing it'
+complete -c treemux -n '__fish_seen_subcommand_from tmux-init' -l apply -d 'load it into the running tmux server'
+complete -c treemux -n '__fish_seen_subcommand_from tmux-init' -l resume-key -r -d 'prefix key that switches worktrees'
+complete -c treemux -n '__fish_seen_subcommand_from tmux-init' -l new-key -r -d 'prefix key that starts a worktree'
 `

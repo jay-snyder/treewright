@@ -83,12 +83,13 @@ func (r *report) render(env *Env) {
 }
 
 func cmdDoctor(env *Env, args []string) error {
-	if _, err := parseArgs("doctor", args, nil, 0); err != nil {
+	if _, err := parseArgs("doctor", args, nil, nil, 0); err != nil {
 		return err
 	}
 
 	var r report
 	checkTmux(&r)
+	checkTmuxIntegration(&r)
 	checkShellIntegration(env, &r)
 	names := checkRegistry(&r)
 	for _, name := range names {
@@ -132,6 +133,36 @@ func checkTmux(r *report) {
 		// Not a fault: treemux is often run from a plain shell, and windows are
 		// still opened, in the repository's own session, to attach to afterwards.
 		r.add(levelWarn, "not inside tmux — windows are created detached, and treemux says how to attach")
+	}
+}
+
+// checkTmuxIntegration reports whether the tmux-side integration is loaded.
+//
+// Unlike the shell one, which can only be inferred from the variable its wrapper
+// exports, this can simply be asked: a key binding is a thing the server holds.
+// It matters most in the case it is hardest to notice — a window running an agent
+// has no shell in it, so without a binding there is no way to reach treemux from
+// inside a worktree at all.
+func checkTmuxIntegration(r *report) {
+	if !tmux.Available() {
+		return // already reported as a failure by checkTmux
+	}
+	// Asked only once a server is known to be up, and in that order deliberately.
+	// Key bindings live in a server, so with none running there is nothing loaded
+	// and nothing to load into — and the command that would ask, list-keys, starts
+	// one, which would have doctor create the very emptiness it then reported.
+	if !tmux.ServerRunning() {
+		return
+	}
+	bound, err := tmux.HasBindings()
+	switch {
+	case err != nil:
+		// The server stopped between the two questions. Nothing worth saying.
+		return
+	case bound:
+		r.add(levelOK, "tmux integration loaded")
+	default:
+		r.add(levelWarn, "tmux integration not loaded — add run-shell 'treemux tmux-init --apply' to your tmux.conf, or no key reaches treemux from a window running an agent")
 	}
 }
 

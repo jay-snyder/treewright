@@ -97,7 +97,7 @@ type command struct {
 }
 
 // commands is ordered as it should read in help: first the four that get you
-// into a stream of work, then inspection, then teardown, then installation.
+// into a worktree, then inspection, then teardown, then installation.
 //
 // Several carry aliases for the name a newcomer is likelier to reach for.
 // They are deliberately absent from help and completion: accepting a second
@@ -173,9 +173,47 @@ the checkout has drifted off the base branch.
 
 It is the same window every time: one already sitting in the main checkout is
 selected rather than a second one being opened beside it. Being the repository's
-session's first window, it is also what keeps that session alive as streams come
+session's first window, it is also what keeps that session alive as worktrees come
 and go.`,
 			run: cmdBase,
+		},
+		{
+			name:    "attach",
+			args:    "[repo]",
+			summary: "attach this terminal to a repository's tmux session",
+			long: `Puts you in the session holding a repository's windows, on whichever
+window was current there when you left — which is what makes this different from
+resume, that being a request for one particular worktree.
+
+Inside tmux the client is moved instead, since attaching a second client to a
+session the first one is already in is the nesting tmux warns about.
+
+The session has to exist. "treemux base" is what opens a repository's first
+window, and so what brings its session into being.`,
+			run: cmdAttach,
+		},
+		{
+			name:    "popup",
+			args:    "[-c <client>] <command> [arguments]",
+			summary: "run a treemux command in a tmux popup sized to its output",
+			long: `Opens a tmux popup and runs "treemux <command>" inside it, having
+first worked out how big that popup needs to be.
+
+tmux sizes a popup when it is created and offers no way to fit one afterwards:
+-w and -h take cells or a percentage of the terminal. A percentage is the wrong
+unit for a picker, whose height is the number of worktrees and whose width is the
+widest slug — neither of which grows when the terminal does, so on a wide
+terminal most of the popup is empty. This is what the key bindings printed by
+"treemux tmux-init" go through.
+
+--client names the terminal to draw on. It matters because a tmux command run
+from outside tmux has no association with the client that asked for it, so with
+two terminals attached to two sessions the popup opens over whichever has been
+busier. A binding passes #{client_tty}, which run-shell expands.`,
+			flags: []flagDoc{
+				{"-c, --client", "terminal to open the popup on (a tmux client, e.g. #{client_tty})"},
+			},
+			run: cmdPopup,
 		},
 		{
 			name:    "ls",
@@ -212,7 +250,7 @@ only as a squash merge is recognized as landed and does not trigger the refusal.
 An unambiguous prefix of a slug is enough to name it.
 
 The tmux window open on that worktree is now pointing at a directory that no
-longer exists, so treemux offers to close it — the window named after the stream,
+longer exists, so treemux offers to close it — the window named after the worktree,
 not whichever one you happened to run this from.`,
 			flags: []flagDoc{
 				{"-f, --force", "remove even when unsaved work would be lost"},
@@ -295,6 +333,43 @@ missing carry file, no tmux server running yet — do not fail the run.`,
 It defines a wrapper function, so that cd can move your shell and rm can move it
 out of a directory it just deleted, and registers tab completion.`,
 			run: cmdInit,
+		},
+		{
+			name:    "tmux-init",
+			args:    "[--apply] [--resume-key <key>] [--new-key <key>]",
+			summary: "print the tmux integration: popup key bindings and titles",
+			long: `Prints tmux configuration to load from your tmux.conf:
+
+    run-shell 'treemux tmux-init --apply'
+
+    treemux tmux-init > ~/.config/treemux/treemux.tmux
+    source-file ~/.config/treemux/treemux.tmux
+
+It binds prefix + T to switch worktrees and prefix + N to start one, both by
+opening treemux in a popup — which is the only way to reach it from a window
+whose pane is the agent itself and has no shell to type into. It also turns
+terminal titles on, and documents the window options treemux records for a
+status line to read.
+
+Both keys are free in stock tmux, and their lowercase twins are harmless if you
+miss the shift: t is clock-mode and n is next-window. Where that is not true of
+your own config, move them:
+
+    treemux tmux-init --resume-key G --new-key C-n
+
+An empty key omits its binding, so --new-key "" binds only the picker. Anything
+more than the keys — the popup size, a binding of your own — is what printing to
+a file is for.
+
+--apply loads the same text into the running server, flags included, for the
+one-line form above; printing is the default, since these are key bindings and
+worth reading first.`,
+			flags: []flagDoc{
+				{"--apply", "load it into the running tmux server instead of printing it"},
+				{"--resume-key", "prefix key that switches worktrees (default T, empty to omit)"},
+				{"--new-key", "prefix key that starts a worktree (default N, empty to omit)"},
+			},
+			run: cmdTmuxInit,
 		},
 		{
 			name:    "__complete",

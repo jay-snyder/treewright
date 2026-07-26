@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -18,7 +19,7 @@ import (
 // ---- new -------------------------------------------------------------------
 
 func cmdNew(env *Env, args []string) error {
-	positional, err := parseArgs("new", args, nil, 2)
+	positional, err := parseArgs("new", args, nil, nil, 2)
 	if err != nil {
 		return err
 	}
@@ -87,7 +88,13 @@ func cmdNew(env *Env, args []string) error {
 	// the path is already on stdout, so `cd "$(treemux new eng-1)"` must not fail
 	// because tmux could not be made to open a window. resume and base do return
 	// it, a window being the whole of what they were asked for.
-	if err := openWindow(env, cfg, dir, cfg.WindowName(slug, override), cfg.Command); err != nil {
+	if err := openWindow(env, cfg, tmux.Spec{
+		Dir:     dir,
+		Name:    cfg.WindowName(slug, override),
+		Command: cfg.Command,
+		Slug:    slug,
+		Branch:  branch,
+	}); err != nil {
 		env.warnf("%v", err)
 	}
 	return nil
@@ -217,7 +224,7 @@ func cmdRm(env *Env, args []string) error {
 	positional, err := parseArgs("rm", args, map[string]*bool{
 		"-f": &force, "--force": &force,
 		"-y": &yes, "--yes": &yes,
-	}, 1)
+	}, nil, 1)
 	if err != nil {
 		return err
 	}
@@ -276,7 +283,7 @@ func cmdRm(env *Env, args []string) error {
 	// And which window is open on the worktree, asked while the worktree still
 	// exists. This is usually not the caller's own window: `treemux rm eng-1` is
 	// run from the base window, and the one left pointing at a deleted directory
-	// is the window named after the stream.
+	// is the window named after the worktree.
 	staleWindow := tmux.Windows(sessionFor(cfg))[dir]
 
 	if err := repo.RemoveWorktree(dir); err != nil {
@@ -324,10 +331,10 @@ func escapeDeletedDir(env *Env, mainDir, goneDir string) {
 //
 // The window is identified from the worktree's path rather than from the caller's
 // own pane, because a teardown is normally run from somewhere else: closing "the
-// window I am in" left the window named after the stream behind, still sitting in
+// window I am in" left the window named after the worktree behind, still sitting in
 // the deleted directory.
 //
-// No client is needed to close a window, so this runs outside tmux too: a stream
+// No client is needed to close a window, so this runs outside tmux too: a worktree
 // torn down from a plain shell should not leave a window behind in the session
 // waiting to be attached to.
 func offerWindowClose(env *Env, window tmux.Window, assumeYes bool) {
@@ -373,7 +380,7 @@ func offerWindowClose(env *Env, window tmux.Window, assumeYes bool) {
 
 func cmdLs(env *Env, args []string) error {
 	var asJSON bool
-	positional, err := parseArgs("ls", args, map[string]*bool{"--json": &asJSON}, 1)
+	positional, err := parseArgs("ls", args, map[string]*bool{"--json": &asJSON}, nil, 1)
 	if err != nil {
 		return err
 	}
@@ -412,7 +419,7 @@ func cmdLs(env *Env, args []string) error {
 
 func cmdPrune(env *Env, args []string) error {
 	var yes bool
-	positional, err := parseArgs("prune", args, map[string]*bool{"-y": &yes, "--yes": &yes}, 1)
+	positional, err := parseArgs("prune", args, map[string]*bool{"-y": &yes, "--yes": &yes}, nil, 1)
 	if err != nil {
 		return err
 	}
@@ -494,7 +501,7 @@ func cmdPrune(env *Env, args []string) error {
 // ---- resume ----------------------------------------------------------------
 
 func cmdResume(env *Env, args []string) error {
-	positional, err := parseArgs("resume", args, nil, 1)
+	positional, err := parseArgs("resume", args, nil, nil, 1)
 	if err != nil {
 		return err
 	}
@@ -513,17 +520,36 @@ func cmdResume(env *Env, args []string) error {
 		return err
 	}
 	if len(managed) == 0 {
-		return fmt.Errorf("no worktrees to resume for %s", repo.Name())
+		// A message rather than an error, because a repository with no worktrees
+		// yet is an ordinary state and not a fault — `ls` says the same thing the
+		// same way. It is still reported through the non-zero exit that keeps a
+		// popup open, though: with nothing to choose from there is nothing else
+		// on screen, and a popup that closed on success would take the only
+		// sentence explaining itself with it.
+		env.progressf("%s", noWorktreesMessage(repo.Name()))
+		return ErrSilent
 	}
 
 	target, err := chooseWorktree(env, cfg, repo, managed, slug)
-	if err != nil {
+	switch {
+	case errors.Is(err, errCancelled):
+		// Nothing was asked for, so nothing failed. Exiting 0 is what lets the
+		// popup this usually runs in close on the same Escape that dismissed the
+		// picker, rather than staying up to report a refusal as an error.
+		return nil
+	case err != nil:
 		return err
 	}
 
 	// openWindow does the rest: a window already open on that worktree is the
 	// session being asked for, so it is switched to rather than duplicated.
-	return openWindow(env, cfg, target.Dir, cfg.WindowName(target.Slug, ""), cfg.ResumeCommand)
+	return openWindow(env, cfg, tmux.Spec{
+		Dir:     target.Dir,
+		Name:    cfg.WindowName(target.Slug, ""),
+		Command: cfg.ResumeCommand,
+		Slug:    target.Slug,
+		Branch:  target.Branch,
+	})
 }
 
 // chooseWorktree picks the worktree a command should act on: the one named, the
@@ -553,10 +579,24 @@ func chooseWorktree(env *Env, cfg *config.Config, repo git.Repo, managed []git.W
 	idx, err := ui.Pick(env.Stderr, header, rows)
 	if err != nil {
 		env.progressf("cancelled")
-		return git.Worktree{}, ErrSilent
+		return git.Worktree{}, errCancelled
 	}
 	return managed[idx], nil
 }
+
+// errCancelled reports that the menu was dismissed rather than answered.
+//
+// Kept apart from ErrSilent because declining is not a failure, and the two
+// callers cannot treat it alike. `resume` prints nothing on stdout, so it can
+// honestly exit 0 and say nothing more. `cd` cannot: its answer is a path, and
+// `cd "$(treemux cd)"` with an empty answer would move the shell to the home
+// directory — so there it stays a failure.
+//
+// The difference is visible in a tmux popup, which closes on success and stays up
+// on failure so an error can be read. Exiting non-zero for a cancel made Escape
+// need pressing twice: once to dismiss the picker, once to clear the popup that
+// was holding "cancelled" on screen.
+var errCancelled = errors.New("cancelled")
 
 // ---- cd --------------------------------------------------------------------
 
@@ -567,7 +607,7 @@ func chooseWorktree(env *Env, cfg *config.Config, repo git.Repo, managed []git.W
 // sources what treemux appends. Without the integration the path on stdout is
 // still the answer, so `cd "$(treemux cd foo)"` works unaided.
 func cmdCd(env *Env, args []string) error {
-	positional, err := parseArgs("cd", args, nil, 1)
+	positional, err := parseArgs("cd", args, nil, nil, 1)
 	if err != nil {
 		return err
 	}
@@ -586,11 +626,17 @@ func cmdCd(env *Env, args []string) error {
 		return err
 	}
 	if len(managed) == 0 {
-		return fmt.Errorf("no worktrees for %s — create one with \"treemux new <slug>\"", repo.Name())
+		return fmt.Errorf("%s", noWorktreesMessage(repo.Name()))
 	}
 
 	target, err := chooseWorktree(env, cfg, repo, managed, slug)
-	if err != nil {
+	switch {
+	case errors.Is(err, errCancelled):
+		// Unlike resume, this one stays a failure. The path on stdout is the
+		// answer, and `cd "$(treemux cd)"` succeeding with nothing to print would
+		// send the shell home.
+		return ErrSilent
+	case err != nil:
 		return err
 	}
 
@@ -605,7 +651,7 @@ func cmdCd(env *Env, args []string) error {
 // ---- base ------------------------------------------------------------------
 
 func cmdBase(env *Env, args []string) error {
-	positional, err := parseArgs("base", args, nil, 1)
+	positional, err := parseArgs("base", args, nil, nil, 1)
 	if err != nil {
 		return err
 	}
@@ -625,8 +671,17 @@ func cmdBase(env *Env, args []string) error {
 	// The base window is found by the directory it sits in, like any other, so a
 	// session that already has one gets it selected rather than gaining a second
 	// window on the main checkout.
+	//
+	// It carries no slug and no branch: it is a checkout rather than a worktree, and
+	// the branch it is parked on is the one thing here the user can change from
+	// inside the window, so recording it would be recording something that goes
+	// stale the moment they do.
 	if tmux.Available() {
-		return openWindow(env, cfg, cfg.MainDir, strings.ToUpper(cfg.BaseBranch), cfg.Command)
+		return openWindow(env, cfg, tmux.Spec{
+			Dir:     cfg.MainDir,
+			Name:    strings.ToUpper(cfg.BaseBranch),
+			Command: cfg.Command,
+		})
 	}
 
 	// Without tmux there is no window to open, so run the command here and hand
@@ -635,4 +690,60 @@ func cmdBase(env *Env, args []string) error {
 	cmd.Dir = cfg.MainDir
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	return cmd.Run()
+}
+
+// ---- attach ------------------------------------------------------------------
+
+// cmdAttach puts the caller in a repository's tmux session.
+//
+// Three commands already print the way to reach a session they have just opened a
+// window in, and until now that was a `tmux attach -t <session>` for the user to
+// copy. That spelling is one treemux can get right and a person cannot always:
+// it has to name the session exactly, and under TREEMUX_TMUX_LABEL it has to
+// reach a server the default `tmux attach` never looks at.
+//
+// It deliberately does not create the session. `base` is the command that opens a
+// repository's first window, and two commands that both bring a session into
+// existence — with different windows in it — is one more than the tool needs.
+func cmdAttach(env *Env, args []string) error {
+	positional, err := parseArgs("attach", args, nil, nil, 1)
+	if err != nil {
+		return err
+	}
+	cfg, err := resolveConfig(at(positional, 0))
+	if err != nil {
+		return err
+	}
+	if !tmux.Available() {
+		return fmt.Errorf("tmux is not installed, so there is no session to attach to")
+	}
+
+	session := sessionFor(cfg)
+	if !tmux.HasSession(session) {
+		return fmt.Errorf("no tmux session %s is running — open one with \"treemux base %s\"", session, cfg.Name)
+	}
+
+	// Inside tmux there is already a client holding this terminal, and attaching a
+	// second one to it is the nesting tmux warns about. Moving the client is the
+	// same thing from where the user sits, and it leaves the session's own current
+	// window current — arriving where you left off is the difference between this
+	// and `resume`.
+	if tmux.Inside() {
+		if tmux.CurrentSession() == session {
+			env.progressf("already attached to %s", session)
+			return nil
+		}
+		return tmux.SwitchTo(session)
+	}
+
+	// Outside it, tmux wants the terminal for as long as the client stays
+	// attached, so it inherits treemux's own worktrees rather than the pipes every
+	// other tmux call here runs through, and this returns when the user detaches.
+	attach := exec.Command("tmux", tmux.AttachArgs(session)...)
+	attach.Stdin, attach.Stdout, attach.Stderr = os.Stdin, os.Stdout, os.Stderr
+	if err := attach.Run(); err != nil {
+		// tmux has already said what went wrong, on the stderr it was handed.
+		return ErrSilent
+	}
+	return nil
 }

@@ -6,11 +6,13 @@ import (
 
 	"github.com/jay-snyder/treemux/internal/config"
 	"github.com/jay-snyder/treemux/internal/shellinit"
+	"github.com/jay-snyder/treemux/internal/tmux"
+	"github.com/jay-snyder/treemux/internal/tmuxinit"
 )
 
 // cmdInit prints the shell integration for the named shell.
 func cmdInit(env *Env, args []string) error {
-	positional, err := parseArgs("shell-init", args, nil, 1)
+	positional, err := parseArgs("shell-init", args, nil, nil, 1)
 	if err != nil {
 		return err
 	}
@@ -23,6 +25,55 @@ func cmdInit(env *Env, args []string) error {
 		return usageErrorf("shell-init", "%v", err)
 	}
 	fmt.Fprint(env.Stdout, script)
+	return nil
+}
+
+// cmdTmuxInit prints the tmux integration, or loads it into the running server.
+//
+// Printing is the default for a reason the shell side does not have: a shell
+// integration is a function you call, while this is a set of key bindings that
+// change what your existing keys do. That is worth reading before it is loaded.
+//
+// --apply exists because tmux has no eval "$(...)" — there is no way to write one
+// line in tmux.conf that both fetches the snippet and runs it. With it, the line
+// is `run-shell 'treemux tmux-init --apply'`, and what the server gets is byte for
+// byte what printing produces.
+//
+// The keys are flags rather than settings in a repo's config, because a key
+// binding belongs to a tmux server and not to a repository: one treemux config
+// per repo would give several answers to a question that has one. As flags they
+// also work identically down both routes — a --apply line in tmux.conf can carry
+// them, where editing the printed file could not.
+func cmdTmuxInit(env *Env, args []string) error {
+	var apply bool
+	keys := tmuxinit.DefaultKeys()
+	if _, err := parseArgs("tmux-init", args,
+		map[string]*bool{"--apply": &apply},
+		map[string]*string{"--resume-key": &keys.Resume, "--new-key": &keys.New},
+		0); err != nil {
+		return err
+	}
+	// Checked before anything is printed or loaded, so a bad key is one message
+	// naming the flag rather than tmux's own complaint about a line of config the
+	// user never wrote.
+	if err := keys.Validate(); err != nil {
+		return usageErrorf("tmux-init", "%v", err)
+	}
+
+	if !apply {
+		fmt.Fprint(env.Stdout, tmuxinit.Script(keys))
+		return nil
+	}
+	if !tmux.Available() {
+		return fmt.Errorf("tmux is not installed, so there is nothing to load the integration into")
+	}
+	if err := tmux.Source(tmuxinit.Script(keys)); err != nil {
+		// Much the likeliest cause, and not otherwise obvious: key bindings live in
+		// a server, so with none running there is nowhere for them to go. From
+		// tmux.conf this cannot happen — the server is what is reading the file.
+		return fmt.Errorf("%w — is a tmux server running? key bindings live in one", err)
+	}
+	env.progressf("loaded the treemux key bindings into the running tmux server")
 	return nil
 }
 

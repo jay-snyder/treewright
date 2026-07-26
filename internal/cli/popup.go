@@ -1,0 +1,170 @@
+package cli
+
+import (
+	"fmt"
+	"io"
+	"os"
+	"strings"
+	"unicode/utf8"
+
+	"github.com/jay-snyder/treemux/internal/tmux"
+	"github.com/jay-snyder/treemux/internal/ui"
+)
+
+// A tmux popup is given its size when it is created, and tmux offers no way to
+// fit one to what appears inside it: -w and -h take cells or a percentage of the
+// terminal, and nothing else. A percentage is the wrong unit for a picker, whose
+// height is the number of worktrees and whose width is the widest slug — neither of
+// which grows when the terminal does. On a wide terminal the stock 70% left most
+// of the popup empty.
+//
+// So the size is worked out before the popup exists, by the one program that
+// knows what will be printed into it.
+
+// PopupHint says how to dismiss a popup, for a treemux that is running in one and
+// is about to exit non-zero — which is exactly when tmux leaves the popup on
+// screen, holding whatever was printed so it can be read.
+//
+// Written here rather than beside each message because every non-zero exit has
+// the same problem and the same answer, and a hint repeated at thirty call sites
+// is one that goes missing from the thirty-first. Outside a popup it says nothing:
+// there is nothing to dismiss, and telling someone to press Escape at their own
+// prompt would only puzzle them.
+func PopupHint(w io.Writer) {
+	if os.Getenv(tmux.PopupEnv) == "" {
+		return
+	}
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, ui.Dim.Apply("press Esc to close", ui.ColorEnabled(w)))
+}
+
+// cmdPopup runs another treemux command inside a tmux popup sized for its output.
+//
+// It is what the key bindings in `treemux tmux-init` invoke, through run-shell,
+// which is the only way a binding can compute anything: display-popup would have
+// to be handed a literal size.
+//
+// That indirection costs one thing, which --client buys back. A tmux command run
+// from outside tmux has no association with the client that asked for it, so tmux
+// falls back to the most recently active one — and with two terminals attached to
+// two sessions, the popup opens over whichever has been busier. run-shell expands
+// formats in the command it runs, so the binding passes #{client_tty} and the
+// popup lands where the key was pressed.
+func cmdPopup(env *Env, args []string) error {
+	var client string
+	positional, err := parseArgs("popup", args, nil,
+		map[string]*string{"-c": &client, "--client": &client}, 3)
+	if err != nil {
+		return err
+	}
+	if len(positional) == 0 {
+		return usageErrorf("popup", "a command to run in the popup is required")
+	}
+	if positional[0] == "popup" {
+		// Left to itself this nests forever, each popup opening another.
+		return usageErrorf("popup", "popup cannot run itself")
+	}
+	if !tmux.Available() {
+		return fmt.Errorf("tmux is not installed, so there is no popup to open")
+	}
+
+	width, height := sizeFor(positional[0])
+
+	// The binary by its own path rather than by name: the popup runs through a
+	// shell whose PATH is the tmux server's, which is inherited from whatever
+	// started it and need not be the one treemux was found on.
+	self, err := os.Executable()
+	if err != nil {
+		self = "treemux"
+	}
+	inner := make([]string, 0, len(positional)+1)
+	inner = append(inner, shellQuote(self))
+	for _, a := range positional {
+		inner = append(inner, shellQuote(a))
+	}
+
+	// run-shell inherits the calling pane's directory, which is how treemux works
+	// out which repository is meant — so the popup starts where this is standing
+	// rather than wherever the tmux server happens to be.
+	dir, _ := os.Getwd()
+	return tmux.Popup(client, dir, strings.Join(inner, " "), width, height)
+}
+
+// sizeFor works out the popup a command needs.
+//
+// Only the pickers have a size worth deriving; everything else prints a few lines
+// of progress whose length nobody can predict, and for those a small fixed popup
+// beats a proportion of the terminal.
+func sizeFor(command string) (width, height int) {
+	const (
+		defaultWidth  = 80
+		defaultHeight = 12
+	)
+	cmd := lookup(command)
+	if cmd == nil || (cmd.name != "resume" && cmd.name != "cd") {
+		return defaultWidth, defaultHeight
+	}
+
+	cfg, err := resolveConfig("")
+	if err != nil {
+		return defaultWidth, defaultHeight
+	}
+	repo := repoFor(cfg)
+	managed, err := repo.Managed()
+	if err != nil {
+		return defaultWidth, defaultHeight
+	}
+	if len(managed) == 0 {
+		// Nothing to pick from, so the popup holds one sentence and the hint
+		// under it — and sizing it for a picker that will not appear is the same
+		// wasted space this whole exercise is about.
+		//
+		// The cursor is the part that is easy to forget. Every one of those lines
+		// ends in a newline, which leaves the cursor on the row below the last of
+		// them, so three lines need four rows: in three the terminal scrolls, and
+		// what goes over the top is the first line — the only one that says
+		// anything. The picker needs no such allowance, its last line being a
+		// prompt the cursor sits on rather than passes.
+		const border, lines, cursor = 2, 3, 1 // message, blank, hint
+		return utf8.RuneCountInString(noWorktreesMessage(repo.Name())) + border, lines + cursor + border
+	}
+	return popupSize(managed, tmux.Windows(sessionFor(cfg)))
+}
+
+// noWorktreesMessage is what treemux says about a repository nobody has started a
+// worktree in yet.
+//
+// It lives here, next to the popup sized to hold it, so the two cannot disagree
+// about how wide that sentence is — a message that outgrew its popup would wrap,
+// which is precisely what a hand-tuned size stops catching.
+//
+// The key comes first when there is one. Someone reading this is already in tmux,
+// most likely in a popup opened by that very key, and the keystroke is the nearer
+// of the two answers; the command is for the shell they will drop back to.
+func noWorktreesMessage(repo string) string {
+	const command = "treemux new <slug>"
+	if keys := newWorktreeKeys(); keys != "" {
+		return fmt.Sprintf("no worktrees for %s — start one with %s, or %q", repo, keys, command)
+	}
+	return fmt.Sprintf("no worktrees for %s — start one with %q", repo, command)
+}
+
+// newWorktreeKeys spells the keystroke that starts a worktree, or "" when no binding
+// does.
+//
+// Asked of tmux rather than assumed, because the keys are the user's: tmux-init
+// binds T and N by default, takes --resume-key and --new-key to move them, and a
+// hand-written tmux.conf answers to nobody. A hint naming the wrong key is worse
+// than no hint.
+func newWorktreeKeys() string {
+	// Both, so that neither `bind n new-window` nor treemux's own resume binding
+	// is mistaken for this one.
+	key := tmux.KeyBoundTo("treemux", " new ")
+	if key == "" {
+		return ""
+	}
+	if prefix := tmux.Prefix(); prefix != "" {
+		return prefix + " " + key
+	}
+	return key
+}

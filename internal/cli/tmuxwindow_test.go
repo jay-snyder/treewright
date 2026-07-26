@@ -30,10 +30,17 @@ func tmuxctl(t *testing.T, args ...string) (string, error) {
 
 // startSession creates a session holding one window that sits in dir and stays
 // open, standing in for a session treemux itself would have created.
+//
+// -f /dev/null because a tmux server reads ~/.tmux.conf as it starts, and this is
+// usually the call that starts the test's server. Without it the developer's own
+// bindings and options land in the table these tests inspect — so a developer who
+// had loaded treemux's own tmux integration into their config would watch the
+// suite fail on their machine and nowhere else. The socket is already private;
+// the configuration has to be too.
 func startSession(t *testing.T, session, window, dir string) {
 	t.Helper()
 	requireTmux(t)
-	if out, err := tmuxctl(t, "new-session", "-d", "-s", session, "-n", window, "-c", dir, "sleep 300"); err != nil {
+	if out, err := tmuxctl(t, "-f", "/dev/null", "new-session", "-d", "-s", session, "-n", window, "-c", dir, "sleep 300"); err != nil {
 		t.Skipf("cannot start a tmux server here: %v\n%s", err, out)
 	}
 }
@@ -44,7 +51,7 @@ func startSession(t *testing.T, session, window, dir string) {
 func startShellSession(t *testing.T, session, window, dir string) {
 	t.Helper()
 	requireTmux(t)
-	if out, err := tmuxctl(t, "new-session", "-d", "-s", session, "-n", window, "-c", dir, "/bin/sh"); err != nil {
+	if out, err := tmuxctl(t, "-f", "/dev/null", "new-session", "-d", "-s", session, "-n", window, "-c", dir, "/bin/sh"); err != nil {
 		t.Skipf("cannot start a tmux server here: %v\n%s", err, out)
 	}
 }
@@ -71,20 +78,25 @@ func walkInto(t *testing.T, session, window, dir string) {
 	t.Fatalf("window %s never moved into %s", window, dir)
 }
 
-// worktreeStampOn reads back the worktree treemux recorded on a window. Windows
-// treemux did not open carry nothing, and answer with an empty string.
-func worktreeStampOn(t *testing.T, session, window string) string {
+// windowStamp reads back one of the user options treemux records on a window.
+//
+// Through a format rather than through show-options, which does not consider an
+// option nobody set to be an option at all: it answers "invalid option" and
+// fails, where a format renders it as the empty string. The format is also how
+// treemux reads the stamp back itself, and how a user's status line would, so
+// this asks the question the way it is really asked.
+func windowStamp(t *testing.T, session, window, option string) string {
 	t.Helper()
-	out, err := tmuxctl(t, "show-options", "-w", "-t", windowIDNamed(t, session, window), "-v", "@treemux_worktree")
+	out, err := tmuxctl(t, "display-message", "-p", "-t", windowIDNamed(t, session, window), "#{"+option+"}")
 	if err != nil {
-		t.Fatalf("read the worktree recorded on %s: %v\n%s", window, err, out)
+		t.Fatalf("read %s on window %s: %v\n%s", option, window, err, out)
 	}
 	return out
 }
 
 // twoWindowsInOneWorktree builds the collision the lookup has to survive: the
-// base window, opened first and standing in the stream's worktree after a
-// `treemux cd`, and the stream's own window, opened by treemux afterwards.
+// base window, opened first and standing in the worktree after a
+// `treemux cd`, and the worktree's own window, opened by treemux afterwards.
 //
 // The visitor is deliberately both the older window and the one arranged first,
 // so neither age nor position can pick the right answer — only what treemux
@@ -219,14 +231,14 @@ func TestRmLeavesOtherWindowsAlone(t *testing.T) {
 	}
 }
 
-// TestRmClosesTheStreamsWindowNotAVisitor is the dangerous half of the lookup
-// bug. Two windows stand in the worktree — the stream's own, and a base window
+// TestRmClosesTheWorktreesWindowNotAVisitor is the dangerous half of the lookup
+// bug. Two windows stand in the worktree — the worktree's own, and a base window
 // whose shell followed a `treemux cd` into it — and the one to close is the
-// stream's. Choosing by position, as this used to, picked whichever was further
+// worktree's. Choosing by position, as this used to, picked whichever was further
 // left, so a rearranged status line had `rm --yes` closing the base window: the
 // window that keeps the session alive, while the genuinely stranded one stayed
 // open on a directory that no longer exists.
-func TestRmClosesTheStreamsWindowNotAVisitor(t *testing.T) {
+func TestRmClosesTheWorktreesWindowNotAVisitor(t *testing.T) {
 	requireTmux(t)
 	f := newFixture(t, "command = 'sleep 300'\n")
 
@@ -241,7 +253,7 @@ func TestRmClosesTheStreamsWindowNotAVisitor(t *testing.T) {
 	}
 
 	if !strings.Contains(r.stderr, "closed its tmux window (ENG-1)") {
-		t.Errorf("stderr = %q, want the stream's own window closed", r.stderr)
+		t.Errorf("stderr = %q, want the worktree's own window closed", r.stderr)
 	}
 	got := windowsIn(t, "proj")
 	if slices.Contains(got, "ENG-1") {

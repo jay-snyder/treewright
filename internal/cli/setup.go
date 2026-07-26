@@ -26,7 +26,7 @@ func cmdSetup(env *Env, args []string) error {
 	var dryRun bool
 	positional, err := parseArgs("setup", args, map[string]*bool{
 		"-n": &dryRun, "--dry-run": &dryRun,
-	}, 1)
+	}, nil, 1)
 	if err != nil {
 		return err
 	}
@@ -265,7 +265,7 @@ func abbreviateHome(path string) string {
 // which of several configs applies depends on where you are standing. This
 // answers all three at once.
 func cmdConfig(env *Env, args []string) error {
-	positional, err := parseArgs("config", args, nil, 1)
+	positional, err := parseArgs("config", args, nil, nil, 1)
 	if err != nil {
 		return err
 	}

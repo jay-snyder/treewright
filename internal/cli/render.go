@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/jay-snyder/treemux/internal/config"
@@ -127,6 +128,56 @@ func worktreeTable(infos []git.Info, windows map[string]tmux.Window, session str
 	return table
 }
 
+// popupSize estimates the popup a picker over these worktrees needs, in the
+// cells display-popup takes.
+//
+// Estimated rather than measured. Measuring means building the table, and
+// building the table means asking git for every worktree's status — the better
+// part of a second on a repository with a few worktrees, and it would be paid twice
+// before the popup so much as appeared. The inputs here are the two cheap
+// listings the caller already has.
+//
+// It errs wide on purpose. A popup a few columns larger than its contents is
+// invisible; one a few columns smaller wraps every row of the table, and one too
+// short scrolls the head of the list away before it can be read.
+//
+// The layout mirrored here is worktreeTable's, and TestPopupSizeCoversTheTable
+// renders a real one to check this still covers it.
+func popupSize(managed []git.Worktree, windows map[string]tmux.Window) (width, height int) {
+	const (
+		// The two columns whose width the data cannot push past: the longest
+		// status is "unpushed (nnn)", and divergence never outgrows its header.
+		statusCol     = len("unpushed (nnn)")
+		divergenceCol = len("AHEAD/BEHIND")
+		gap           = 2
+		// The current-worktree marker column, which appears only sometimes, and
+		// is cheaper to always allow for than to predict.
+		markerCol = 1 + gap
+		// display-popup spends a row and a column on each side drawing a border,
+		// so the interior is two smaller than what -w and -h ask for.
+		border = 2
+		// The picker's own prompt line, which is what sets the floor on a
+		// repository with one short slug in it.
+		promptCol = len("select 1-nn (Esc to cancel): ")
+	)
+
+	slugCol, windowCol := len("SLUG"), len("WINDOW")
+	for _, wt := range managed {
+		slugCol = max(slugCol, len(wt.Slug))
+		windowCol = max(windowCol, len(windowCell(windows[wt.Dir], "")))
+	}
+	// The "n) " the picker puts in front of every row, and the same indent it
+	// gives the header.
+	indexCol := len(strconv.Itoa(len(managed))) + 2
+
+	width = indexCol + markerCol + slugCol + gap + statusCol + gap + divergenceCol + gap + windowCol
+	width = max(width, promptCol) + border
+
+	// A header, a row each, a blank line, and the prompt.
+	height = 1 + len(managed) + 1 + 1 + border
+	return width, height
+}
+
 // worktreeJSON is the machine-readable form of one worktree.
 //
 // Ahead and Behind are pointers so that an impossible comparison serializes as
@@ -184,24 +235,50 @@ func writeJSON(env *Env, v any) error {
 	return nil
 }
 
-// parseArgs splits args into recognized boolean flags and positional values,
-// rejecting unknown flags and more positionals than the command accepts.
+// parseArgs splits args into recognized flags and positional values, rejecting
+// unknown flags and more positionals than the command accepts.
 //
 // Flags are accepted in any position, so `treemux rm slug -f` and `treemux rm -f
 // slug` both work. Go's flag package stops at the first non-flag argument and
 // would read the former's -f as a positional, which is why this is hand-rolled.
-func parseArgs(cmd string, args []string, flags map[string]*bool, maxPositional int) ([]string, error) {
+//
+// A flag in flags is a switch and takes no value; one in values takes the next
+// argument, or the text after an "=". Both spellings are accepted because both
+// are what people type: --resume-key T and --resume-key=T.
+func parseArgs(cmd string, args []string, flags map[string]*bool, values map[string]*string, maxPositional int) ([]string, error) {
 	var positional []string
-	for _, a := range args {
-		if strings.HasPrefix(a, "-") && a != "-" {
-			target, ok := flags[a]
-			if !ok {
-				return nil, usageErrorf(cmd, "unknown flag %q", a)
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if !strings.HasPrefix(a, "-") || a == "-" {
+			positional = append(positional, a)
+			continue
+		}
+
+		// "--key=value" is split here so the two spellings meet at the same place.
+		name, inline, joined := strings.Cut(a, "=")
+		if target, ok := flags[name]; ok {
+			if joined {
+				return nil, usageErrorf(cmd, "flag %q takes no value", name)
 			}
 			*target = true
 			continue
 		}
-		positional = append(positional, a)
+		target, ok := values[name]
+		if !ok {
+			return nil, usageErrorf(cmd, "unknown flag %q", name)
+		}
+		if joined {
+			*target = inline
+			continue
+		}
+		// A flag consuming the next argument must not swallow another flag: that
+		// turns a forgotten value into a silently mis-parsed command line rather
+		// than into a message about the value being missing.
+		if i+1 >= len(args) || (strings.HasPrefix(args[i+1], "-") && args[i+1] != "-") {
+			return nil, usageErrorf(cmd, "flag %q needs a value", name)
+		}
+		i++
+		*target = args[i]
 	}
 	if len(positional) > maxPositional {
 		// Silently dropping an argument hides a typo: a slug with a stray space

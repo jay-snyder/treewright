@@ -1,12 +1,12 @@
 # treemux
 
-One command per stream of work: an isolated git worktree on its own branch, a
+One command per piece of work: an isolated git worktree on its own branch, a
 tmux window, and a coding-agent session — created together, torn down together.
 
 Instead of `git checkout`-ing between branches in one directory (which forces you
-to stash, rebuild dependencies, and lose your place), every stream of work gets
+to stash, rebuild dependencies, and lose your place), every piece of work gets
 its **own checkout on disk**. A long-running agent session, a dev server, and
-your editor can all stay open per stream and never collide.
+your editor can all stay open per worktree and never collide.
 
 ```mermaid
 flowchart TD
@@ -25,9 +25,9 @@ flowchart TD
   window treemux opens for it.
 - **One base window** sits in the main checkout, parked on the base branch. Use it
   to spawn new work and ask general questions — never for feature work.
-- **Each stream** gets a worktree (`myrepo-<slug>`), a branch (`<prefix><slug>`),
-  and a window in that session named after its ticket.
-- **When the PR merges**, one command tears the whole stream down — and refuses
+- **Each worktree** is a checkout (`myrepo-<slug>`) on a branch (`<prefix><slug>`),
+  with a window in that session named after its ticket.
+- **When the PR merges**, one command tears all three down together — and refuses
   if that would lose work.
 
 ## Install
@@ -76,6 +76,74 @@ a shell-script predecessor, say — write the eval as `eval "$(command treemux
 shell-init zsh)"`. `command` skips functions and aliases, so the line cannot ask
 the thing being replaced for its own replacement.
 
+### tmux integration
+
+treemux runs your agent as the tmux window's own command, so a worktree's pane *is*
+the agent: there is no shell in it to type `treemux resume` into. Reaching treemux
+from inside a worktree meant splitting a pane or going to find a window that has a
+prompt. A key binding that opens treemux in a popup closes that gap. Add one line
+to `~/.tmux.conf`:
+
+```tmux
+run-shell 'treemux tmux-init --apply'
+```
+
+tmux has no equivalent of `eval "$(...)"`, so the binary loads the snippet itself.
+To read it first, and keep it as a file of your own to edit:
+
+```sh
+treemux tmux-init > ~/.config/treemux/treemux.tmux
+```
+
+```tmux
+source-file ~/.config/treemux/treemux.tmux
+```
+
+Both load the same text, which binds two keys tmux itself leaves free:
+
+| Key | What it does |
+|---|---|
+| `prefix + T` | Pick a worktree and switch to it, in a popup over whatever is running. |
+| `prefix + N` | Ask for a slug, then create the worktree. |
+
+It also turns terminal titles on, and documents the window options treemux records
+for a status line to read. Unlike the shell integration, which can only be
+inferred, this one can be asked about: `treemux doctor` reports whether any key
+binding reaches treemux, because a binding is a thing the server holds.
+
+Both bindings go through `treemux popup`, which works out how big the popup needs
+to be before opening it. tmux fixes a popup's size at creation and `-w`/`-h` take
+only cells or a percentage of the terminal — and a percentage is the wrong unit
+for a picker, whose height is the number of worktrees and whose width is the widest
+slug. Neither grows when the terminal does, so on a wide screen a proportional
+popup is mostly empty: three worktrees need 83×8, where 70%×60% of a 237×62 terminal
+is 165×37, ten times the area. The bindings also pass `#{client_tty}`, because a
+command run from `run-shell` has no association with the client that triggered it
+and tmux would otherwise draw the popup over whichever terminal had been busier.
+
+**Moving the keys.** Being unbound is the smaller half of choosing a key; the
+larger half is what a missed shift does, since these get reached for in a hurry.
+`t` is clock-mode and `n` is next-window, both harmless. But your config is yours,
+and plenty of people rebind those — so pass the keys instead of editing after the
+fact, and both ways of loading stay identical:
+
+```sh
+treemux tmux-init --resume-key G --new-key C-n
+```
+
+An empty key omits its binding, so `--new-key ""` binds only the picker. Keys are
+letters, digits, dashes and underscores, which covers `G`, `C-n`, `M-Left` and
+`F5`; anything with punctuation tmux reads as config syntax is refused, and
+writing that binding by hand in the printed file is the way to have it. Anything
+deeper than the keys — the popup's size, a binding of your own — is what printing
+to a file is for.
+
+> The first version of this bound `prefix + W`, for the mnemonic with tmux's own
+> `w` window picker. Stock tmux has `w` as `choose-tree`, which is harmless — but
+> a great many configs rebind lowercase `w` to `kill-window`, and there a missed
+> shift destroys the very window the binding exists to reach. Hence `T`, and hence
+> the flags.
+
 ## Get started
 
 Inside the repository you want to work on:
@@ -95,7 +163,7 @@ From there the loop is four commands:
 
 ```sh
 treemux new eng-142-white-screen   # worktree, branch, and a window running your agent
-treemux ls                         # where every stream stands
+treemux ls                         # where every worktree stands
 treemux cd eng-142                 # jump between them
 treemux rm eng-142                 # when the PR merges
 ```
@@ -103,7 +171,7 @@ treemux rm eng-142                 # when the PR merges
 ## One session per repository
 
 Every repository's windows live in a tmux session of its own, named after its
-config: the base window in the main checkout, and one window per stream beside it.
+config: the base window in the main checkout, and one window per worktree beside it.
 
 ```
 tmux session "myrepo"                        tmux session "api-gateway"
@@ -123,11 +191,13 @@ What follows from it:
   of the day is what establishes it. `resume` and `base` do the same.
 - **`base` is the same window every time.** A window already sitting in the main
   checkout is selected rather than a second one opened beside it — and being the
-  session's first window, it is what keeps the session alive as streams come and go.
-- **Commands follow their window across sessions.** Resuming a stream while
+  session's first window, it is what keeps the session alive as worktrees come and go.
+- **Commands follow their window across sessions.** Resuming a worktree while
   attached to another repository's session switches you there.
 - **Outside tmux nothing is skipped.** The session and window are created
-  detached, and treemux prints the `tmux attach -t <session>` that reaches them.
+  detached, and treemux says to run `treemux attach` to reach them — its own
+  command rather than a `tmux attach` to copy, because that spelling names the
+  session exactly and finds the right server under `TREEMUX_TMUX_LABEL`.
 - **A window in the wrong session is used rather than duplicated** — one you
   opened by hand, or one from before the repository had a session. `ls` shows it as
   `session:window`, and `resume` switches to it there.
@@ -143,27 +213,51 @@ through `$TMUX`.
 
 ### Terminal and tab titles
 
-Attaching with `tmux attach -t <session>` tends to leave the terminal and tab
-titled with that command line rather than the session. tmux is not the one writing
-it: `set-titles` is off by default, so tmux never sets a title at all, and whatever
+Attaching tends to leave the terminal and tab titled with the command line that
+attached rather than with the session. tmux is not the one writing it:
+`set-titles` is off by default, so tmux never sets a title at all, and whatever
 the shell wrote before it started — under kitty, iTerm2 or any terminal with shell
 integration, the command being run — stays there until the next prompt, which
 inside tmux never comes.
 
-Turning it on, in `tmux.conf`, gives the session name instead:
+`treemux tmux-init` turns it on, which is the one thing in that snippet not about
+treemux:
 
 ```tmux
 set -g set-titles on
-set -g set-titles-string "#S"
+set -g set-titles-string "#S: #W"
 ```
 
-`"#S: #W"` adds the window, which for treemux is the stream name — the repository
-and the worktree rather than the repository alone.
+`#S` is the session, so the repository, and `#W` the window, so the worktree — the
+repository and the worktree rather than the repository alone. Delete those two
+lines from the snippet if you set your own format.
 
-treemux leaves this to you rather than setting it per session. Session options are
-set with `set-option -t`, whose target does not accept tmux's exact-match `=name`
-form, so treemux would be back to the prefix matching the rest of this section
-avoids — and setting it server-wide would overwrite a title format you chose.
+It is set there rather than by treemux itself, per session, for two reasons.
+Session options are set with `set-option -t`, whose target does not accept tmux's
+exact-match `=name` form, so treemux would be back to the prefix matching the rest
+of this section avoids. And a title format is yours: a file you loaded on purpose
+can change it, a `treemux new` should not.
+
+### What treemux records on a window
+
+Every window treemux opens carries the worktree it belongs to, as tmux user options,
+so a status line can name it without shelling out to git on every interval:
+
+| Option | Value |
+|---|---|
+| `@treemux_repo` | The config's name. |
+| `@treemux_worktree` | The checkout the window was opened on. |
+| `@treemux_slug` | The worktree. Unset on the base window, which is not one. |
+| `@treemux_branch` | The branch that worktree is on. |
+
+Only the worktree is read back by treemux, and for a reason worth knowing: it is
+what identifies a window. A pane's directory moves with every `cd`, and two
+windows can stand in one directory at once — the base window does exactly that
+after `treemux cd` — so which window a worktree owns cannot be read off where its
+shell happens to be standing.
+
+They are written when the window is created, so a window treemux merely finds and
+switches to keeps whatever it already had.
 
 ## Configure
 
@@ -217,6 +311,8 @@ config, or the name you pass.
 | `treemux resume [slug]` | Reopen a window on an existing worktree, or switch to the one already open. Menu when the slug is omitted. |
 | `treemux cd [slug]` | Move your shell into a worktree. Menu when the slug is omitted. |
 | `treemux base [repo]` | Select the base window on the main checkout, opening it if it is not there. |
+| `treemux attach [repo]` | Attach this terminal to a repository's tmux session, on whichever window was current there. Moves the client instead when already inside tmux. |
+| `treemux popup [-c <client>] <command>` | Run a treemux command in a tmux popup sized to its output. What the `tmux-init` key bindings go through. |
 | `treemux ls [--json] [repo]` | List worktrees with status, divergence, and the tmux window open in each. Changes no working tree, branch, or ref. |
 | `treemux rm [-f] [-y] <slug>` | Tear down the worktree, branch, and stale remote ref, and offer to close its tmux window. Refuses when work would be lost, unless `--force`. |
 | `treemux prune [-y] [repo]` | Remove every merged, clean worktree. Lists them without `--yes`. |
@@ -224,6 +320,7 @@ config, or the name you pass.
 | `treemux config [repo]` | Print the settings in force, defaults included, and the file they came from. |
 | `treemux doctor` | Check the installation and every registered config. Exits non-zero on a failure. |
 | `treemux shell-init <shell>` | Print the shell integration for zsh, bash, or fish. |
+| `treemux tmux-init [--apply] [--resume-key <key>] [--new-key <key>]` | Print the tmux integration: popup key bindings and titles. `--apply` loads it into the running server instead. |
 
 Run `treemux help <command>` for detail on any one of them.
 
@@ -282,7 +379,7 @@ Exit codes: `0` success, `1` the command ran and failed, `2` it was invoked wron
 `doctor` exits `1` when a check fails, so it can gate a setup script.
 
 A branch always forks from `origin/<base_branch>`. There is deliberately no flag
-to base one on anything else — the point is that every stream starts from the
+to base one on anything else — the point is that every worktree starts from the
 same known-current place. When origin is unreachable, `new` says so and forks
 from the local base branch instead.
 
@@ -342,7 +439,7 @@ unknown is an error naming the alternatives. `setup` will not overwrite an exist
 config, or add a second one for a repository already registered.
 
 Removing a worktree leaves its tmux window pointing at a directory that is gone,
-so `rm` offers to close it — the window named after the stream, identified from the
+so `rm` offers to close it — the window named after the worktree, identified from the
 worktree's own path rather than from wherever you ran the command, and closed even
 when it turns out to be in another session or when you are not in tmux at all.
 `prune` asks per worktree it removed. Neither closes a window without asking unless
@@ -351,7 +448,7 @@ with nobody to prompt, both print the `tmux kill-window` to run instead.
 
 Closing a session's last window ends the session, which moves an attached client
 elsewhere or detaches it, so the prompt says when that is what is about to happen.
-Normally it is not: the base window outlives every stream.
+Normally it is not: the base window outlives every worktree.
 
 ## Development
 
@@ -368,7 +465,10 @@ the shell shims — each emitted shim is syntax-checked by the shell it targets.
 The tmux integration is tested against a real tmux server, private to each test:
 its own socket directory, its own server, killed afterwards, so a developer's own
 sessions and windows are never touched. Tests that need one skip when tmux is not
-installed, which is why CI installs it.
+installed, which is why CI installs it. The emitted tmux config is loaded into one
+of those servers and then read back out of it — the same check the shell shims get
+from their own shells, and for the same reason: a snippet that does not parse
+would break the startup of the thing it is loaded into.
 
 Layout:
 
@@ -380,3 +480,4 @@ Layout:
 | `internal/tmux` | The handful of tmux commands treemux drives. |
 | `internal/ui` | The interactive picker and the table. |
 | `internal/shellinit` | The zsh, bash, and fish integration snippets. |
+| `internal/tmuxinit` | The tmux integration: key bindings and titles. |

@@ -65,6 +65,7 @@ command        = "codex"
 resume_command = "codex resume"
 post_create    = "pnpm install"
 ticket_pattern = '(?i)^(proj-[0-9]+)'
+tmux_session   = "work"
 `,
 	})
 
@@ -74,6 +75,9 @@ ticket_pattern = '(?i)^(proj-[0-9]+)'
 	}
 	if c.BaseBranch != "staging" || c.BranchPrefix != "alice/" || c.Command != "codex" || c.PostCreate != "pnpm install" {
 		t.Errorf("scalar fields wrong: %+v", c)
+	}
+	if c.TmuxSession != "work" {
+		t.Errorf("TmuxSession = %q, want %q", c.TmuxSession, "work")
 	}
 	if c.ResumeCommand != "codex resume" {
 		t.Errorf("ResumeCommand = %q, want %q", c.ResumeCommand, "codex resume")
