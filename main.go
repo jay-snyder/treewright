@@ -17,7 +17,9 @@ import (
 )
 
 // version is overwritten at build time via -ldflags "-X main.version=v1.2.3";
-// GoReleaser does this on every tagged release. Plain `go build` leaves "dev".
+// GoReleaser does this on every tagged release. Nothing else stamps it — notably
+// not `go install ...@latest` — so when it is still "dev",
+// cli.ResolveVersion falls back to the module version the go command embedded.
 var version = "dev"
 
 func main() {
@@ -31,7 +33,7 @@ func main() {
 	if argv0 == "" {
 		argv0 = filepath.Base(os.Args[0])
 	}
-	err := cli.Run(cli.Env{Args: os.Args[1:], Argv0: argv0, Version: version})
+	err := cli.Run(cli.Env{Args: os.Args[1:], Argv0: argv0, Version: cli.ResolveVersion(version)})
 	if err == nil {
 		return
 	}
