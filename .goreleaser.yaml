@@ -16,7 +16,10 @@ builds:
     goos: [darwin, linux]
     goarch: [amd64, arm64]
     ldflags:
-      # Stamps `treewright --version`; main.version is "dev" for plain `go build`.
+      # Stamps `treewright --version`. This is the authoritative spelling of a
+      # release's version, but no longer the only source: an unstamped build —
+      # `go install ...@latest`, which is how Linux installs without the cask —
+      # falls back to the module version in the build info. See internal/cli/version.go.
       - -s -w -X main.version={{ .Version }}
 
 archives:

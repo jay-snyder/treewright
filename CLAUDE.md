@@ -19,7 +19,8 @@ companions:
 ## Build, test, lint
 
 ```sh
-go build -o treewright .   # /treewright is gitignored; version stays "dev"
+go build -o treewright .   # /treewright is gitignored; reports "v0.1.0+dirty" and
+                           # the like, from the build info (see internal/cli/version.go)
 go test ./... -count=1     # unit + end-to-end, against throwaway git repos
 go vet ./...
 gofmt -l .                 # must print nothing — CI fails on any output
@@ -97,6 +98,7 @@ ldflags. Validate config changes with `goreleaser check`.
 | `internal/cli/popup.go` | `popup`, popup sizing, the no-worktrees message. |
 | `internal/cli/eval.go` | The eval-file protocol and shell quoting. |
 | `internal/cli/init.go` | `shell-init`, `tmux-init`, `__complete`. |
+| `internal/cli/version.go` | What `version` reports: the ldflags stamp, else the build info. |
 | `internal/config` | TOML loading, defaults, and which config applies. |
 | `internal/refname` | git's branch-name rules, restated for slugs and prefixes. |
 | `internal/git` | Every git call, including merged/unpushed/dirty logic. |
