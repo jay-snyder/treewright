@@ -475,6 +475,12 @@ agent-agnosticism promise kept in the table itself. `--json` always carries
 `agent_state`, empty when nothing has signaled — a consumer's schema should not
 depend on whether anyone happens to be signaling today.
 
+**Two option names are reserved, not designed**, so nothing else squats on
+them while the states prove whether they are enough:
+`@treewright_agent_message` for a short "why" (the permission being asked for,
+from a hook's stdin payload), and `@treewright_agent_since` for when the state
+was set ("waiting for 25m" in `ls`).
+
 ## Agent modules
 
 `signal` is half of a deliberate split: treewright's core provides agent-neutral
@@ -527,6 +533,47 @@ wiring check, which may sniff the command's first word — a warn-level hint can
 rest on a guess in a way behavior never can. `setup` writes the key when it
 finds the agent's binary on PATH, which is as close to consent as detection
 gets — and one commented line to remove when it guessed wrong.
+
+**Still in the module's future:** a second artifact teaching the agent to
+*drive* treewright — see the estate with `ls --json`, spawn parallel work with
+`new`, never touch `git worktree` directly, `rm` is guarded. The reverse
+direction needs no new core surface at all, which is the sign the protocol
+boundary is drawn right.
+
+## The kickoff prompt
+
+`new` used to open a window whose agent sat waiting to be told what the ticket
+was, when the person typing the command knew perfectly well. `--prompt` closes
+that gap on `new` and `resume` both, and the mechanism is a placeholder in the
+command template — `command = "claude {prompt}"` — because where an agent's
+CLI wants its prompt is a fact about the agent, and the template saying so is
+what keeps treewright out of guessing.
+
+Three rules, each load-bearing:
+
+- **With a prompt, the placeholder becomes the shell-quoted text**: one
+  literal argument however many spaces and quotes the prompt holds, through
+  the same `shellQuote` the eval file trusts.
+- **Without one, the placeholder is removed entirely — never substituted as
+  `''`.** An empty argument is not the absence of an argument: to most agents
+  it is an instruction, an empty one, and `claude ''` opening every window
+  with a blank prompt to answer is the bug this rule avoids. Every consumer of
+  `command` and `resume_command` fills the template, `base` included, or the
+  literal `{prompt}` would leak into a shell line.
+- **A prompt aimed at a template with no placeholder is refused, not
+  appended.** Appending happens to be right for claude and is still a guess
+  about an arbitrary agent's CLI; the error names the setting and shows where
+  the text belongs. It is checked before anything is created, so the refusal
+  never leaves a half-made worktree behind an error about a flag.
+
+**A prompt that reached no agent is warned about.** The command carrying it
+runs only in a window that was actually created, and `resume` mostly finds
+windows rather than creating them — so `openWindow` reports which of the two
+happened, and a prompt that landed on an already-open window gets a warning
+naming the recovery: paste it there. Silently dropping text the user typed
+once and cannot retype from memory would be the quiet failure everything else
+here refuses to be. `base` takes no `--prompt` at all, since reusing its one
+window is its normal case — the flag would warn more often than it worked.
 
 ## Reporting what failed
 

@@ -99,7 +99,7 @@ func TestConfigReportsWhatTheAgentKeySupplies(t *testing.T) {
 		"agent",
 		"claude",
 		".claude/settings.local.json  (from agent)",
-		"claude  (from agent)",
+		"claude {prompt}  (from agent)",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("config = %q, want it to contain %q", out, want)

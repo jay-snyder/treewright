@@ -174,6 +174,15 @@ pattern — it is one key taking either a string or a list, via
 `config.Commands.UnmarshalTOML`, so there is no second key to set as well. Don't
 "make it consistent" by adding one.
 
+**`{prompt}` is resolved by `fillPrompt`, everywhere.** Every consumer of
+`command` and `resume_command` fills the template before using it — `base`
+too, with an empty prompt — or the literal placeholder leaks into a shell
+line. No prompt removes the placeholder entirely, never substitutes `''` (an
+empty argument is an instruction to most agents), and a prompt aimed at a
+template without the placeholder is refused *before anything is created*.
+`openWindow` reports created-vs-found so callers can warn when a prompt landed
+on a window that was already open and its command never ran.
+
 **Anything that is a fact about a particular agent lives in `internal/agentinit`.**
 Core stays agent-agnostic: it provides protocols (`signal`, `command`, the
 carry), and a module provides the wiring. `agent = "claude"` is a defaults
@@ -295,9 +304,4 @@ parse would break the startup of whatever loads it.
 | `TREEWRIGHT_ARGV0` | The name the user typed (`tw`), since the wrapper erases it from argv[0]. |
 | `TREEWRIGHT_TMUX_LABEL` | Drive a non-default tmux server (`tmux -L <label>`). |
 | `TREEWRIGHT_POPUP` | Set inside a popup, so exit paths can say "press Esc to close". |
-
-`docs/agent-integration-design.md` is the draft plan for the agent-integration
-phases not yet built (`agent-init`, the `agent` config key, the kickoff prompt);
-what has shipped — the `signal` protocol — is documented in `docs/design-notes.md`
-like everything else.
 | `NO_COLOR`, `TERM=dumb` | Turn color off; color is also off whenever stdout is not a terminal. |

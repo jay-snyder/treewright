@@ -231,6 +231,8 @@ complete -c treewright -n '__fish_seen_subcommand_from setup' -s n -l dry-run -d
 complete -c treewright -n '__fish_seen_subcommand_from tmux-init' -l apply -d 'load it into the running tmux server'
 complete -c treewright -n '__fish_seen_subcommand_from tmux-init' -l resume-key -r -d 'prefix key that switches worktrees'
 complete -c treewright -n '__fish_seen_subcommand_from tmux-init' -l new-key -r -d 'prefix key that starts a worktree'
+complete -c treewright -n '__fish_seen_subcommand_from new' -s p -l prompt -r -d 'text the agent starts working on'
+complete -c treewright -n '__fish_seen_subcommand_from resume' -s p -l prompt -r -d 'text for the resumed agent'
 
 # tw calls the treewright function, and --wraps inherits its completions. The
 # function runs the binary as "command treewright", which erases the name the
