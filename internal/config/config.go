@@ -14,11 +14,13 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
 	"github.com/BurntSushi/toml"
 
+	"github.com/jay-snyder/treewright/internal/agentinit"
 	"github.com/jay-snyder/treewright/internal/refname"
 )
 
@@ -69,6 +71,18 @@ type Config struct {
 	// Read through Prefixes rather than directly, which folds the singular
 	// spelling into the same list.
 	BranchPrefixes []string `toml:"branch_prefixes"`
+
+	// Agent names a built-in agent module (see internal/agentinit), which
+	// supplies the defaults for Command and ResumeCommand and has the agent's
+	// own gitignored state files carried into every new worktree. A defaults
+	// bundle, not a second spelling: setting Command alongside it overrides
+	// that one field, and the file still says which command runs.
+	//
+	// Never inferred from Command's first word. Two configs saying
+	// command = "claude" behaving differently on an invisible guess is the kind
+	// of rule this format exists to avoid; the key is one line, and writing it
+	// is what asks for the bundle.
+	Agent string `toml:"agent"`
 
 	// CarryFiles are paths, relative to MainDir, copied into each new worktree.
 	// Git ignores these files, so a new worktree starts without them, and the
@@ -248,6 +262,27 @@ func Load(path string) (*Config, error) {
 		}
 	}
 
+	// The agent module's defaults apply before the global ones, so a config
+	// naming an agent launches that agent unless its own command says
+	// otherwise. An unknown name is a load error listing the modules there
+	// are, like an unknown branch prefix: the key's whole value is the module
+	// it names, and a misspelling that silently fell back to the global
+	// defaults would leave the carry — the part with no other spelling —
+	// quietly not happening.
+	if c.Agent != "" {
+		module, ok := agentinit.Lookup(c.Agent)
+		if !ok {
+			return nil, fmt.Errorf("%s: unknown agent %q (built-in modules: %s)",
+				filepath.Base(path), c.Agent, strings.Join(agentinit.Names(), ", "))
+		}
+		if c.Command == "" {
+			c.Command = module.Command
+		}
+		if c.ResumeCommand == "" {
+			c.ResumeCommand = module.ResumeCommand
+		}
+	}
+
 	if c.BaseBranch == "" {
 		c.BaseBranch = DefaultBaseBranch
 	}
@@ -386,6 +421,38 @@ func (c *Config) SplitPrefix(typed string) (prefix, slug string, matched bool) {
 		return c.Prefixes()[0], typed, false
 	}
 	return best, strings.TrimPrefix(typed, best), true
+}
+
+// AgentCarries returns the agent module's local-state files that carry_files
+// does not already list — for claude, .claude/settings.local.json, which holds
+// the hooks that report state and the "always allow" permission decisions the
+// agent records as it works. Carried into every new worktree so both travel
+// with the checkout.
+//
+// These differ from carry_files entries in exactly one way: absent from the
+// main checkout they are skipped silently rather than warned about. An
+// explicit entry warns when missing because the user asserted the file exists
+// and a missing one is a stale config; these were asserted by nobody, and a
+// checkout that has never run the agent has nothing to carry yet.
+//
+// The dedupe is what makes listing the same path in carry_files harmless —
+// copied once, under the explicit entry's warn-when-missing semantics, since
+// writing it out is exactly such an assertion.
+func (c *Config) AgentCarries() []string {
+	if c.Agent == "" {
+		return nil
+	}
+	module, ok := agentinit.Lookup(c.Agent)
+	if !ok {
+		return nil // Load refused the config; nothing can hold one like this
+	}
+	var out []string
+	for _, rel := range module.LocalState {
+		if !slices.Contains(c.CarryFiles, rel) {
+			out = append(out, rel)
+		}
+	}
+	return out
 }
 
 // WindowName derives the tmux window name for a slug, uppercased.

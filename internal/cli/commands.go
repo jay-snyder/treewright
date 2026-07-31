@@ -137,24 +137,41 @@ func validateSlug(cfg *config.Config, slug string) error {
 
 // carryFiles copies in the files git ignores and the app needs: .env files,
 // local credentials, editor settings. A new worktree starts without them.
+//
+// The agent module's local-state files ride along when the config names an
+// agent, differing in one way: missing ones are skipped silently. An explicit
+// carry_files entry warns because the user asserted the file exists and a
+// missing one is a stale config; the agent's were asserted by nobody, and a
+// checkout that has never run the agent has nothing to carry yet.
 func carryFiles(env *Env, cfg *config.Config, dir string) {
 	for _, rel := range cfg.CarryFiles {
-		src := filepath.Join(cfg.MainDir, rel)
-		info, err := os.Stat(src)
-		if err != nil || info.IsDir() {
-			// A carry_files entry that does not exist is almost always a stale
-			// config, and the worktree will fail confusingly later.
+		carryOne(env, cfg, dir, rel, true)
+	}
+	for _, rel := range cfg.AgentCarries() {
+		carryOne(env, cfg, dir, rel, false)
+	}
+}
+
+// carryOne copies a single carried file, asserted saying whether the config
+// wrote the entry itself — which is what decides if a missing source is worth
+// a warning. A copy that starts and fails warns either way: that is a real
+// failure, not an absence.
+func carryOne(env *Env, cfg *config.Config, dir, rel string, asserted bool) {
+	src := filepath.Join(cfg.MainDir, rel)
+	info, err := os.Stat(src)
+	if err != nil || info.IsDir() {
+		if asserted {
 			env.warnf("carry_files: %s not found in %s", rel, cfg.MainDir)
-			continue
 		}
-		dst := filepath.Join(dir, rel)
-		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-			env.warnf("carry_files: %v", err)
-			continue
-		}
-		if err := copyFile(src, dst, info.Mode().Perm()); err != nil {
-			env.warnf("carry_files: %s: %v", rel, err)
-		}
+		return
+	}
+	dst := filepath.Join(dir, rel)
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		env.warnf("carry_files: %v", err)
+		return
+	}
+	if err := copyFile(src, dst, info.Mode().Perm()); err != nil {
+		env.warnf("carry_files: %s: %v", rel, err)
 	}
 }
 

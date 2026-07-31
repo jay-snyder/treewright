@@ -160,6 +160,14 @@ func TestLoadRejectsBadConfigs(t *testing.T) {
 			wantErr: "unknown setting",
 		},
 		{
+			// The key's whole value is the module it names, and a misspelling
+			// that fell back to the global defaults would leave the carry — the
+			// part with no other spelling — quietly not happening.
+			name:    "unknown agent",
+			body:    "main_dir = \"/tmp/repo\"\nagent = \"claud\"\n",
+			wantErr: "unknown agent",
+		},
+		{
 			name:    "missing main_dir",
 			body:    `base_branch = "main"`,
 			wantErr: "main_dir is required",
@@ -246,6 +254,54 @@ func TestLoadRejectsBadConfigs(t *testing.T) {
 				t.Errorf("error = %q, want it to mention %q", err, tc.wantErr)
 			}
 		})
+	}
+}
+
+// TestAgentKeyIsADefaultsBundle pins the key's three effects and the two rules
+// they follow: explicit keys win field by field, and the carry is deduped
+// against carry_files rather than doubled.
+func TestAgentKeyIsADefaultsBundle(t *testing.T) {
+	dir := registry(t, map[string]string{
+		"bare":     "main_dir = \"/tmp/repo\"\nagent = \"claude\"\n",
+		"override": "main_dir = \"/tmp/repo\"\nagent = \"claude\"\ncommand = \"nvim\"\n",
+		"listed":   "main_dir = \"/tmp/repo\"\nagent = \"claude\"\ncarry_files = [\".claude/settings.local.json\", \".env\"]\n",
+		"none":     "main_dir = \"/tmp/repo\"\n",
+	})
+	load := func(name string) *Config {
+		t.Helper()
+		c, err := Load(filepath.Join(dir, name+".toml"))
+		if err != nil {
+			t.Fatalf("Load(%s): %v", name, err)
+		}
+		return c
+	}
+
+	bare := load("bare")
+	if bare.Command != "claude" || bare.ResumeCommand != "claude --continue" {
+		t.Errorf("module defaults = %q / %q, want claude / claude --continue", bare.Command, bare.ResumeCommand)
+	}
+	if got := bare.AgentCarries(); len(got) != 1 || got[0] != ".claude/settings.local.json" {
+		t.Errorf("AgentCarries() = %v, want the agent's settings file", got)
+	}
+
+	// agent-plus-command is override, not a load error: the file still says
+	// which command runs, because the command key is sitting right there in it.
+	override := load("override")
+	if override.Command != "nvim" {
+		t.Errorf("explicit command = %q, want it to beat the module's", override.Command)
+	}
+	if override.ResumeCommand != "claude --continue" {
+		t.Errorf("resume_command = %q, want the module's default for the field left unset", override.ResumeCommand)
+	}
+
+	// Writing the same path in carry_files changes nothing but the semantics —
+	// the explicit entry warns when missing, so it must own the copy.
+	if got := load("listed").AgentCarries(); len(got) != 0 {
+		t.Errorf("AgentCarries() = %v, want nothing left after the explicit entry", got)
+	}
+
+	if got := load("none").AgentCarries(); len(got) != 0 {
+		t.Errorf("AgentCarries() with no agent = %v, want nothing", got)
 	}
 }
 

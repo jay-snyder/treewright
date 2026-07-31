@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/jay-snyder/treewright/internal/agentinit"
 	"github.com/jay-snyder/treewright/internal/config"
 	"github.com/jay-snyder/treewright/internal/shellinit"
 	"github.com/jay-snyder/treewright/internal/tmux"
@@ -74,6 +75,41 @@ func cmdTmuxInit(env *Env, args []string) error {
 		return fmt.Errorf("%w — is a tmux server running? key bindings live in one", err)
 	}
 	env.progressf("loaded the treewright key bindings into the running tmux server")
+	return nil
+}
+
+// cmdAgentInit prints an agent's hook configuration: its own hooks wired to
+// `treewright signal`, which is what fills the AGENT column of ls.
+//
+// The fragment goes to stdout alone, pasteable or pipeable, with the
+// instructions around it on stderr — the same contract as every other command.
+// No --apply, unlike tmux-init, and the difference is what applying would
+// mean: tmux's source-file is additive, while applying hooks means rewriting a
+// settings file the user owns, which a JSON merge would reorder and reformat.
+// Printing the fragment and naming the file is the honest version until there
+// is a merge strategy worth trusting.
+func cmdAgentInit(env *Env, args []string) error {
+	positional, err := parseArgs("agent-init", args, nil, nil, 1)
+	if err != nil {
+		return err
+	}
+	name := at(positional, 0)
+	if name == "" {
+		return usageErrorf("agent-init", "an agent is required (one of: %s)", strings.Join(agentinit.Names(), ", "))
+	}
+	agent, ok := agentinit.Lookup(name)
+	if !ok {
+		return usageErrorf("agent-init", "no module for %q (built-in modules: %s)", name, strings.Join(agentinit.Names(), ", "))
+	}
+
+	fmt.Fprint(env.Stdout, agent.Hooks)
+	env.progressf("add these hooks to %s — they run \"treewright signal\" as %s works, and the AGENT column of \"%s ls\" says which window wants you",
+		agent.UserSettings, agent.Name, env.Argv0)
+	env.progressf("they are safe to keep global: outside a treewright window, signal does nothing, quietly")
+	if len(agent.LocalState) > 0 {
+		env.progressf("prefer per-repo? put them in %s under the main checkout instead, and set agent = %q in the repo's config so every new worktree gets a copy",
+			agent.LocalState[0], agent.Name)
+	}
 	return nil
 }
 
@@ -150,6 +186,10 @@ func cmdComplete(env *Env, args []string) error {
 	case "states":
 		for _, state := range signalStates {
 			fmt.Fprintln(env.Stdout, state)
+		}
+	case "agents":
+		for _, name := range agentinit.Names() {
+			fmt.Fprintln(env.Stdout, name)
 		}
 	case "flags":
 		// Derived from the same table that renders help, so a flag can never be
