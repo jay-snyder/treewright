@@ -144,6 +144,13 @@ func cmdComplete(env *Env, args []string) error {
 		for _, shell := range shellinit.Shells() {
 			fmt.Fprintln(env.Stdout, shell)
 		}
+	// What `signal` completes: its closed vocabulary. Typed rarely — hooks are
+	// the callers — but the list living here keeps the shims from each spelling
+	// out a vocabulary that internal/cli owns.
+	case "states":
+		for _, state := range signalStates {
+			fmt.Fprintln(env.Stdout, state)
+		}
 	case "flags":
 		// Derived from the same table that renders help, so a flag can never be
 		// documented in one place and missing from the other.

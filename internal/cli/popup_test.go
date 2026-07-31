@@ -52,6 +52,16 @@ func TestPopupSizeCoversTheTable(t *testing.T) {
 			infos: []git.Info{{Worktree: git.Worktree{Slug: "x", Dir: "/wt/x"}, Status: git.StatusMerged, Compared: true}},
 		},
 		{
+			// The AGENT column exists only once a window carries a state, so the
+			// estimate has to grow exactly when the table does.
+			name: "an agent state adds its column",
+			infos: []git.Info{{
+				Worktree: git.Worktree{Slug: "eng-1675-cold-start-checklist-boost", Dir: "/wt/a"},
+				Status:   git.StatusActive, Compared: true,
+			}},
+			window: tmux.Window{ID: "@1", Session: "another-session", Name: "ENG-1675", State: "working"},
+		},
+		{
 			name: "ten of them, so the index column grows a digit",
 			infos: func() []git.Info {
 				var out []git.Info

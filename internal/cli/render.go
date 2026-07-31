@@ -110,6 +110,20 @@ func windowCell(w tmux.Window, session string) string {
 	}
 }
 
+// agentColor maps a signaled state to how much it wants from a person: waiting
+// is the one asking for someone, done is a result to collect, and working asks
+// nothing — the same cyan an in-flight branch gets.
+func agentColor(state string) ui.Color {
+	switch state {
+	case stateWaiting:
+		return ui.Yellow
+	case stateDone:
+		return ui.Green
+	default:
+		return ui.Cyan
+	}
+}
+
 // worktreeTable builds the table shown by `ls` and used as the `resume` and `cd`
 // menus, so a menu is a picker over the same rows the user already knows.
 //
@@ -124,6 +138,11 @@ func windowCell(w tmux.Window, session string) string {
 // holding it appears only when one of the rows is in fact the current directory:
 // a marker column that is blank on every row would be a permanent indent paid
 // for a case that is not occurring.
+//
+// The AGENT column follows the same rule for a stronger reason: it appears only
+// when some window carries a signaled state, so for the user whose command is
+// nvim the whole feature is invisible — the agent-agnosticism promise kept in
+// the table itself rather than asserted in the README.
 func worktreeTable(infos []git.Info, windows map[string]tmux.Window, session string) *ui.Table {
 	cwd, err := os.Getwd()
 	here := -1
@@ -136,7 +155,18 @@ func worktreeTable(infos []git.Info, windows map[string]tmux.Window, session str
 		}
 	}
 
+	hasAgent := false
+	for _, info := range infos {
+		if windows[info.Dir].State != "" {
+			hasAgent = true
+			break
+		}
+	}
+
 	headers := []string{"SLUG", "STATUS", "AHEAD/BEHIND", "WINDOW"}
+	if hasAgent {
+		headers = append(headers, "AGENT")
+	}
 	if here >= 0 {
 		headers = append([]string{""}, headers...)
 	}
@@ -153,6 +183,9 @@ func worktreeTable(infos []git.Info, windows map[string]tmux.Window, session str
 			ui.Text(divergence),
 			ui.Text(windowCell(windows[info.Dir], session)),
 		}
+		if hasAgent {
+			cells = append(cells, agentCell(windows[info.Dir]))
+		}
 		if here >= 0 {
 			marker := " "
 			if i == here {
@@ -163,6 +196,16 @@ func worktreeTable(infos []git.Info, windows map[string]tmux.Window, session str
 		table.Add(cells...)
 	}
 	return &table
+}
+
+// agentCell renders one window's signaled state, blank for a window nothing has
+// signaled about — a "-" here would imply an answer ("no agent") to a question
+// ("what is it doing?") that nothing has actually answered.
+func agentCell(w tmux.Window) ui.Cell {
+	if w.State == "" {
+		return ui.Text("")
+	}
+	return ui.Colored(w.State, agentColor(w.State))
 }
 
 // popupSize estimates the popup a picker over these worktrees needs, in the
@@ -210,11 +253,20 @@ func popupSize(rows []git.Info, windows map[string]tmux.Window) (width, height i
 		slugCol = max(slugCol, len(slugCell(info)))
 		windowCol = max(windowCol, len(windowCell(windows[info.Dir], "")))
 	}
+	// The AGENT column, which worktreeTable adds only when some window carries a
+	// signaled state — so it is measured from the same data, and contributes
+	// nothing when the table would not show it.
+	agentCol := 0
+	for _, info := range rows {
+		if state := windows[info.Dir].State; state != "" {
+			agentCol = max(agentCol, gap+max(len("AGENT"), len(state)))
+		}
+	}
 	// The "n) " the picker puts in front of every row, and the same indent it
 	// gives the header.
 	indexCol := len(strconv.Itoa(len(rows))) + 2
 
-	width = indexCol + markerCol + slugCol + gap + statusCol + gap + divergenceCol + gap + windowCol
+	width = indexCol + markerCol + slugCol + gap + statusCol + gap + divergenceCol + gap + windowCol + agentCol
 	width = max(width, promptCol) + border
 
 	// A header, a row each, a blank line, and the prompt.
@@ -250,6 +302,12 @@ type worktreeJSON struct {
 	Window        string `json:"window"`
 	WindowID      string `json:"window_id"`
 	WindowSession string `json:"window_session"`
+
+	// AgentState is what the agent in the window last said it was doing, via
+	// `signal`: working, waiting, or done. Empty like the window fields when no
+	// window is open — and when one is open but nothing has ever signaled, since
+	// an option never set is not an answer.
+	AgentState string `json:"agent_state"`
 }
 
 func worktreesJSON(infos []git.Info, windows map[string]tmux.Window) []worktreeJSON {
@@ -267,6 +325,7 @@ func worktreesJSON(infos []git.Info, windows map[string]tmux.Window) []worktreeJ
 			Window:        w.Name,
 			WindowID:      w.ID,
 			WindowSession: w.Session,
+			AgentState:    w.State,
 		}
 		if info.Compared {
 			ahead, behind := info.Ahead, info.Behind

@@ -165,6 +165,13 @@ leaves none of your branch's commits upstream, so the usual check says your work
 is unpushed and refuses to clean up. treewright rebuilds the patch and asks git
 whether it already landed.
 
+With three agents running at once, the question the table can't answer from git
+alone is which one needs you. If your agent's hooks report what it's doing —
+they run `tw signal` with `working`, `waiting`, or `done` — the table grows an
+AGENT column saying exactly that, and a window whose agent is waiting on you
+gets a `!` in front of its name in the tmux status line. Agents that report
+nothing cost nothing: the column only exists once something has signaled.
+
 Hit `prefix + T` and that same table becomes a menu, in a popup sized to fit it:
 
 ```
@@ -199,7 +206,8 @@ move around on you.
 | `tw tmux-init [--apply]` | Print the tmux integration, or load it straight into the server |
 
 `tw help <command>` has the details on any of them. There's also `tw popup`,
-which is what the key bindings run; you won't type it yourself.
+which is what the key bindings run, and `tw signal`, which is what agent hooks
+run to fill the AGENT column; you won't type either yourself.
 
 You don't have to spell slugs out. `tw cd eng-2318` finds
 `eng-2318-cart-total-rounding` and tells you that's what it did. If a

@@ -250,6 +250,29 @@ the tmux server's, wherever that was started. A binding passes
 			run: cmdPopup,
 		},
 		{
+			name:    "signal",
+			args:    "<state>",
+			summary: "record the state of the agent running in this worktree",
+			long: `Stamps the tmux window belonging to the checkout you are standing in
+with an agent state — working, waiting, done, or clear — as the window option
+@treewright_agent_state. The state shows in the AGENT column of "treewright ls"
+and as agent_state in its JSON, and "waiting" also puts a marker on the window's
+name (!ENG-142), so the one window that needs a person shows in any status line
+with nothing added to tmux.conf.
+
+This is for an agent's own hooks to run rather than for typing: a hook that
+fires when the agent starts work, blocks on you, or finishes runs
+"treewright signal" with the matching state, and the ls table answers which of
+your worktrees wants attention. The state lives on the window and dies with it,
+so a closed window never leaves a stale claim behind.
+
+Anywhere out of scope — outside tmux, outside a registered repository, in a
+checkout with no window — it exits 0 and prints nothing. Hooks fire in every
+session the agent runs, and most of those are none of treewright's business; a
+hook that complains about that would nag from every plain terminal.`,
+			run: cmdSignal,
+		},
+		{
 			name:    "ls",
 			aliases: []string{"list", "status"},
 			args:    "[--json] " + argRepo,

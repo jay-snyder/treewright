@@ -110,6 +110,15 @@ func (r Repo) Worktrees() ([]Worktree, error) {
 	return list, nil
 }
 
+// TopLevel returns the root of the checkout Dir is inside, as git reports it —
+// the worktree's own root, where MainDir answers with the repository's main
+// checkout from any of its worktrees. It is how `signal` names the checkout the
+// calling hook is standing in, and git's fully resolved spelling is what makes
+// the answer comparable to a window's worktree stamp.
+func (r Repo) TopLevel() (string, error) {
+	return r.run("rev-parse", "--show-toplevel")
+}
+
 // MainDir returns the repo's main checkout path as git sees it. Callers use this
 // to identify which repo they are standing in: git reports the same main path
 // from inside any of the repo's worktrees.

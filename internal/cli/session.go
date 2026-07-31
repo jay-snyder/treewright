@@ -113,6 +113,17 @@ func openWindow(env *Env, cfg *config.Config, spec tmux.Spec) error {
 // that calls `exit` itself, or sources something that does — a wrapper script, a
 // shell function, an activate — would otherwise end the whole script at that line
 // and close the window with its output erased, which is the case this exists for.
+//
+// The held-open path also takes the agent state off the window. That state
+// normally dies with the window — the agent is the window's command — and holding
+// the window open past the command is the one place that stops being true: left
+// alone, a dead agent's "working" would sit in the ls table for as long as the
+// window sat unread, and its waiting marker would keep flagging a window whose
+// agent is gone. Both are cleared best-effort, straight through tmux rather than
+// through `treewright signal`, so the wrapper stays runnable when the binary that
+// wrote it has since moved off PATH. Inside the pane, $TMUX names the right
+// server — including under TREEWRIGHT_TMUX_LABEL — and $TMUX_PANE targets the
+// pane's own window, which display-message untargeted would not.
 func heldOpenOnFailure(command string) string {
 	if strings.TrimSpace(command) == "" {
 		return command
@@ -120,6 +131,11 @@ func heldOpenOnFailure(command string) string {
 	return "( " + command + "\n)\n" +
 		"tw_status=$?\n" +
 		`if [ "$tw_status" -eq 0 ] || [ "$tw_status" -gt 128 ]; then exit "$tw_status"; fi` + "\n" +
+		`if [ -n "$TMUX_PANE" ]; then` + "\n" +
+		`  tmux set-window-option -q -u -t "$TMUX_PANE" ` + tmux.AgentStateOption + " 2>/dev/null || true\n" +
+		`  tw_name=$(tmux display-message -p -t "$TMUX_PANE" '#{window_name}' 2>/dev/null) || tw_name=''` + "\n" +
+		`  case "$tw_name" in ` + shellQuote(tmux.WaitingMarker) + `*) tmux rename-window -t "$TMUX_PANE" "${tw_name#?}" 2>/dev/null || true ;; esac` + "\n" +
+		"fi\n" +
 		"printf '\\n\"%s\" exited %s — this window is kept so the output above stays readable\\n'" +
 		" " + shellQuote(command) + ` "$tw_status"` + "\n" +
 		"printf 'press Enter to close it\\n'\n" +
