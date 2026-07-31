@@ -26,6 +26,10 @@ That gets you:
 - `npm install` already running in the background
 - a tmux window called `ENG-2318` with your agent in it
 
+Add `--prompt "the cart total rounds down at checkout"` and the agent in that
+window starts on the ticket before you've even switched to it — `tw new` stops
+being "prepare a desk" and becomes "assign the work".
+
 Do that three times and `prefix + T` switches between all three from anywhere,
 including from inside a running agent. When the PR merges, `tw rm eng-2318`
 takes the whole thing away, and stops you if there's unpushed work in there.
@@ -204,8 +208,8 @@ move around on you.
 
 | Command | What it does |
 |---|---|
-| `tw new <slug> [window-name]` | Fork a branch off the latest `origin/<base_branch>`, make the worktree, open a window on it |
-| `tw resume [slug]` | Go back to a worktree's window, or open it again. Shows the menu if you don't name one |
+| `tw new <slug> [window-name]` | Fork a branch off the latest `origin/<base_branch>`, make the worktree, open a window on it. `--prompt` hands the agent its first instruction |
+| `tw resume [slug]` | Go back to a worktree's window, or open it again — `--prompt` hands the agent its next instruction. Shows the menu if you don't name one |
 | `tw cd [slug]` | Move your shell into a worktree |
 | `tw base [repo]` | Go to the main checkout's window |
 | `tw attach [repo]` | Attach this terminal to a repo's tmux session |
@@ -258,8 +262,12 @@ carry_files = ["apps/api/.env", ".env.local"]
 # worktree. `tw setup` writes it when it finds the agent installed.
 agent = "claude"
 
-command        = "claude"              # what `new` and `base` launch; overrides agent
-resume_command = "claude --continue"   # what `resume` launches
+# What the windows launch; either overrides what agent supplies. {prompt} is
+# where --prompt's text lands, shell-quoted. No prompt, no placeholder — it
+# just disappears.
+command        = "claude {prompt}"
+resume_command = "claude --continue {prompt}"
+
 post_create    = "npm install"         # runs in the background after `new`
 
 # Or a list of commands, run in order and stopped at the first failure. Each one

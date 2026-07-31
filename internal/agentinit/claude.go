@@ -17,11 +17,14 @@ package agentinit
 //
 // `--continue` is what makes resuming per-worktree exact: each worktree is its
 // own directory, and claude resumes the session that last ran in the directory
-// it is started from.
+// it is started from. {prompt} is where a --prompt lands, as a positional
+// argument in both templates — claude takes an initial prompt that way fresh
+// or resumed. The templates must agree with the config package's defaults,
+// which a test holds them to.
 var claude = Agent{
 	Name:          "claude",
-	Command:       "claude",
-	ResumeCommand: "claude --continue",
+	Command:       "claude {prompt}",
+	ResumeCommand: "claude --continue {prompt}",
 	LocalState:    []string{".claude/settings.local.json"},
 	UserSettings:  "~/.claude/settings.json",
 	Hooks:         claudeHooks,

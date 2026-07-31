@@ -125,7 +125,7 @@ func init() {
 		{
 			name:    "new",
 			aliases: []string{"create"},
-			args:    "<slug> [window-name]",
+			args:    "[-p <text>] <slug> [window-name]",
 			summary: "create a worktree and branch, and open a tmux window in it",
 			long: `Creates the worktree repo-<slug> on branch <prefix><slug>, copies in the
 configured carry_files, runs post_create in the background, and opens a tmux
@@ -150,13 +150,23 @@ pull request you have fetched — it is checked out rather than recreated, so th
 also how you get a worktree onto an existing branch.
 
 The window is named after a ticket key found in the slug, or the truncated slug,
-unless [window-name] overrides it.`,
+unless [window-name] overrides it.
+
+--prompt hands the agent its first instruction, so the window opens already
+working rather than waiting to be told what the ticket is. The text lands where
+the command template says with {prompt} — the default is "claude {prompt}" —
+shell-quoted as one argument. Without the flag the placeholder simply
+disappears; with the flag and no placeholder to take it, the error says where
+to write one.`,
+			flags: []flagDoc{
+				{"-p, --prompt", "text the agent starts working on, placed at the command's {prompt}"},
+			},
 			run: cmdNew,
 		},
 		{
 			name:    "resume",
 			aliases: []string{"reopen"},
-			args:    "[slug]",
+			args:    "[-p <text>] [slug]",
 			summary: "reopen a window on an existing worktree",
 			long: `Opens a tmux window running the configured resume_command in the
 worktree, or switches to the window already open there — following it into
@@ -169,7 +179,15 @@ The base checkout heads that menu, so the window you return to between worktrees
 is reachable from the same key as the rest — and after a reboot, which a checkout
 on disk survives and a tmux session does not, it is reopened along with them. Name
 it "base" or name the branch it is parked on. It runs resume_command like every
-other row; "treewright base" is the way in that opens it fresh.`,
+other row; "treewright base" is the way in that opens it fresh.
+
+--prompt hands the resumed agent its next instruction, at resume_command's
+{prompt} placeholder. It only reaches an agent the resume actually starts: a
+window that was already open is switched to as usual, with a warning that the
+prompt went undelivered and is worth pasting there.`,
+			flags: []flagDoc{
+				{"-p, --prompt", "text for the resumed agent, placed at resume_command's {prompt}"},
+			},
 			run: cmdResume,
 		},
 		{

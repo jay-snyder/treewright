@@ -27,12 +27,17 @@ import (
 // Defaults applied when a config leaves a field out.
 const (
 	DefaultBaseBranch = "main"
-	DefaultCommand    = "claude"
+
+	// {prompt} is where `new --prompt` puts its text, shell-quoted; without a
+	// prompt the placeholder is removed entirely. The substitution lives in
+	// internal/cli — to the config this is only a string — but the default
+	// carries the placeholder so the kickoff prompt works out of the box.
+	DefaultCommand = "claude {prompt}"
 
 	// DefaultResumeCommand reattaches to the previous session in a worktree.
 	// Because each worktree has its own path, `claude --continue` resumes
 	// exactly the session that last ran there.
-	DefaultResumeCommand = "claude --continue"
+	DefaultResumeCommand = "claude --continue {prompt}"
 
 	// DefaultTicketPattern recognizes a leading issue key such as "proj-142" or
 	// "bug-7" in a slug, so the tmux window can be named after the ticket rather

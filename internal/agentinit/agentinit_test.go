@@ -73,9 +73,12 @@ func TestClaudeModuleFacts(t *testing.T) {
 	}
 	// The launch defaults have to agree with what the config package defaults
 	// to without the key, or setting agent = "claude" would change which
-	// command runs — the key is a bundle, not a behavior change.
-	if module.Command != "claude" || module.ResumeCommand != "claude --continue" {
-		t.Errorf("launch defaults = %q / %q, want claude / claude --continue", module.Command, module.ResumeCommand)
+	// command runs — the key is a bundle, not a behavior change. The strings
+	// are spelled out here because importing config from an in-package test
+	// would be a cycle; TestAgentKeyIsADefaultsBundle in config holds the same
+	// values against the config constants from the other side.
+	if module.Command != "claude {prompt}" || module.ResumeCommand != "claude --continue {prompt}" {
+		t.Errorf("launch defaults = %q / %q, want the {prompt} template forms", module.Command, module.ResumeCommand)
 	}
 	if !slices.Contains(module.LocalState, ".claude/settings.local.json") {
 		t.Errorf("LocalState = %v, want the gitignored settings file", module.LocalState)

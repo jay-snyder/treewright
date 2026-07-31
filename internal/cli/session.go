@@ -43,10 +43,15 @@ func sessionFor(cfg *config.Config) string {
 // day is also what establishes the repository's session. Nothing here needs a
 // client: outside tmux the window is still created and left current, and the
 // caller is told how to attach.
-func openWindow(env *Env, cfg *config.Config, spec tmux.Spec) error {
+//
+// Whether the window was created or merely found is reported back, because the
+// two differ in the one thing a caller cannot see: only a created window runs
+// spec.Command. A caller that folded something into that command — a kickoff
+// prompt — needs to know when it never ran.
+func openWindow(env *Env, cfg *config.Config, spec tmux.Spec) (created bool, err error) {
 	if !tmux.Available() {
 		env.progressf("tmux is not installed — cd %s and run %s yourself", spec.Dir, spec.Command)
-		return nil
+		return false, nil
 	}
 	spec.Session = sessionFor(cfg)
 	spec.Repo = cfg.Name
@@ -67,13 +72,11 @@ func openWindow(env *Env, cfg *config.Config, spec tmux.Spec) error {
 			env.warnf("window %s is in session %s rather than %s — switching to it there",
 				w.Name, w.Session, spec.Session)
 		}
-		return focusWindow(env, cfg, w, command)
+		focusWindow(env, cfg, w, command)
+		return false, nil
 	}
 
-	var (
-		w   tmux.Window
-		err error
-	)
+	var w tmux.Window
 	if tmux.HasSession(spec.Session) {
 		w, err = tmux.NewWindow(spec)
 	} else {
@@ -83,9 +86,10 @@ func openWindow(env *Env, cfg *config.Config, spec tmux.Spec) error {
 		}
 	}
 	if err != nil {
-		return err
+		return false, err
 	}
-	return focusWindow(env, cfg, w, command)
+	focusWindow(env, cfg, w, command)
+	return true, nil
 }
 
 // heldOpenOnFailure wraps a window's command so that one which fails leaves its
@@ -146,16 +150,17 @@ func heldOpenOnFailure(command string) string {
 // focusWindow brings a window to the foreground, or says how to reach it when
 // there is no client to move.
 //
-// Nothing here fails the command. The window exists by this point, created or
-// found, so a client that could not be moved — or a window that has closed since
-// — is news to report rather than grounds for calling the whole thing a failure.
+// Nothing here fails the command — it returns nothing a caller could fail on.
+// The window exists by this point, created or found, so a client that could not
+// be moved — or a window that has closed since — is news to report rather than
+// grounds for calling the whole thing a failure.
 //
 // The way out is given as `treewright attach <repo>` rather than as the tmux command
 // it runs, because that spelling stays correct: it names the session exactly, and
 // it reaches the right server when TREEWRIGHT_TMUX_LABEL has aimed treewright at one a
 // bare `tmux attach` would not find. Spelled with Argv0, so someone who typed tw
 // is answered in the name they use.
-func focusWindow(env *Env, cfg *config.Config, w tmux.Window, command string) error {
+func focusWindow(env *Env, cfg *config.Config, w tmux.Window, command string) {
 	switch err := tmux.Focus(w); {
 	case errors.Is(err, tmux.ErrNotFollowed):
 		env.warnf("could not switch to session %s — attach with: %s attach %s", w.Session, env.Argv0, cfg.Name)
@@ -169,5 +174,4 @@ func focusWindow(env *Env, cfg *config.Config, w tmux.Window, command string) er
 		env.progressf("window %s is open in tmux session %s — attach with: %s attach %s",
 			w.Name, w.Session, env.Argv0, cfg.Name)
 	}
-	return nil
 }

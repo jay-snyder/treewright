@@ -21,7 +21,8 @@ import (
 // ---- new -------------------------------------------------------------------
 
 func cmdNew(env *Env, args []string) error {
-	positional, err := parseArgs("new", args, nil, nil, 2)
+	var prompt string
+	positional, err := parseArgs("new", args, nil, map[string]*string{"-p": &prompt, "--prompt": &prompt}, 2)
 	if err != nil {
 		return err
 	}
@@ -36,6 +37,13 @@ func cmdNew(env *Env, args []string) error {
 	}
 	prefix, slug := splitPrefix(env, cfg, slug)
 	if err := validateSlug(cfg, slug); err != nil {
+		return err
+	}
+	// Resolved before anything is created: a prompt the command cannot take is
+	// this invocation being wrong, and finding that out after the worktree
+	// exists would leave a half-made one behind an error about a flag.
+	command, err := fillPrompt(cfg.Command, "command", prompt)
+	if err != nil {
 		return err
 	}
 
@@ -95,16 +103,30 @@ func cmdNew(env *Env, args []string) error {
 	// the path is already on stdout, so `cd "$(treewright new eng-1)"` must not fail
 	// because tmux could not be made to open a window. resume and base do return
 	// it, a window being the whole of what they were asked for.
-	if err := openWindow(env, cfg, tmux.Spec{
+	created, err := openWindow(env, cfg, tmux.Spec{
 		Dir:     dir,
 		Name:    cfg.WindowName(slug, override),
-		Command: cfg.Command,
+		Command: command,
 		Slug:    slug,
 		Branch:  branch,
-	}); err != nil {
+	})
+	if err != nil {
 		env.warnf("%v", err)
 	}
+	warnIfPromptUndelivered(env, prompt, created, err)
 	return nil
+}
+
+// warnIfPromptUndelivered says so when a --prompt never reached an agent: the
+// command carrying it runs only in a window openWindow created, so one merely
+// found — or one that failed to open — leaves the user believing work was
+// kicked off that nobody is doing. The prompt was typed once and is gone, so
+// the warning names the recovery.
+func warnIfPromptUndelivered(env *Env, prompt string, created bool, err error) {
+	if prompt == "" || created || err != nil {
+		return
+	}
+	env.warnf("the window was already open, so the prompt was not delivered — paste it to the agent there")
 }
 
 // validateSlug rejects slugs that would not round-trip through a directory name
@@ -612,11 +634,18 @@ func cmdPrune(env *Env, args []string) error {
 // ---- resume ----------------------------------------------------------------
 
 func cmdResume(env *Env, args []string) error {
-	positional, err := parseArgs("resume", args, nil, nil, 1)
+	var prompt string
+	positional, err := parseArgs("resume", args, nil, map[string]*string{"-p": &prompt, "--prompt": &prompt}, 1)
 	if err != nil {
 		return err
 	}
 	cfg, err := resolveConfig("")
+	if err != nil {
+		return err
+	}
+	// Before the menu, so a resume_command that cannot take the prompt is
+	// refused before anyone has picked a row to send it to.
+	command, err := fillPrompt(cfg.ResumeCommand, "resume_command", prompt)
 	if err != nil {
 		return err
 	}
@@ -659,9 +688,13 @@ func cmdResume(env *Env, args []string) error {
 	}
 
 	// The base checkout opens the way `base` opens it, under the base window's
-	// name — with resume_command, this being resume.
+	// name — with resume_command, this being resume. The prompt rides along:
+	// the base window runs an agent too, and "resume the base and hand it this"
+	// is the same sentence as for any worktree.
 	if target.Base {
-		return openBaseWindow(env, cfg, cfg.ResumeCommand)
+		created, err := openBaseWindow(env, cfg, command)
+		warnIfPromptUndelivered(env, prompt, created, err)
+		return err
 	}
 
 	// Said before the window opens, since afterwards the agent has the screen.
@@ -669,13 +702,15 @@ func cmdResume(env *Env, args []string) error {
 
 	// openWindow does the rest: a window already open on that worktree is the
 	// session being asked for, so it is switched to rather than duplicated.
-	return openWindow(env, cfg, tmux.Spec{
+	created, err := openWindow(env, cfg, tmux.Spec{
 		Dir:     target.Dir,
 		Name:    cfg.WindowName(target.Slug, ""),
-		Command: cfg.ResumeCommand,
+		Command: command,
 		Slug:    target.Slug,
 		Branch:  target.Branch,
 	})
+	warnIfPromptUndelivered(env, prompt, created, err)
+	return err
 }
 
 // choice is what `resume` and `cd` act on: one row of the menu.
@@ -840,7 +875,15 @@ func cmdBase(env *Env, args []string) error {
 	if err != nil {
 		return err
 	}
-	return openBaseWindow(env, cfg, cfg.Command)
+	// No --prompt here — base reuses its one window nearly every time, which is
+	// exactly when a prompt would go undelivered — but the placeholder still has
+	// to come out of the template on the first open of the day.
+	command, err := fillPrompt(cfg.Command, "command", "")
+	if err != nil {
+		return err
+	}
+	_, err = openBaseWindow(env, cfg, command)
+	return err
 }
 
 // openBaseWindow selects the base window on the main checkout, opening it if it
@@ -856,7 +899,7 @@ func cmdBase(env *Env, args []string) error {
 //
 // The disagreement shows once and then never again: every later call finds the
 // window by its directory and switches to it, whatever it was started with.
-func openBaseWindow(env *Env, cfg *config.Config, command string) error {
+func openBaseWindow(env *Env, cfg *config.Config, command string) (created bool, err error) {
 	if branch, err := git.CurrentBranch(cfg.MainDir); err == nil && branch != cfg.BaseBranch {
 		where := branch
 		if where == "" {
@@ -882,11 +925,12 @@ func openBaseWindow(env *Env, cfg *config.Config, command string) error {
 	}
 
 	// Without tmux there is no window to open, so run the command here and hand
-	// it the terminal.
+	// it the terminal — which is the command running, prompt included, so this
+	// counts as created for the caller weighing whether a prompt was delivered.
 	cmd := exec.Command("sh", "-c", command)
 	cmd.Dir = cfg.MainDir
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
-	return cmd.Run()
+	return true, cmd.Run()
 }
 
 // ---- attach ------------------------------------------------------------------

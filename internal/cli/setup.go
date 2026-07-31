@@ -361,7 +361,8 @@ func renderConfig(name, mainDir, baseBranch string, prefixes []string, carry []s
 
 	fmt.Fprintf(&b, "# What to launch in the tmux window. command is used by new and base,\n")
 	fmt.Fprintf(&b, "# resume_command by resume; the two default independently, and either\n")
-	fmt.Fprintf(&b, "# overrides what agent supplies.\n")
+	fmt.Fprintf(&b, "# overrides what agent supplies. {prompt} is where --prompt's text lands,\n")
+	fmt.Fprintf(&b, "# shell-quoted; without a prompt the placeholder disappears.\n")
 	fmt.Fprintf(&b, "# command        = %s\n", tomlString(config.DefaultCommand))
 	fmt.Fprintf(&b, "# resume_command = %s\n\n", tomlString(config.DefaultResumeCommand))
 

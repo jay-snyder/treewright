@@ -1020,7 +1020,7 @@ func TestDispatch(t *testing.T) {
 		if err == nil {
 			t.Error("want a non-zero exit")
 		}
-		if !strings.Contains(out, "new <slug>") {
+		if !strings.Contains(out, "new [-p <text>] <slug>") {
 			t.Errorf("output = %q, want the command overview", out)
 		}
 	})
@@ -1030,7 +1030,7 @@ func TestDispatch(t *testing.T) {
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
 		}
-		if !strings.Contains(out, "resume [slug]") {
+		if !strings.Contains(out, "resume [-p <text>] [slug]") {
 			t.Errorf("output = %q, want the command overview", out)
 		}
 	})

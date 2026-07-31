@@ -276,9 +276,12 @@ func TestAgentKeyIsADefaultsBundle(t *testing.T) {
 		return c
 	}
 
+	// Against the config constants, so the module and the global defaults are
+	// held to agreement: setting the key must not change which command runs.
 	bare := load("bare")
-	if bare.Command != "claude" || bare.ResumeCommand != "claude --continue" {
-		t.Errorf("module defaults = %q / %q, want claude / claude --continue", bare.Command, bare.ResumeCommand)
+	if bare.Command != DefaultCommand || bare.ResumeCommand != DefaultResumeCommand {
+		t.Errorf("module defaults = %q / %q, want the global defaults %q / %q",
+			bare.Command, bare.ResumeCommand, DefaultCommand, DefaultResumeCommand)
 	}
 	if got := bare.AgentCarries(); len(got) != 1 || got[0] != ".claude/settings.local.json" {
 		t.Errorf("AgentCarries() = %v, want the agent's settings file", got)
@@ -290,7 +293,7 @@ func TestAgentKeyIsADefaultsBundle(t *testing.T) {
 	if override.Command != "nvim" {
 		t.Errorf("explicit command = %q, want it to beat the module's", override.Command)
 	}
-	if override.ResumeCommand != "claude --continue" {
+	if override.ResumeCommand != DefaultResumeCommand {
 		t.Errorf("resume_command = %q, want the module's default for the field left unset", override.ResumeCommand)
 	}
 
