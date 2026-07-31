@@ -68,8 +68,9 @@ options:
 | `@treewright_worktree` | The checkout the window was opened on. |
 | `@treewright_slug` | The worktree. Unset on the base window, which is not one. |
 | `@treewright_branch` | The branch that worktree is on. |
+| `@treewright_agent_state` | What the agent in it last signaled. Written by `signal`, not at creation — see "Agent state" below. |
 
-Only the worktree is read back, and it is what *identifies* a window. A pane's
+Of these, the worktree is what *identifies* a window. A pane's
 directory moves with every `cd`, and two windows can stand in one directory at
 once — the base window does exactly that after `tw cd` — so which window a
 worktree owns cannot be read off where its shell happens to be standing.
@@ -366,6 +367,7 @@ stdout carries the answer and nothing else, so any command can be piped:
 | `setup` | the config file's path, or the config itself with `--dry-run` |
 | `config`, `doctor` | the report you asked for |
 | `shell-init`, `tmux-init`, `help`, `version` | the script or text you asked for |
+| `signal` | nothing — the answer is the stamp on the window, and out of scope it is silent on stderr too |
 
 Progress, warnings, prompts, and errors go to stderr, prefixed `warning:` or
 `error:` following git's convention, and unprefixed when it is just narration. So
@@ -411,6 +413,66 @@ That synthetic commit is written to the object database as a dangling object, so
 Its author, committer, and dates are fixed, so its hash depends only on the tree
 and parent being tested: repeated runs reuse the same object rather than leaving
 a new one behind each time, and `git gc` reaps it.
+
+## Agent state
+
+treewright's whole point is several agents running in parallel, and the question
+the ls table could not answer from git alone is *which one needs me?* An agent
+blocked on a permission prompt looks exactly like one deep in a refactor: a
+window name in a status line. `signal` closes that gap, and it is one half of a
+deliberate split: treewright provides the agent-neutral protocol, and each
+agent's own hook configuration provides the wiring that calls it. Nothing in
+treewright knows any agent's name.
+
+**The vocabulary is closed, and chosen from the human's chair**: `working`
+(leave it alone), `waiting` (blocked on you), `done` (a result to look at), and
+`clear` (no agent state). Free-form states lose the way free-form branch
+prefixes would: every consumer — the AGENT column, its colors, the name marker —
+needs to know what a state *means*, and a vocabulary nobody shares is a column
+nobody can read.
+
+**State lives on the window, not on disk.** A treewright window runs the agent
+as the window's own command, so the agent dying *is* the window closing *is*
+the option evaporating: no marker file to garbage-collect, no stale "working"
+from an agent that crashed days ago. The post_create marker went the other way —
+a file beside the log — because a failed install outlives any window; an agent's
+state never outlives its window, except in one case treewright itself creates:
+a failed command's window is deliberately held open so its output stays
+readable, and there the hold-open wrapper clears the state and the name marker
+itself, best-effort, straight through tmux.
+
+**`signal` never makes noise.** It exits 0 and prints nothing everywhere except
+being invoked wrong: outside tmux, outside a registered repository, in a
+checkout with no window — silence, not a warning. The hooks that run it fire in
+*every* session the agent has — plain terminals, ssh, repositories treewright
+has never heard of — and each of those is out of scope, not broken. This is the
+one command deliberately outside the "a background failure needs somewhere to be
+reported" rule, and the reason is that a no-op signal is not a failure; a hook
+that warns is an integration that nags, and those get ripped out.
+
+**`waiting` — only waiting — marks the window's name** (`!ENG-2318`), because it
+is the one state that needs to reach you across the room, and a name shows in
+any status line with nothing added to tmux.conf. The alternatives lose
+concretely: setting `window-status-format` overwrites a format that is the
+user's own — the same reasoning that keeps `set-titles` in the tmux-init snippet
+rather than in the binary — and ringing the pane's bell requires being the pane.
+The marker is display, not identity: `Windows` strips it as it parses, so every
+message, table cell, and JSON field carries the name underneath, and only
+windows treewright opened (stamped ones) are ever decorated — a window the user
+opened by hand on a worktree's directory keeps its name however loudly its agent
+waits. A custom status line can render `#{@treewright_agent_state}` directly,
+like the other `@treewright_` options.
+
+**Nothing clears a state on focus.** Switching to a waiting window is arrival,
+not help; the agent's own next transition is the truth, and the protocol stays a
+one-way street — agents write, treewright displays.
+
+**The AGENT column appears only when some window carries a state**, the same
+rule as the current-worktree marker column and for a stronger reason: for the
+user whose `command` is `nvim`, the whole feature is invisible, which is the
+agent-agnosticism promise kept in the table itself. `--json` always carries
+`agent_state`, empty when nothing has signaled — a consumer's schema should not
+depend on whether anyone happens to be signaling today.
 
 ## Reporting what failed
 

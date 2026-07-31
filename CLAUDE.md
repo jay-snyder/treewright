@@ -96,6 +96,7 @@ ldflags. Validate config changes with `goreleaser check`.
 | `internal/cli/session.go` | One session per repo; `openWindow`/`focusWindow`. |
 | `internal/cli/render.go` | Tables, JSON, `parseArgs`, slug resolution. |
 | `internal/cli/popup.go` | `popup`, popup sizing, the no-worktrees message. |
+| `internal/cli/signal.go` | `signal`: the agent-state protocol's one verb, run by agent hooks. |
 | `internal/cli/eval.go` | The eval-file protocol and shell quoting. |
 | `internal/cli/init.go` | `shell-init`, `tmux-init`, `__complete`. |
 | `internal/cli/version.go` | What `version` reports: the ldflags stamp, else the build info. |
@@ -191,6 +192,16 @@ post_create, so a failing step leaves a marker beside its log and
 `warnIfSetupFailed` reports it from `ls`, `cd` and `resume`. A new mechanism that
 runs unattended needs the same, or it fails silently.
 
+**`signal` is silent out of scope — deliberately outside the rule above.** Agent
+hooks run it in every session the agent has, so outside tmux, outside a
+registered repo, or with no window it exits 0 and prints nothing; a hook that
+warns is an integration that nags. The state it writes lives on the window
+option `@treewright_agent_state`, never on disk — the agent is the window's
+command, so agent death is state death — and the `!` waiting marker is display
+only: `tmux.Windows` strips it at parse, so `Window.Name` is always the clean
+name. The held-open wrapper is the one place a window outlives its agent, and it
+clears both itself. See "Agent state" in `docs/design-notes.md`.
+
 **Read-only-looking commands still write to `.git`.** Squash-merge detection
 synthesizes a dangling commit object (`IsMerged`), with fixed author/committer
 env so the hash is deterministic and repeat runs reuse the object.
@@ -273,4 +284,9 @@ parse would break the startup of whatever loads it.
 | `TREEWRIGHT_ARGV0` | The name the user typed (`tw`), since the wrapper erases it from argv[0]. |
 | `TREEWRIGHT_TMUX_LABEL` | Drive a non-default tmux server (`tmux -L <label>`). |
 | `TREEWRIGHT_POPUP` | Set inside a popup, so exit paths can say "press Esc to close". |
+
+`docs/agent-integration-design.md` is the draft plan for the agent-integration
+phases not yet built (`agent-init`, the `agent` config key, the kickoff prompt);
+what has shipped — the `signal` protocol — is documented in `docs/design-notes.md`
+like everything else.
 | `NO_COLOR`, `TERM=dumb` | Turn color off; color is also off whenever stdout is not a terminal. |

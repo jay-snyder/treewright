@@ -16,13 +16,19 @@ import (
 // worktree stamp: it is one treewright did not open, or one open since before
 // treewright stamped them.
 func pane(id, session, name, dir string) string {
-	return stamped(id, session, name, "", dir)
+	return signaled(id, session, name, "", "", dir)
 }
 
 // stamped renders a pane whose window treewright opened on worktree — which is not
 // necessarily where the pane is standing now, since a shell can walk anywhere.
 func stamped(id, session, name, worktree, dir string) string {
-	return strings.Join([]string{id, session, name, worktree, dir}, "\t")
+	return signaled(id, session, name, worktree, "", dir)
+}
+
+// signaled renders a pane whose window also carries an agent state, the way one
+// looks after `treewright signal` has run in its worktree.
+func signaled(id, session, name, worktree, state, dir string) string {
+	return strings.Join([]string{id, session, name, worktree, state, dir}, "\t")
 }
 
 func TestParsePanes(t *testing.T) {
@@ -113,7 +119,7 @@ func TestParsePanes(t *testing.T) {
 				stamped("@2", "myrepo", "ENG-1", "/wt/eng-1", "/wt/eng-1"),
 			prefer: "myrepo",
 			want: map[string]Window{
-				"/wt/eng-1": {ID: "@2", Session: "myrepo", Name: "ENG-1"},
+				"/wt/eng-1": {ID: "@2", Session: "myrepo", Name: "ENG-1", Stamped: true},
 			},
 		},
 		{
@@ -124,7 +130,7 @@ func TestParsePanes(t *testing.T) {
 				stamped("@2", "elsewhere", "ENG-1", "/wt/eng-1", "/wt/eng-1"),
 			prefer: "myrepo",
 			want: map[string]Window{
-				"/wt/eng-1": {ID: "@2", Session: "elsewhere", Name: "ENG-1"},
+				"/wt/eng-1": {ID: "@2", Session: "elsewhere", Name: "ENG-1", Stamped: true},
 			},
 		},
 		{
@@ -134,8 +140,8 @@ func TestParsePanes(t *testing.T) {
 			out:    stamped("@2", "myrepo", "ENG-1", "/wt/eng-1", "/somewhere/else"),
 			prefer: "myrepo",
 			want: map[string]Window{
-				"/wt/eng-1":       {ID: "@2", Session: "myrepo", Name: "ENG-1"},
-				"/somewhere/else": {ID: "@2", Session: "myrepo", Name: "ENG-1"},
+				"/wt/eng-1":       {ID: "@2", Session: "myrepo", Name: "ENG-1", Stamped: true},
+				"/somewhere/else": {ID: "@2", Session: "myrepo", Name: "ENG-1", Stamped: true},
 			},
 		},
 		{
@@ -148,7 +154,7 @@ func TestParsePanes(t *testing.T) {
 			prefer: "myrepo",
 			want: map[string]Window{
 				"/wt/eng-1": {ID: "@5", Session: "myrepo", Name: "VISITOR"},
-				"/wt/eng-2": {ID: "@1", Session: "myrepo", Name: "ENG-2"},
+				"/wt/eng-2": {ID: "@1", Session: "myrepo", Name: "ENG-2", Stamped: true},
 			},
 		},
 		{
@@ -168,6 +174,27 @@ func TestParsePanes(t *testing.T) {
 			want: map[string]Window{
 				"/a": {ID: "@1", Session: "s", Name: "A"},
 				"/b": {ID: "@3", Session: "s", Name: "C"},
+			},
+		},
+		{
+			// The agent state rides the same listing the worktree stamp does, so
+			// one tmux invocation still answers for every window.
+			name:   "an agent state is read back",
+			out:    signaled("@2", "myrepo", "ENG-1", "/wt/eng-1", "waiting", "/wt/eng-1"),
+			prefer: "myrepo",
+			want: map[string]Window{
+				"/wt/eng-1": {ID: "@2", Session: "myrepo", Name: "ENG-1", State: "waiting", Stamped: true},
+			},
+		},
+		{
+			// The waiting marker is display, not identity: it comes off here, once,
+			// so every message, table cell, and JSON field carries the name
+			// underneath treewright's own punctuation.
+			name:   "the waiting marker is stripped from the name",
+			out:    signaled("@2", "myrepo", "!ENG-1", "/wt/eng-1", "waiting", "/wt/eng-1"),
+			prefer: "myrepo",
+			want: map[string]Window{
+				"/wt/eng-1": {ID: "@2", Session: "myrepo", Name: "ENG-1", State: "waiting", Stamped: true},
 			},
 		},
 		{

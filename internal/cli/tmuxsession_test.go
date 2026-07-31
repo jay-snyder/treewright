@@ -407,6 +407,13 @@ func TestAFailingCommandKeepsItsWindowOpen(t *testing.T) {
 // the wrapper checks the status at all: holding every window open would turn
 // finishing normally into a keypress.
 func TestASuccessfulCommandClosesItsWindowAsBefore(t *testing.T) {
+	// The wrapper's failure path cleans the agent state off its window, aiming
+	// at $TMUX_PANE. This test runs the wrapper bare, outside any fixture, so a
+	// developer running the suite from inside tmux would otherwise hand it their
+	// own pane to clean.
+	t.Setenv("TMUX", "")
+	t.Setenv("TMUX_PANE", "")
+
 	for _, tc := range []struct {
 		name    string
 		command string

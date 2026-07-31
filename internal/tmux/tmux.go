@@ -64,7 +64,14 @@ var ErrNotFollowed = errors.New("no tmux client followed")
 type Window struct {
 	ID      string // "@3", unique across the server
 	Session string // the session holding it
-	Name    string // as shown in the status line, e.g. "ENG-142"
+	Name    string // as shown in the status line, e.g. "ENG-142", minus any waiting marker
+	State   string // what the agent in it last signaled, "" when nothing has
+
+	// Stamped reports that treewright opened this window — it carries a worktree
+	// stamp. It gates the things treewright may do to its own windows but not to
+	// one the user happened to open on a worktree's directory, such as decorating
+	// the name.
+	Stamped bool
 }
 
 // Available reports whether tmux is installed. Every operation here needs it, and
@@ -151,26 +158,47 @@ func ServerRunning() bool {
 // The user options treewright records on every window it opens. Windows treewright did
 // not open have none, and read as empty.
 //
-// Only the worktree is read back — it is what identifies a window, and it is the
-// one that rides in paneFormat below. The rest are written for the user's own
+// Two are read back, and they ride in paneFormat below: the worktree, which is
+// what identifies a window, and the agent state, which is what the agent running
+// in it last said it was doing. The rest are written for the user's own
 // tmux.conf, where "#{@treewright_slug}" in a status line costs nothing to render
 // and the alternative is a shell-out to git on every status interval.
+//
+// The agent state lives on the window rather than in a file because a treewright
+// window runs the agent as the window's own command: the agent dying is the
+// window closing is the option evaporating, so a crashed agent can never leave a
+// stale "working" behind and there is nothing to garbage-collect. It is written
+// by `treewright signal`, which the agent's own hooks run.
+// AgentStateOption and WaitingMarker are exported for the one consumer outside
+// this package: the held-open wrapper in internal/cli, which clears both from
+// shell when a window outlives the agent that was signaling in it.
 const (
 	worktreeOption = "@treewright_worktree"
 	repoOption     = "@treewright_repo"
 	slugOption     = "@treewright_slug"
 	branchOption   = "@treewright_branch"
+
+	// AgentStateOption holds what the agent in a window last signaled.
+	AgentStateOption = "@treewright_agent_state"
+
+	// WaitingMarker is prefixed to a window's name while its agent is waiting on
+	// the user, so the one state that needs to reach you across the room shows in
+	// any status line with nothing added to tmux.conf. Windows returns names with
+	// the marker already stripped: the marker is display, not identity, and every
+	// message, table cell, and JSON field wants the name underneath it.
+	WaitingMarker = "!"
 )
 
 // paneFormat lists a pane as window id, session, window name, the worktree its
-// window was opened on, then path.
+// window was opened on, the agent state recorded on it, then path.
 //
 // The fields are tab-separated and the path comes last, because both a window
 // name and a path may contain spaces: splitting on a space is only unambiguous
-// for the id. Splitting into a fixed five parts leaves any tab in a path — rare,
+// for the id. Splitting into a fixed six parts leaves any tab in a path — rare,
 // but possible — inside the path where it belongs. The stamped worktree is a path
-// too, which is why stampWorktree declines to write one holding a tab.
-const paneFormat = "#{window_id}\t#{session_name}\t#{window_name}\t#{" + worktreeOption + "}\t#{pane_current_path}"
+// too, which is why stamp declines to write one holding a tab; the agent state is
+// a word from signal's closed vocabulary and can hold neither.
+const paneFormat = "#{window_id}\t#{session_name}\t#{window_name}\t#{" + worktreeOption + "}\t#{" + AgentStateOption + "}\t#{pane_current_path}"
 
 // Windows maps each pane's working directory to the window holding it, across
 // every session on the server. It is what stops `resume` from opening a second
@@ -270,18 +298,26 @@ func parsePanes(out, prefer string) map[string]Window {
 	}
 
 	for line := range strings.SplitSeq(out, "\n") {
-		fields := strings.SplitN(line, "\t", 5)
-		if len(fields) != 5 {
+		fields := strings.SplitN(line, "\t", 6)
+		if len(fields) != 6 {
 			continue
 		}
 		c := claim{
-			Window:   Window{ID: fields[0], Session: fields[1], Name: fields[2]},
+			Window: Window{
+				ID:      fields[0],
+				Session: fields[1],
+				// The waiting marker comes off here, once, so the name every
+				// consumer sees is the one underneath treewright's own punctuation.
+				Name:    strings.TrimPrefix(fields[2], WaitingMarker),
+				State:   fields[4],
+				Stamped: fields[3] != "",
+			},
 			worktree: fields[3],
 		}
 		if c.ID == "" {
 			continue
 		}
-		stake(fields[4], c)
+		stake(fields[5], c)
 		// A window treewright opened answers for its own worktree wherever its pane
 		// is standing, so cd-ing a pane out of the directory no longer orphans the
 		// worktree's window and has a second one opened beside it.
@@ -351,7 +387,42 @@ func newWindow(s Spec, args []string) (Window, error) {
 	stamp(id, slugOption, s.Slug)
 	stamp(id, branchOption, s.Branch)
 
-	return Window{ID: id, Session: s.Session, Name: s.Name}, nil
+	return Window{ID: id, Session: s.Session, Name: s.Name, Stamped: true}, nil
+}
+
+// SetAgentState records what the agent in a window says it is doing, or clears
+// the record when state is empty.
+//
+// Cleared means unset rather than written as "": an option that was never set is
+// the honest record for a window nothing is signaling about, and it is also what
+// keeps the base case — no agent anywhere — indistinguishable from a fresh
+// window, which is what it is. -q on the unset, because unsetting an option that
+// is not there is the caller saying "make it so", not a mistake to report.
+func SetAgentState(id, state string) error {
+	if state == "" {
+		_, err := run("set-window-option", "-q", "-u", "-t", id, AgentStateOption)
+		return err
+	}
+	_, err := run("set-window-option", "-t", id, AgentStateOption, state)
+	return err
+}
+
+// SetWaitingMarker puts the attention marker on a window's name, or takes it
+// off. Renaming is unconditional in either direction: Windows strips the marker
+// as it parses, so whether the name on the server carries one right now is the
+// one thing the caller cannot know — and renaming a window to the name it
+// already has is a no-op tmux does not mind.
+//
+// Callers gate this on Window.Stamped. The name of a window treewright opened is
+// treewright's to decorate; the name of one the user opened on a worktree's
+// directory is not, however good the cause.
+func SetWaitingMarker(w Window, waiting bool) error {
+	name := w.Name
+	if waiting {
+		name = WaitingMarker + name
+	}
+	_, err := run("rename-window", "-t", w.ID, name)
+	return err
 }
 
 // stamp records one value on a window as a user option.
