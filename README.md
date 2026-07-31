@@ -172,6 +172,23 @@ AGENT column saying exactly that, and a window whose agent is waiting on you
 gets a `!` in front of its name in the tmux status line. Agents that report
 nothing cost nothing: the column only exists once something has signaled.
 
+Any agent that can run a command when its state changes can report this way.
+For Claude Code, it's four hooks in `~/.claude/settings.json`:
+
+```json
+{
+  "hooks": {
+    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "treewright signal working" }] }],
+    "Notification": [{ "hooks": [{ "type": "command", "command": "treewright signal waiting" }] }],
+    "Stop": [{ "hooks": [{ "type": "command", "command": "treewright signal done" }] }],
+    "SessionEnd": [{ "hooks": [{ "type": "command", "command": "treewright signal clear" }] }]
+  }
+}
+```
+
+They're safe to keep global: outside a treewright window, `signal` does
+nothing, quietly.
+
 Hit `prefix + T` and that same table becomes a menu, in a popup sized to fit it:
 
 ```
