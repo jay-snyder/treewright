@@ -172,22 +172,18 @@ AGENT column saying exactly that, and a window whose agent is waiting on you
 gets a `!` in front of its name in the tmux status line. Agents that report
 nothing cost nothing: the column only exists once something has signaled.
 
-Any agent that can run a command when its state changes can report this way.
-For Claude Code, it's four hooks in `~/.claude/settings.json`:
+Any agent that can run a command when its state changes can report this way,
+and treewright prints the wiring for the ones it knows:
 
-```json
-{
-  "hooks": {
-    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "treewright signal working" }] }],
-    "Notification": [{ "hooks": [{ "type": "command", "command": "treewright signal waiting" }] }],
-    "Stop": [{ "hooks": [{ "type": "command", "command": "treewright signal done" }] }],
-    "SessionEnd": [{ "hooks": [{ "type": "command", "command": "treewright signal clear" }] }]
-  }
-}
+```sh
+tw agent-init claude
 ```
 
-They're safe to keep global: outside a treewright window, `signal` does
-nothing, quietly.
+That's the hooks for `~/.claude/settings.json`, with instructions alongside.
+They're safe to keep global — outside a treewright window, `signal` does
+nothing, quietly — or scope them to one repo by putting them in the main
+checkout's `.claude/settings.local.json` and setting `agent = "claude"` in the
+config, which carries that file into every new worktree.
 
 Hit `prefix + T` and that same table becomes a menu, in a popup sized to fit it:
 
@@ -221,6 +217,7 @@ move around on you.
 | `tw doctor` | Check your install and every config you've registered |
 | `tw shell-init <shell>` | Print the shell integration for zsh, bash, or fish |
 | `tw tmux-init [--apply]` | Print the tmux integration, or load it straight into the server |
+| `tw agent-init <agent>` | Print the hooks that make an agent report its state |
 
 `tw help <command>` has the details on any of them. There's also `tw popup`,
 which is what the key bindings run, and `tw signal`, which is what agent hooks
@@ -256,7 +253,12 @@ branch_prefix = "john/"              # branch name is <prefix><slug> (default: n
 # so treewright copies them in from your main checkout.
 carry_files = ["apps/api/.env", ".env.local"]
 
-command        = "claude"              # what `new` and `base` launch
+# The agent these windows run. Fills in command and resume_command, and copies
+# the agent's own gitignored settings — permissions, hooks — into each new
+# worktree. `tw setup` writes it when it finds the agent installed.
+agent = "claude"
+
+command        = "claude"              # what `new` and `base` launch; overrides agent
 resume_command = "claude --continue"   # what `resume` launches
 post_create    = "npm install"         # runs in the background after `new`
 

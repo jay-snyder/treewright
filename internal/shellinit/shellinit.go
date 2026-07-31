@@ -99,6 +99,7 @@ _treewright() {
     'doctor:check the installation and every registered config'
     'shell-init:print the shell integration'
     'tmux-init:print the tmux integration'
+    'agent-init:print the hooks that make an agent report its state'
   )
   if (( CURRENT == 2 )); then
     _describe -t commands 'treewright command' cmds
@@ -117,6 +118,7 @@ _treewright() {
     ls|prune|base|config|attach) compadd -- ${(f)"$(command treewright __complete repos 2>/dev/null)"} ;;
     shell-init)                  compadd -- ${(f)"$(command treewright __complete shells 2>/dev/null)"} ;;
     signal)                      compadd -- ${(f)"$(command treewright __complete states 2>/dev/null)"} ;;
+    agent-init)                  compadd -- ${(f)"$(command treewright __complete agents 2>/dev/null)"} ;;
   esac
 }
 # tw calls the treewright *function*, resolved at call time, so the eval-file
@@ -143,7 +145,7 @@ treewright() {
 _treewright_completions() {
   local cur="${COMP_WORDS[COMP_CWORD]}"
   if [[ $COMP_CWORD -eq 1 ]]; then
-    COMPREPLY=($(compgen -W "new resume cd base attach popup signal ls rm prune setup config doctor shell-init tmux-init" -- "$cur"))
+    COMPREPLY=($(compgen -W "new resume cd base attach popup signal ls rm prune setup config doctor shell-init tmux-init agent-init" -- "$cur"))
     return
   fi
   if [[ "$cur" == -* ]]; then
@@ -164,6 +166,7 @@ _treewright_completions() {
     ls|prune|base|config|attach) candidates="$(command treewright __complete repos 2>/dev/null)" ;;
     shell-init)                  candidates="$(command treewright __complete shells 2>/dev/null)" ;;
     signal)                      candidates="$(command treewright __complete states 2>/dev/null)" ;;
+    agent-init)                  candidates="$(command treewright __complete agents 2>/dev/null)" ;;
   esac
   COMPREPLY=($(compgen -W "$candidates" -- "$cur"))
 }
@@ -212,12 +215,14 @@ complete -c treewright -n __fish_use_subcommand -a config     -d 'print the sett
 complete -c treewright -n __fish_use_subcommand -a doctor     -d 'check the installation and every registered config'
 complete -c treewright -n __fish_use_subcommand -a shell-init -d 'print the shell integration'
 complete -c treewright -n __fish_use_subcommand -a tmux-init  -d 'print the tmux integration'
+complete -c treewright -n __fish_use_subcommand -a agent-init -d 'print the hooks that make an agent report its state'
 complete -c treewright -n '__fish_seen_subcommand_from new' -a '(command treewright __complete prefixes)' -d 'branch prefix'
 complete -c treewright -n '__fish_seen_subcommand_from rm' -a '(command treewright __complete slugs)'
 complete -c treewright -n '__fish_seen_subcommand_from resume cd' -a '(command treewright __complete targets)'
 complete -c treewright -n '__fish_seen_subcommand_from ls prune base config attach' -a '(command treewright __complete repos)'
 complete -c treewright -n '__fish_seen_subcommand_from shell-init' -a '(command treewright __complete shells)'
 complete -c treewright -n '__fish_seen_subcommand_from signal' -a '(command treewright __complete states)'
+complete -c treewright -n '__fish_seen_subcommand_from agent-init' -a '(command treewright __complete agents)'
 complete -c treewright -n '__fish_seen_subcommand_from rm' -s f -l force -d 'remove even when unsaved work would be lost'
 complete -c treewright -n '__fish_seen_subcommand_from rm' -s y -l yes -d 'do not ask before closing the tmux window'
 complete -c treewright -n '__fish_seen_subcommand_from prune' -s y -l yes -d 'actually remove them, instead of listing'

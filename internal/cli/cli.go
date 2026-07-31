@@ -435,6 +435,30 @@ worth reading first.`,
 			run: cmdTmuxInit,
 		},
 		{
+			name:    "agent-init",
+			args:    "<agent>",
+			summary: "print the hooks that make an agent report its state",
+			long: `Prints an agent's hook configuration: its own hooks wired to
+"treewright signal", so the window it runs in says whether it is working,
+waiting on you, or done — the AGENT column of "treewright ls", and a marker on
+the window's name when it needs a person.
+
+The fragment goes to stdout by itself, so it can be piped; where to put it is
+said alongside, on stderr. For claude that is ~/.claude/settings.json, and the
+hooks are safe to keep global there: outside a treewright window, signal does
+nothing, quietly.
+
+To scope the hooks to one repository instead, put them in the main checkout's
+.claude/settings.local.json — the file git ignores — and set agent = "claude"
+in the repo's config. The agent key is what carries that file into every new
+worktree; without it, hooks in a gitignored file reach the main checkout and
+no worktree at all. "treewright doctor" checks for exactly that gap.
+
+Nothing is applied for you, deliberately: hooks live in a settings file you
+own, and a merge that reordered it would be worse than asking you to paste.`,
+			run: cmdAgentInit,
+		},
+		{
 			name:    "__complete",
 			args:    "<slugs|targets|repos|shells|flags [command]>",
 			summary: "list completion candidates",

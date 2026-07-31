@@ -98,7 +98,7 @@ ldflags. Validate config changes with `goreleaser check`.
 | `internal/cli/popup.go` | `popup`, popup sizing, the no-worktrees message. |
 | `internal/cli/signal.go` | `signal`: the agent-state protocol's one verb, run by agent hooks. |
 | `internal/cli/eval.go` | The eval-file protocol and shell quoting. |
-| `internal/cli/init.go` | `shell-init`, `tmux-init`, `__complete`. |
+| `internal/cli/init.go` | `shell-init`, `tmux-init`, `agent-init`, `__complete`. |
 | `internal/cli/version.go` | What `version` reports: the ldflags stamp, else the build info. |
 | `internal/config` | TOML loading, defaults, and which config applies. |
 | `internal/refname` | git's branch-name rules, restated for slugs and prefixes. |
@@ -107,6 +107,7 @@ ldflags. Validate config changes with `goreleaser check`.
 | `internal/ui` | Picker, table, color. |
 | `internal/shellinit` | zsh/bash/fish shims, as Go string constants. |
 | `internal/tmuxinit` | tmux key bindings and titles, as Go string constants. |
+| `internal/agentinit` | Facts about coding agents, one module per agent: launch/resume defaults, local-state carries, the hooks `agent-init` prints. |
 | `internal/gittest` | Scratch-repo builder for tests (bare origin + checkout). |
 | `internal/testenv` | Whether a missing tool is a skip or, under `CI`, a failure. |
 
@@ -172,6 +173,16 @@ rather than a precedence rule. `post_create` deliberately does *not* follow that
 pattern — it is one key taking either a string or a list, via
 `config.Commands.UnmarshalTOML`, so there is no second key to set as well. Don't
 "make it consistent" by adding one.
+
+**Anything that is a fact about a particular agent lives in `internal/agentinit`.**
+Core stays agent-agnostic: it provides protocols (`signal`, `command`, the
+carry), and a module provides the wiring. `agent = "claude"` is a defaults
+bundle — explicit `command`/`resume_command` override it field-by-field (unlike
+the branch_prefix pair, setting both is not an error), and the module's
+local-state files are carried into new worktrees *silently when absent*, which
+is the one way `AgentCarries()` differs from `carry_files`. The module is never
+inferred from `command`'s first word for behavior; only doctor's warn-level
+wiring check may sniff it. See "Agent modules" in `docs/design-notes.md`.
 
 **Branch-name rules live in `internal/refname`, not in the code that uses them.**
 `CheckSlug` runs in `new`, `CheckPrefix` runs in `config.Load`, and both are

@@ -367,6 +367,7 @@ stdout carries the answer and nothing else, so any command can be piped:
 | `setup` | the config file's path, or the config itself with `--dry-run` |
 | `config`, `doctor` | the report you asked for |
 | `shell-init`, `tmux-init`, `help`, `version` | the script or text you asked for |
+| `agent-init` | the hooks fragment alone, pipeable — where to put it goes to stderr |
 | `signal` | nothing — the answer is the stamp on the window, and out of scope it is silent on stderr too |
 
 Progress, warnings, prompts, and errors go to stderr, prefixed `warning:` or
@@ -473,6 +474,59 @@ user whose `command` is `nvim`, the whole feature is invisible, which is the
 agent-agnosticism promise kept in the table itself. `--json` always carries
 `agent_state`, empty when nothing has signaled — a consumer's schema should not
 depend on whether anyone happens to be signaling today.
+
+## Agent modules
+
+`signal` is half of a deliberate split: treewright's core provides agent-neutral
+protocols, and everything that is a fact about a *particular* agent — what
+launches it, what resumes it, which gitignored files hold its per-project
+state, how its hooks are wired to `signal` — lives in `internal/agentinit`, one
+module per agent. Supporting another agent is a file beside `claude.go`, not
+edits across the tree. The modules are the third instance of a pattern the repo
+already had twice: like the shell shims and the tmux snippet, the hook
+configuration is emitted by the binary (`agent-init claude`), so it can never
+drift from the `signal` vocabulary it targets.
+
+**`agent-init` prints; it does not apply.** tmux-init's `--apply` is safe
+because `source-file` is additive; applying hooks means rewriting a settings
+file the user owns, which a JSON merge would reorder and reformat. Printing the
+fragment and naming the file is the honest version until there is a merge
+strategy worth trusting.
+
+**Where the hooks go, and the trap between the placements.** User-level
+(`~/.claude/settings.json`) covers every repository and every worktree at once,
+and costs nothing because `signal` silently no-ops outside treewright windows —
+that contract is what makes the global placement free. Per-repo means the main
+checkout's `.claude/settings.local.json`, which git ignores — so **every
+worktree treewright creates starts without it**, and hooks placed there fire in
+the MAIN window and in no worktree at all unless something carries the file.
+That half-configured state looks finished, which is why `doctor` checks for
+exactly it. The committed project file would work mechanically and is not
+offered: it imposes treewright on every teammate who clones the repo.
+
+**The `agent` config key is a defaults bundle, and the carry is the point.**
+`agent = "claude"` names a module and takes its command and resume_command as
+defaults — explicit keys still win field-by-field, so agent-plus-command is
+override rather than a load error; the file still says which command runs. What
+the key adds that has no other spelling is the carry: the module's local-state
+files are copied into every new worktree as if `carry_files` listed them, which
+dissolves the placement trap and gives every worktree the "always allow"
+permission decisions already granted in the main checkout, hooks or no hooks.
+The implicit carry differs from an explicit entry in exactly one way — absent
+from the main checkout it is skipped silently, because unlike a `carry_files`
+entry nobody asserted it exists. An unknown agent name is a load error naming
+the modules there are: the key's whole value is the module it names, and a
+misspelling that fell back to the global defaults would leave the carry quietly
+not happening.
+
+**The module is never inferred from `command`.** Two configs saying
+`command = "claude"` behaving differently on an invisible guess is the kind of
+rule the config format exists to avoid; the key is one line, and writing it is
+what asks for the bundle. The one place a guess is allowed is `doctor`'s
+wiring check, which may sniff the command's first word — a warn-level hint can
+rest on a guess in a way behavior never can. `setup` writes the key when it
+finds the agent's binary on PATH, which is as close to consent as detection
+gets — and one commented line to remove when it guessed wrong.
 
 ## Reporting what failed
 

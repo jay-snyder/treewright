@@ -5,9 +5,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
+	"github.com/jay-snyder/treewright/internal/agentinit"
 	"github.com/jay-snyder/treewright/internal/config"
 	"github.com/jay-snyder/treewright/internal/git"
 	"github.com/jay-snyder/treewright/internal/tmux"
@@ -321,6 +323,85 @@ func checkConfig(r *report, name string) {
 			r.addf(levelWarn, "%s: %s runs %q, which is not on PATH", name, setting.label, words[0])
 		}
 	}
+
+	checkAgentWiring(r, name, cfg)
+}
+
+// checkAgentWiring reports whether the agent this config runs is wired to
+// `signal` — the integration whose absence is otherwise invisible: everything
+// works, and the AGENT column simply never appears.
+//
+// The module is the config's `agent` key when it sets one, else the one whose
+// command matches the config's first word — a guess, but a warn-level hint may
+// rest on a guess in a way behavior never would. Hooks count wherever they
+// live: the agent's user-level settings cover every repository, and the main
+// checkout's local settings cover this one — provided they reach the
+// worktrees, which is the second check. Hooks in a gitignored local file with
+// nothing carrying it fire in the MAIN window and in no worktree at all: the
+// half-configured state that looks finished, which is what doctor is for.
+func checkAgentWiring(r *report, name string, cfg *config.Config) {
+	module, ok := agentModuleFor(cfg)
+	if !ok || len(module.LocalState) == 0 {
+		return
+	}
+	localState := module.LocalState[0]
+
+	userHooked := mentionsSignal(expandHome(module.UserSettings))
+	localHooked := mentionsSignal(filepath.Join(cfg.MainDir, localState))
+	switch {
+	case !userHooked && !localHooked:
+		r.addf(levelWarn, "%s: %s does not report state — \"treewright agent-init %s\" prints the hooks that fill the AGENT column",
+			name, module.Name, module.Name)
+	case localHooked && cfg.Agent == "" && !slices.Contains(cfg.CarryFiles, localState):
+		r.addf(levelWarn, "%s: the hooks in %s reach no worktree — set agent = %q, or add %s to carry_files",
+			name, localState, module.Name, localState)
+	default:
+		r.addf(levelOK, "%s: %s reports state through its hooks", name, module.Name)
+	}
+}
+
+// agentModuleFor resolves which agent module a config runs: the `agent` key
+// when set — Load has already proven it resolves — else the module whose
+// command shares the config's first word.
+func agentModuleFor(cfg *config.Config) (agentinit.Agent, bool) {
+	if cfg.Agent != "" {
+		return agentinit.Lookup(cfg.Agent)
+	}
+	words := strings.Fields(cfg.Command)
+	if len(words) == 0 {
+		return agentinit.Agent{}, false
+	}
+	for _, name := range agentinit.Names() {
+		module, _ := agentinit.Lookup(name)
+		if moduleWords := strings.Fields(module.Command); len(moduleWords) > 0 && moduleWords[0] == words[0] {
+			return module, true
+		}
+	}
+	return agentinit.Agent{}, false
+}
+
+// mentionsSignal reports whether a settings file wires anything to
+// `treewright signal`. A substring test rather than a parse, deliberately: the
+// file is another program's, its schema is not treewright's to validate, and
+// the question is only whether the wiring exists at all. A missing file is a
+// plain no.
+func mentionsSignal(path string) bool {
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	return strings.Contains(string(body), "treewright signal")
+}
+
+// expandHome resolves the leading ~ the agent modules spell their user-level
+// paths with, being paths shown to users as often as read.
+func expandHome(path string) string {
+	if path == "~" || strings.HasPrefix(path, "~/") {
+		if home, err := os.UserHomeDir(); err == nil {
+			return filepath.Join(home, strings.TrimPrefix(strings.TrimPrefix(path, "~"), "/"))
+		}
+	}
+	return path
 }
 
 // checkCurrentRepo reports which config the caller's location selects, since that
