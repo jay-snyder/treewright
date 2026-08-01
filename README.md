@@ -189,6 +189,12 @@ nothing, quietly — or scope them to one repo by putting them in the main
 checkout's `.claude/settings.local.json` and setting `agent = "claude"` in the
 config, which carries that file into every new worktree.
 
+The same command teaches the agent the other direction. `tw agent-init claude
+--skill` prints a skill that shows Claude how to drive treewright itself —
+list what's in flight, spawn a sibling worktree with a prompt, respect the
+teardown guards — so you can ask the agent in your MAIN window to farm three
+tickets out to three worktrees and it knows exactly how.
+
 Hit `prefix + T` and that same table becomes a menu, in a popup sized to fit it:
 
 ```

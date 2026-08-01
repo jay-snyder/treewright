@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/jay-snyder/treewright/internal/agentinit"
@@ -78,18 +79,23 @@ func cmdTmuxInit(env *Env, args []string) error {
 	return nil
 }
 
-// cmdAgentInit prints an agent's hook configuration: its own hooks wired to
-// `treewright signal`, which is what fills the AGENT column of ls.
+// cmdAgentInit prints an agent's integration: by default its hook
+// configuration — its own hooks wired to `treewright signal`, which is what
+// fills the AGENT column of ls — and with --skill the document that teaches
+// the agent to drive treewright, the same knowledge in the other direction.
 //
-// The fragment goes to stdout alone, pasteable or pipeable, with the
+// Either artifact goes to stdout alone, pasteable or pipeable, with the
 // instructions around it on stderr — the same contract as every other command.
-// No --apply, unlike tmux-init, and the difference is what applying would
-// mean: tmux's source-file is additive, while applying hooks means rewriting a
-// settings file the user owns, which a JSON merge would reorder and reformat.
-// Printing the fragment and naming the file is the honest version until there
-// is a merge strategy worth trusting.
+// No --apply for the hooks, unlike tmux-init, and the difference is what
+// applying would mean: tmux's source-file is additive, while applying hooks
+// means rewriting a settings file the user owns, which a JSON merge would
+// reorder and reformat. Printing the fragment and naming the file is the
+// honest version until there is a merge strategy worth trusting. The skill has
+// no such problem — its file is treewright's own — so the instruction for it
+// is a redirect the user can run as printed.
 func cmdAgentInit(env *Env, args []string) error {
-	positional, err := parseArgs("agent-init", args, nil, nil, 1)
+	var skill bool
+	positional, err := parseArgs("agent-init", args, map[string]*bool{"--skill": &skill}, nil, 1)
 	if err != nil {
 		return err
 	}
@@ -100,6 +106,15 @@ func cmdAgentInit(env *Env, args []string) error {
 	agent, ok := agentinit.Lookup(name)
 	if !ok {
 		return usageErrorf("agent-init", "no module for %q (built-in modules: %s)", name, strings.Join(agentinit.Names(), ", "))
+	}
+
+	if skill {
+		fmt.Fprint(env.Stdout, agent.Skill)
+		env.progressf("save it where %s looks for skills:", agent.Name)
+		env.progressf("  mkdir -p %s && treewright agent-init %s --skill > %s",
+			filepath.Dir(agent.SkillPath), agent.Name, agent.SkillPath)
+		env.progressf("it teaches the agent to drive treewright — starting parallel work, reading the estate, guarded teardown")
+		return nil
 	}
 
 	fmt.Fprint(env.Stdout, agent.Hooks)

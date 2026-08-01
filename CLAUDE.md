@@ -107,7 +107,7 @@ ldflags. Validate config changes with `goreleaser check`.
 | `internal/ui` | Picker, table, color. |
 | `internal/shellinit` | zsh/bash/fish shims, as Go string constants. |
 | `internal/tmuxinit` | tmux key bindings and titles, as Go string constants. |
-| `internal/agentinit` | Facts about coding agents, one module per agent: launch/resume defaults, local-state carries, the hooks `agent-init` prints. |
+| `internal/agentinit` | Facts about coding agents, one module per agent: launch/resume defaults, local-state carries, the hooks and driving-guide skill `agent-init` prints. |
 | `internal/gittest` | Scratch-repo builder for tests (bare origin + checkout). |
 | `internal/testenv` | Whether a missing tool is a skip or, under `CI`, a failure. |
 

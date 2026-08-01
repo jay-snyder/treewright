@@ -454,7 +454,7 @@ worth reading first.`,
 		},
 		{
 			name:    "agent-init",
-			args:    "<agent>",
+			args:    "[--skill] <agent>",
 			summary: "print the hooks that make an agent report its state",
 			long: `Prints an agent's hook configuration: its own hooks wired to
 "treewright signal", so the window it runs in says whether it is working,
@@ -473,7 +473,15 @@ worktree; without it, hooks in a gitignored file reach the main checkout and
 no worktree at all. "treewright doctor" checks for exactly that gap.
 
 Nothing is applied for you, deliberately: hooks live in a settings file you
-own, and a merge that reordered it would be worse than asking you to paste.`,
+own, and a merge that reordered it would be worse than asking you to paste.
+
+--skill prints the other direction: a skill teaching the agent to drive
+treewright — see what is in flight with "treewright ls --json", start parallel
+work with new and a --prompt, respect the teardown guards. The instructions
+name the one-line redirect that installs it.`,
+			flags: []flagDoc{
+				{"--skill", "print the skill that teaches the agent to drive treewright instead"},
+			},
 			run: cmdAgentInit,
 		},
 		{
