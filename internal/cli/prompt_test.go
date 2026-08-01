@@ -87,12 +87,15 @@ func TestALongPromptIsRefusedBeforeTheWorktreeExists(t *testing.T) {
 	if r.err == nil {
 		t.Fatal("want an error for a prompt tmux will not run")
 	}
-	// treewright's own voice, with both numbers in it, rather than tmux's.
+	// treewright's own voice, with both numbers in it, rather than tmux's — and
+	// a way out that does not assume a keyboard, since the caller of --prompt is
+	// as often an agent as a person and there is no window to paste into anyway.
 	msg := flat(r.err.Error())
 	for _, want := range []string{
 		"--prompt makes command too long",
 		"limit " + strconv.Itoa(tmux.MaxCommandLength) + " bytes",
 		"shorten the prompt",
+		"put it in a file",
 	} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("error = %q, want it to say %q", msg, want)

@@ -83,6 +83,11 @@ the state it is in whenever this is caught early. A refusal from rm is the guard
 under Clean up doing its job — there is work in there that exists nowhere else,
 and that is the person's to decide about rather than yours to force past.
 
+The other way is to hand the brief to that idle agent where it stands, under
+Continue or hand work onward. Remaking the worktree is the simpler story while
+it is empty; once there is anything in it worth keeping, reaching the agent in
+place is the only one of the two that works.
+
 Without `--prompt` the window opens on an agent waiting to be told what to do,
 which is a legitimate thing to want: a worktree readied for a person, or for
 work whose instructions do not exist yet. It is a choice to make rather than the
@@ -97,6 +102,32 @@ default to fall into.
   the repository has not configured is refused rather than guessed at.
 - A branch that already exists — a colleague's pull request after fetching —
   is checked out rather than recreated, so this is also how work is picked up.
+
+## Hand over a long brief
+
+    treewright new eng-142-null-user --prompt "read /tmp/eng-142-brief.md in full — it is your complete brief"
+
+Anything longer than a few sentences goes in a file, and the prompt is one line
+pointing at it. That is the default for a handoff worth the name rather than a
+fallback for when something breaks: `--prompt` is interpolated into a tmux
+command line, tmux has a hard ceiling on how long a command it will run, and
+quoting the text into that line inflates it — so a brief long enough to be worth
+writing gets there sooner than its size suggests. Past the ceiling `new` refuses
+and creates nothing at all: no branch, no worktree, nothing half-made to clean
+up, and the way on from the error is this one anyway.
+
+The file is worth it well before the ceiling. The agent can read it again after
+a compaction, when the prompt it started on is long gone, and it outlives the
+session that wrote it. It is also the shape that reaches an agent whose window
+is already open, under Continue or hand work onward.
+
+Write it to /tmp. Inside the new worktree is the obvious place and it is the
+wrong one: a BRIEF.md in the checkout arrives as an untracked file in the diff
+somebody reviews. `.git/` is the trap that looks like the answer — it stays out
+of `git status`, so it feels tidy, and that is exactly why nothing will ever
+remove it and nobody will ever see it again. Delete the file once the work has
+landed, wherever it went; /tmp is cleared eventually, and eventually is not
+cleanup.
 
 ## Move work already started in the base checkout
 
@@ -132,6 +163,33 @@ An unambiguous prefix of a slug is enough, and the expansion is reported. The
 prompt reaches the agent only when the resume actually starts one: a window
 that was already open is switched to instead, with a warning that the prompt
 went undelivered.
+
+That warning is not the end of the road. The agent in that window is an ordinary
+TUI on an ordinary tty, so tmux can type at it:
+
+    treewright ls --json                      # window_id, e.g. "@16"
+    tmux capture-pane -p -t @16 | tail -20    # look before you type
+    tmux send-keys -t @16 -l "read /tmp/eng-142-review.md and address the comments in it"
+    tmux send-keys -t @16 Enter
+
+Read the pane first. An agent sitting on a question with options takes
+keystrokes as the answer to it, and `capture-pane` changes nothing and costs
+nothing; typing blind is how you choose an option you never saw. `-l` sends the
+string literally — without it tmux reads the words as key names and the message
+arrives mangled — and `Enter` is a separate call for the same reason, since
+under `-l` it would arrive as five characters.
+
+Send one line. Enter is what submits in these TUIs, so a message with a newline
+in it submits at the first one and posts the rest as further turns: anything
+longer goes in a file and the line names it, exactly as a long brief does. A
+message that lands mid-turn is queued and picked up when that turn ends, so this
+works whether the row reads `working` or `waiting`.
+
+`waiting` is the case this is for — that agent is blocked on a person, and this
+is how it gets unblocked without one walking over to the window. It is still
+somebody else's session: send instructions, not keystrokes that drive their UI.
+And a window a person is typing in is a window you will collide with, so this is
+for reaching agents rather than interrupting people.
 
 ## Clean up
 

@@ -248,10 +248,17 @@ func checkCommandFits(command, key, prompt string) error {
 	// The prompt is what fills this budget in practice, and a reader who has just
 	// typed one needs to be told that rather than left to wonder what is wrong
 	// with a config line they have not touched.
+	//
+	// The way out it names used to be pasting the text once the window was open,
+	// which assumes a keyboard and a window — and there is no window, since
+	// nothing was created. The route that works from where the reader is standing
+	// is a file with the text in it and a prompt naming that file: it is what the
+	// skill teaches an agent driving treewright, it needs no second command to
+	// make sense of, and a person can take it too.
 	subject, fix := key+" is", "shorten it"
 	if prompt != "" {
 		subject = "--prompt makes " + key
-		fix = "shorten the prompt, or paste the text to the agent once the window is open"
+		fix = "shorten the prompt, or put it in a file and pass a prompt naming that file"
 	}
 	return fmt.Errorf("%s too long for tmux to run in a window%s\nnothing was created — %s",
 		subject, asFields(
