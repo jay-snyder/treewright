@@ -72,6 +72,16 @@ The cask is macOS only. On Linux, grab a tarball from
 go install github.com/jay-snyder/treewright@latest
 ```
 
+That puts the binary in `$(go env GOPATH)/bin`, which is not on your `PATH`
+unless you have put it there. Check before going on:
+
+```sh
+command -v treewright
+```
+
+If that prints nothing, add the directory to your `PATH`. Both setup steps below
+run `treewright` to get their output, and so does everything after them.
+
 ### Set up your shell
 
 Add one line to your shell's startup file. It defines `tw`, sets up tab
@@ -89,6 +99,12 @@ treewright shell-init fish | source
 ```
 
 Open a new terminal afterwards, or re-source the file, and `tw` is there.
+
+That line runs `treewright`, so an unreachable binary makes it print
+`command not found` and define nothing — the error names your startup file,
+not the `PATH` behind it. If you put the `go install` directory on your `PATH`
+in a login-only file like `~/.profile`, `~/.zprofile` or `~/.bash_profile`, a new
+terminal is not enough to pick it up: log out and back in.
 
 ### Set up tmux
 
@@ -108,6 +124,11 @@ That binds two keys:
 You need them because a treewright window runs your agent as the window's
 command. There's no shell in there to type into. The keys open a popup on top of
 whatever's running, and close it again when you've picked.
+
+`run-shell` looks up `treewright` in the tmux server's `PATH`, not your shell's,
+and tmux says nothing when a line in your config fails. So if the keys do nothing,
+make treewright reachable and then restart the server with `tmux kill-server` — a
+running server keeps the `PATH` it started with, and a new window inherits it.
 
 Both are unbound in stock tmux. If your config already uses them, choose your
 own by adding flags to the same line:

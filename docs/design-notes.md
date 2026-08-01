@@ -164,6 +164,18 @@ process is put back afterwards, since the tests call `Run` in-process and a
 command that wandered off and stayed there would decide where the next one thinks
 it is.
 
+**Why a binding that cannot find treewright says nothing at all.** tmux resolves
+the command in the server's environment, which is whatever the server was started
+from rather than the shell that edited the config, and it discards what a
+`run-shell` at config load reports. A binary that is not on that `PATH` therefore
+produces no bindings and no message — the keys simply do nothing, which reads as a
+treewright bug rather than an installation one. Two things compound it: a server
+keeps the environment it started with, so making the binary reachable afterwards
+takes a `kill-server` rather than a new window; and the check that would report it,
+`checkTmuxIntegration`, has to skip when no server is running, because `list-keys`
+would start the very server whose emptiness it then described. So the one session
+where the keys never loaded is also the one where nothing says so.
+
 **Why `-EE` and not `-E`.** A single `-E` closes the popup however the command
 exited, so anything it reported on the way out is gone before it can be read.
 Doubled, tmux closes it only on success. That is also why `PopupHint` exists:
@@ -731,6 +743,18 @@ zsh and bash expand aliases in a function body when the function is *defined*: a
 `eval "$(command treewright shell-init zsh)"` when a shell function named
 `treewright` already exists — `command` skips functions, so the line cannot ask
 the thing being replaced for its own replacement.
+
+**Why the documented line is a bare `eval` rather than a guarded one.** The line
+runs the binary to get its own text, so it fails when treewright is not on `PATH`
+— and the shell reports that against the startup file's line number, which names
+the wrong culprit and sends people looking at the integration instead of the
+install. Wrapping it in `command -v treewright >/dev/null 2>&1 &&`, the shape
+tool-init lines often take, is the wrong trade for a first-time setup: it turns a
+loud wrong-culprit error into a silent no-op, where `tw` is undefined and nothing
+at all has been said. The install section carries the `PATH` check instead, before
+either integration is added. A dotfiles repo shared across machines, some without
+treewright on them, is the case where the guard earns its keep — but that is a
+choice about absent installs, not the instruction to hand someone installing it.
 
 **`tw` and `TREEWRIGHT_ARGV0`.** `tw` calls the `treewright` *function*, resolved
 at call time, so the eval-file protocol works identically under either name. That
