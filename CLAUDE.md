@@ -36,6 +36,40 @@ made unasked is not a step forward, it is work the maintainer now has to inspect
 and undo. If one was made in error, `git reset --soft HEAD~1` puts every change
 back in the working tree with nothing lost.
 
+## Driving the built binary by hand happens on a scratch server
+
+**Any hands-on exercise of the binary — a throwaway repo, a demo `new`, a
+popup, anything that reaches tmux or the registry — sets a scratch
+`TREEWRIGHT_TMUX_LABEL` and a scratch `TREEWRIGHT_CONFIG_DIR` first.**
+
+```sh
+export TREEWRIGHT_TMUX_LABEL=twscratch       # a server nobody is attached to
+export TREEWRIGHT_CONFIG_DIR="$(mktemp -d)"  # a registry that is not the maintainer's
+./treewright setup demo                      # from inside the throwaway repo
+./treewright new eng-1
+tmux -L twscratch kill-server                # the socket outlives the run
+```
+
+The danger is not that treewright misbehaves. It is that it behaves correctly on
+a client you did not realize you shared. A Claude Code Bash call inherits `$TMUX`
+from the pane its session was started in, so `tmux.Focus` finds `Inside()` true,
+finds the scratch session's name different from the current one, and does exactly
+what it is for: `switch-client`. There is one client and it is the maintainer's.
+That is how a demo `new eng-1` against a repo in a scratchpad threw an attached
+maintainer out of their real treewright session into a fresh one holding a single
+ENG-1 window, with detach-and-reattach the only way back. `TREEWRIGHT_CONFIG_DIR`
+is the same argument one layer down: a scratch repo registered in the real
+registry is a repo that `ls`, `doctor` and every popup keep answering about long
+after the demo is gone.
+
+The test suite is already isolated and needs no change — `newFixture` gives every
+test that reaches a server its own `-L` label under its own `TMUX_TMPDIR`. To
+*prove* that rather than read it, put a shim ahead of `tmux` on `PATH` that
+resolves the socket each call would land on the way tmux itself does — `-L`/`-S`,
+then `$TMUX`, then `$TMUX_TMPDIR/tmux-$UID/default` — and fails on the developer's
+default socket. An escape then arrives as a failing test rather than as a
+surprise for whoever is attached.
+
 ## Build, test, lint
 
 ```sh
