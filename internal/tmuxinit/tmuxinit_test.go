@@ -265,3 +265,63 @@ func TestCustomKeysStillLoadIntoARealServer(t *testing.T) {
 		}
 	}
 }
+
+// TestTheSnippetSaysWhichTreewrightLoadedIt covers the question a tmux server
+// could not answer before: "treewright" appearing in list-keys says that some
+// version's bindings are loaded and never which, and a server outlives an
+// upgrade by weeks.
+//
+// The value is read back off a real server rather than out of the string,
+// because what has to survive is the round trip — tmux parses the line, stores
+// the option, and hands it back through show-options, and a value that arrives
+// requoted would be a comparison that never matches.
+func TestTheSnippetSaysWhichTreewrightLoadedIt(t *testing.T) {
+	tmux := server(t)
+
+	if got, err := tmux("show-options", "-gv", VersionOption); err == nil {
+		t.Fatalf("a stock server already answers %s with %q", VersionOption, got)
+	}
+
+	path := filepath.Join(t.TempDir(), "treewright.tmux")
+	if err := os.WriteFile(path, []byte(Script(DefaultKeys())), 0o644); err != nil {
+		t.Fatalf("write the snippet: %v", err)
+	}
+	if out, err := tmux("source-file", path); err != nil {
+		t.Fatalf("tmux rejected the emitted config: %v\n%s", err, out)
+	}
+
+	stamped, err := tmux("show-options", "-gv", VersionOption)
+	if err != nil {
+		t.Fatalf("the loaded snippet stamped nothing on the server: %v\n%s", err, stamped)
+	}
+	if stamped != Version() {
+		t.Errorf("the server holds %q, want %q — doctor compares these two", stamped, Version())
+	}
+}
+
+// TestMovingTheKeysDoesNotChangeTheFingerprint pins what the fingerprint is
+// about. Which key opens the picker is the user's decision, made at the
+// tmux.conf line; a fingerprint that moved with it would report a server loaded
+// by this very binary as out of date for as long as the custom key survived —
+// which is forever, that being the point of setting one.
+func TestMovingTheKeysDoesNotChangeTheFingerprint(t *testing.T) {
+	for _, keys := range []Keys{DefaultKeys(), {Resume: "C-g", New: "F5"}, {Resume: "T"}, {}} {
+		script := Script(keys)
+		if !strings.Contains(script, `set -g `+VersionOption+` "`+Version()+`"`) {
+			t.Errorf("the snippet for %+v does not carry the current fingerprint:\n%s", keys, script)
+		}
+	}
+}
+
+// TestTheFingerprintIsStableAcrossRuns: a value that changed between two
+// invocations of the same binary would make every server read as stale from the
+// moment after it was loaded.
+func TestTheFingerprintIsStableAcrossRuns(t *testing.T) {
+	first := Version()
+	if first == "" {
+		t.Fatal("the fingerprint is empty, so nothing can be compared with it")
+	}
+	if second := Version(); first != second {
+		t.Errorf("two calls gave %q and %q", first, second)
+	}
+}

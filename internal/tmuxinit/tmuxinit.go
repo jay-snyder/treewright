@@ -21,6 +21,8 @@
 package tmuxinit
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"strings"
 )
@@ -99,7 +101,42 @@ func Script(k Keys) string {
 
 	b.WriteString(titles)
 	b.WriteString(recorded)
+	b.WriteString(strings.ReplaceAll(stamp, "{{version}}", Version()))
 	return b.String()
+}
+
+// VersionOption is the server option the snippet stamps with Version, and the
+// name doctor reads back. It is declared here rather than beside the option
+// names in internal/tmux because this is the package that writes it: one
+// spelling, in the file holding the line that sets it.
+const VersionOption = "@treewright_tmux_init"
+
+// Version fingerprints the snippet this binary emits, so that a server can say
+// which treewright's bindings it is holding.
+//
+// A tmux server routinely outlives an upgrade by weeks, and until now the only
+// question that could be asked of one was whether the word "treewright" appears
+// in list-keys — which a two-release-old binding answers exactly as a current
+// one does. "It follows at the next start" is true, and the interim is unbounded
+// and invisible.
+//
+// Comparing the bindings themselves is what the agent plugin gets and what does
+// not work here: tmux echoes a binding back in its own normalized spelling, with
+// single quotes rewritten as double ones, backslashes doubled and its own column
+// padding, so byte-comparing list-keys against this text would report every
+// server as stale. What the server can hold verbatim is a value treewright puts
+// there, and a digest of the snippet's own source is the honest one — it changes
+// when the snippet changes and at no other time.
+//
+// The keys are deliberately not in it. Which key opens the picker is the user's
+// choice, made at the tmux.conf line, and a fingerprint that moved with it would
+// report a custom binding as an old one forever.
+func Version() string {
+	sum := sha256.Sum256([]byte(header + reachHeader + resumeBinding + newBinding + titles + recorded + stamp))
+	// Twelve hex characters, as internal/shellinit does for the same purpose: the
+	// value goes in a line a person reads, and 48 bits is far more than enough to
+	// separate one release's snippet from another's.
+	return hex.EncodeToString(sum[:])[:12]
 }
 
 // fill substitutes the key into a binding.
@@ -208,4 +245,22 @@ const recorded = `
 # For instance, to keep the repository in view while attached:
 #
 #     set -g status-right " #{@treewright_repo} "
+`
+
+// The stamp goes last, after the bindings it describes.
+//
+// It is a comment plus a line rather than something treewright sets behind the
+// user's back after sourcing, because a server whose bindings and whose stamp
+// came from two different runs is exactly the state this is meant to detect —
+// and because somebody reading their own tmux configuration is entitled to know
+// what the odd-looking value is for.
+const stamp = `
+# --- which treewright loaded this --------------------------------------------
+#
+# A fingerprint of the text above, so "treewright doctor" can tell bindings a
+# two-release-old binary loaded from the ones this one would write. A tmux server
+# outlives an upgrade by weeks, and "treewright" appearing in list-keys says only
+# that some version's bindings are loaded, never which. Moving your keys does not
+# change it: the keys are yours, the snippet is treewright's.
+set -g @treewright_tmux_init "{{version}}"
 `

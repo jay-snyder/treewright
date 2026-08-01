@@ -318,3 +318,81 @@ func TestWrapperSurvivesAnRmAlias(t *testing.T) {
 		})
 	}
 }
+
+// TestEveryScriptExportsWhichTreewrightWroteIt covers the one integration that
+// cannot be asked about any other way.
+//
+// A tmux binding is a thing a server holds and a plugin is a file on disk, but
+// the shell wrapper lives in the user's own shell, where a child process cannot
+// see it. Before this, doctor inferred "loaded" from the eval file being set —
+// which a terminal opened two releases ago reports exactly as one opened a
+// minute ago does. The variable is what separates them, and it has to be
+// exported, since the only thing that reads it is a child.
+func TestEveryScriptExportsWhichTreewrightWroteIt(t *testing.T) {
+	// Each shell's own spelling of "set this in the environment", so a shim that
+	// merely assigned the value — invisible to the binary — fails here.
+	exports := map[string]string{
+		"zsh":  `export ` + VersionVar + `="`,
+		"bash": `export ` + VersionVar + `="`,
+		"fish": `set -gx ` + VersionVar + ` "`,
+	}
+	for _, shell := range Shells() {
+		script, err := Script(shell)
+		if err != nil {
+			t.Fatalf("Script(%q): %v", shell, err)
+		}
+		version, err := Version(shell)
+		if err != nil {
+			t.Fatalf("Version(%q): %v", shell, err)
+		}
+		if !strings.Contains(script, exports[shell]+version+`"`) {
+			t.Errorf("the %s script does not export %s as %q", shell, VersionVar, version)
+		}
+		// The placeholder is filled on the way out, never shipped: a shell asked
+		// to export "{{version}}" would report a version that is the same for
+		// every build there has ever been.
+		if strings.Contains(script, versionPlaceholder) {
+			t.Errorf("the %s script still carries %s", shell, versionPlaceholder)
+		}
+	}
+}
+
+// TestEachShimHasItsOwnFingerprint: the value identifies a script rather than a
+// release, so two shells that differ must not answer alike — otherwise a shim
+// could change without the fingerprint moving.
+func TestEachShimHasItsOwnFingerprint(t *testing.T) {
+	seen := map[string]string{}
+	for _, shell := range Shells() {
+		version, err := Version(shell)
+		if err != nil {
+			t.Fatalf("Version(%q): %v", shell, err)
+		}
+		if other, clash := seen[version]; clash {
+			t.Errorf("%s and %s both fingerprint as %q", shell, other, version)
+		}
+		seen[version] = shell
+	}
+}
+
+// TestCurrentRecognizesEveryShimAndNothingElse is what doctor asks. Any shell's
+// fingerprint counts, deliberately: the question is "is this wrapper one of
+// mine", and working out which shell the caller is running to ask a narrower one
+// would mean trusting $SHELL, which names the login shell rather than the
+// running one.
+func TestCurrentRecognizesEveryShimAndNothingElse(t *testing.T) {
+	for _, shell := range Shells() {
+		version, err := Version(shell)
+		if err != nil {
+			t.Fatalf("Version(%q): %v", shell, err)
+		}
+		if !Current(version) {
+			t.Errorf("the %s shim's own fingerprint %q is not recognized", shell, version)
+		}
+	}
+	// An older treewright's shim, and a shell that exports nothing at all.
+	for _, stale := range []string{"", "000000000000", "dev"} {
+		if Current(stale) {
+			t.Errorf("%q is reported as a fingerprint this binary emits", stale)
+		}
+	}
+}

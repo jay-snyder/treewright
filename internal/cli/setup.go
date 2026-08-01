@@ -25,12 +25,16 @@ import (
 // the principle that the file remains the record: setup is a way to start one,
 // not a layer above it.
 func cmdSetup(env *Env, args []string) error {
-	var dryRun bool
+	var dryRun, refresh bool
 	positional, err := parseArgs("setup", args, map[string]*bool{
 		"-n": &dryRun, "--dry-run": &dryRun,
+		"--refresh": &refresh,
 	}, nil, 1)
 	if err != nil {
 		return err
+	}
+	if refresh {
+		return refreshConfig(env, at(positional, 0), dryRun)
 	}
 
 	wd, err := os.Getwd()
@@ -98,7 +102,15 @@ func cmdSetup(env *Env, args []string) error {
 	)
 	env.progressf("detected:%s", asFields(fields...))
 
-	body := renderConfig(name, mainDir, baseBranch, prefixes, len(detected) > 0, carry, agent)
+	body := renderConfig(configSettings{
+		name:             name,
+		mainDir:          mainDir,
+		baseBranch:       baseBranch,
+		prefixes:         prefixes,
+		prefixFromOrigin: len(detected) > 0,
+		carry:            carry,
+		agent:            agent,
+	})
 	if dryRun {
 		fmt.Fprint(env.Stdout, body)
 		env.progressf("nothing was written%s", asFields(
@@ -125,6 +137,98 @@ func cmdSetup(env *Env, args []string) error {
 		field("start work with", env.copyable(env.Argv0+" new <slug>")),
 	))
 	return nil
+}
+
+// refreshConfig regenerates an existing config in place, keeping every setting
+// the user chose and rewriting everything around it.
+//
+// It exists because `setup` refuses an existing config outright — rightly, since
+// overwriting one would discard edits — and the consequence was that every later
+// improvement to the generated file reached new repositories only. A config
+// written two releases ago names none of the keys added since, explains none of
+// what the commentary now explains, and there was no command that changed that
+// short of deleting the file and answering the detection again.
+//
+// **Nothing is re-detected.** The values are read back out of the file that is
+// there, which is the whole difference between this and running `setup` again: a
+// base branch someone corrected by hand, a prefix they chose over the guess, a
+// command that is not the agent's default — those are decisions, and a refresh
+// that re-derived them from the repository would quietly undo the ones that
+// disagree with what treewright would guess today.
+//
+// What moves is the version, the comments, and any key the generator has since
+// learned to write.
+func refreshConfig(env *Env, name string, dryRun bool) error {
+	// Resolved rather than derived from the directory's name, because that is
+	// what --refresh is refreshing: the config in force here, whatever it is
+	// called. `setup`'s own default — the checkout's base name — is a name for a
+	// file that does not exist yet, and pointing it at one that does would target
+	// whichever config happened to share the directory's spelling.
+	cfg, err := resolveConfig(name)
+	if err != nil {
+		return err
+	}
+
+	body := renderConfig(settingsFrom(cfg))
+	if dryRun {
+		fmt.Fprint(env.Stdout, body)
+		env.progressf("nothing was written%s", asFields(
+			field("would rewrite", cfg.Path()),
+			field("to do it", env.copyable(env.Argv0+" setup --refresh "+cfg.Name)),
+		))
+		return nil
+	}
+	if err := os.WriteFile(cfg.Path(), []byte(body), 0o644); err != nil {
+		return err
+	}
+	fmt.Fprintln(env.Stdout, cfg.Path())
+	env.progressf("rewrote %q for config version %d%s", cfg.Name, config.FormatVersion, asFields(
+		field("config", cfg.Path()),
+		field("kept", "every setting the file already had"),
+		field("check it with", env.copyable(env.Argv0+" config "+cfg.Name)),
+	))
+	return nil
+}
+
+// settingsFrom reads a loaded config back into the shape the generator writes.
+//
+// Explicit rather than the value throughout, because Load has already filled the
+// blanks: cfg.Command holds "claude {prompt}" whether the file said so or the
+// default did, and writing that back would turn a default into a setting — the
+// one thing a regenerated file must not do, since a default is what follows
+// treewright's own changes and a setting is what refuses to.
+func settingsFrom(cfg *config.Config) configSettings {
+	s := configSettings{
+		name:       cfg.Name,
+		mainDir:    cfg.MainDir,
+		baseBranch: cfg.BaseBranch,
+		prefixes:   cfg.Prefixes(),
+		carry:      cfg.CarryFiles,
+		agent:      cfg.Agent,
+	}
+	// A refreshed file is written under whichever spelling it already used, so a
+	// repository that lists several prefixes keeps the list and one that names a
+	// single prefix keeps the singular key. Prefixes() returns one element for
+	// the singular spelling, which is exactly the shape renderConfig expects.
+	s.pluralPrefixes = cfg.Explicit("branch_prefixes")
+	if cfg.Explicit("command") {
+		s.command = cfg.Command
+	}
+	if cfg.Explicit("resume_command") {
+		s.resumeCommand = cfg.ResumeCommand
+	}
+	if cfg.Explicit("post_create") {
+		s.postCreate = cfg.PostCreate
+	}
+	// The one setting whose empty value is a decision: ticket_pattern = "" is how
+	// a repository that tracks no tickets turns the search off, so what is kept
+	// is whether the key was written, not whether it holds anything.
+	s.ticketPatternSet = cfg.Explicit("ticket_pattern")
+	s.ticketPattern = cfg.TicketPattern
+	if cfg.Explicit("tmux_session") {
+		s.tmuxSession = cfg.TmuxSession
+	}
+	return s
 }
 
 // validateConfigName rejects a name that would not survive being turned into a
@@ -306,6 +410,46 @@ func detectAgent() string {
 	return ""
 }
 
+// configSettings is everything a generated config carries, and the reason it is
+// a struct rather than a parameter list is `setup --refresh`.
+//
+// `setup` fills it from what it detected; `--refresh` fills it from the file
+// that is already there. Both then go through one renderer, which is what keeps
+// a regenerated config identical in shape to a fresh one — the alternative, a
+// second writer for the refresh path, would have the two drifting apart at the
+// first key added to either.
+//
+// The lower half is the keys `setup` never guesses and so only ever commented
+// out. They are here because `--refresh` must not lose them: a config saying
+// command = "nvim" rewritten from a struct that could not hold a command would
+// come back launching claude, which is not a formatting change.
+type configSettings struct {
+	name       string
+	mainDir    string
+	baseBranch string
+
+	// prefixes is the list in force, most preferred first — always at least one
+	// element, as config.Prefixes guarantees. pluralPrefixes says which of the
+	// setting's two spellings to write it under, and prefixFromOrigin whether a
+	// single one is evidence or a guess, since only the guess says so.
+	prefixes         []string
+	pluralPrefixes   bool
+	prefixFromOrigin bool
+
+	carry []string
+	agent string
+
+	// Written only when set, commented as the default otherwise. Empty means the
+	// file did not say — except for ticketPattern, where empty is a setting and
+	// ticketPatternSet is what distinguishes the two.
+	command          string
+	resumeCommand    string
+	postCreate       []string
+	ticketPattern    string
+	ticketPatternSet bool
+	tmuxSession      string
+}
+
 // renderConfig writes the config file's text. prefixFromOrigin says which of
 // the two things the branch prefix is, since only one of them is evidence.
 //
@@ -324,33 +468,50 @@ func detectAgent() string {
 // with exactly the confidence of a value nothing guessed, and a reader with no
 // reason to doubt the file leaves it there. So the guess says it is one, in the
 // place a reader is already looking.
-func renderConfig(name, mainDir, baseBranch string, prefixes []string, prefixFromOrigin bool, carry []string, agent string) string {
+func renderConfig(s configSettings) string {
+	prefixes := s.prefixes
 	var b strings.Builder
 
-	fmt.Fprintf(&b, "# treewright config for %s, generated by \"treewright setup\".\n", name)
+	fmt.Fprintf(&b, "# treewright config for %s, generated by \"treewright setup\".\n", s.name)
 	fmt.Fprintf(&b, "# Most of this was read off the repository itself; anything called a guess\n")
 	fmt.Fprintf(&b, "# below was not. Worth a read either way — edit anything that is wrong.\n\n")
 
+	// The version leads, above the settings, because it is about the file rather
+	// than about the repository — and because a reader who has just been told by
+	// doctor that this config predates the generator should find it on the first
+	// line they look at rather than at the bottom of a page of commentary.
+	fmt.Fprintf(&b, "# Which revision of this file's layout treewright wrote. \"treewright doctor\"\n")
+	fmt.Fprintf(&b, "# reads it to say when a config predates the treewright you are running;\n")
+	fmt.Fprintf(&b, "# \"treewright setup --refresh\" rewrites the file around your own settings.\n")
+	fmt.Fprintf(&b, "version = %d\n\n", config.FormatVersion)
+
 	fmt.Fprintf(&b, "# The repository's main checkout. Worktrees are created as its siblings,\n")
 	fmt.Fprintf(&b, "# named <main_dir>-<slug>.\n")
-	fmt.Fprintf(&b, "main_dir = %s\n\n", tomlString(abbreviateHome(mainDir)))
+	fmt.Fprintf(&b, "main_dir = %s\n\n", tomlString(abbreviateHome(s.mainDir)))
 
-	fmt.Fprintf(&b, "# New branches fork from origin/%s, and every status is measured against it.\n", baseBranch)
-	fmt.Fprintf(&b, "base_branch = %s\n\n", tomlString(baseBranch))
+	fmt.Fprintf(&b, "# New branches fork from origin/%s, and every status is measured against it.\n", s.baseBranch)
+	fmt.Fprintf(&b, "base_branch = %s\n\n", tomlString(s.baseBranch))
 
 	switch {
-	case len(prefixes) > 1:
-		fmt.Fprintf(&b, "# Branch names are <prefix><slug>, and these are the prefixes origin's own\n")
-		fmt.Fprintf(&b, "# branches use, most used first. Pick one by naming it — \"treewright new\n")
+	case s.pluralPrefixes || len(prefixes) > 1:
+		// The example names the second prefix, since the first is what a bare slug
+		// already gets — but a list may legitimately hold one entry, and then the
+		// only prefix there is has to serve as its own example.
+		example := prefixes[0]
+		if len(prefixes) > 1 {
+			example = prefixes[1]
+		}
+		fmt.Fprintf(&b, "# Branch names are <prefix><slug>, and these are the prefixes this repository\n")
+		fmt.Fprintf(&b, "# uses, most preferred first. Pick one by naming it — \"treewright new\n")
 		fmt.Fprintf(&b, "# %seng-1\" branches %seng-1 — or leave it off and get %s.\n",
-			prefixes[1], prefixes[1], prefixes[0])
+			example, example, prefixes[0])
 		fmt.Fprintf(&b, "branch_prefixes = [%s]\n\n", tomlList(prefixes))
 	case len(prefixes) == 0 || prefixes[0] == "":
 		fmt.Fprintf(&b, "# Prepended to a slug to form the branch name, e.g. \"alice/\" gives\n")
 		fmt.Fprintf(&b, "# alice/eng-1. Left empty: git has no user.email configured for this repo.\n")
 		fmt.Fprintf(&b, "# branch_prefix = \"alice/\"\n")
 		writePrefixesHint(&b)
-	case prefixFromOrigin:
+	case s.prefixFromOrigin:
 		fmt.Fprintf(&b, "# Prepended to a slug to form the branch name: %seng-1. It is what\n", prefixes[0])
 		fmt.Fprintf(&b, "# origin's own branches already use.\n")
 		fmt.Fprintf(&b, "branch_prefix = %s\n", tomlString(prefixes[0]))
@@ -369,12 +530,12 @@ func renderConfig(name, mainDir, baseBranch string, prefixes []string, prefixFro
 	fmt.Fprintf(&b, "# .env, copied in from main_dir. Usually files git ignores, though being\n")
 	fmt.Fprintf(&b, "# ignored is not what puts a file here — the agent key below carries its\n")
 	fmt.Fprintf(&b, "# own, ignored or not. Paths are relative to main_dir.\n")
-	if len(carry) == 0 {
+	if len(s.carry) == 0 {
 		fmt.Fprintf(&b, "# Nothing was detected; add what your app needs, e.g.:\n")
 		fmt.Fprintf(&b, "# carry_files = [\".env.local\", \"apps/api/.env\"]\n\n")
 	} else {
 		fmt.Fprintf(&b, "carry_files = [\n")
-		for _, rel := range carry {
+		for _, rel := range s.carry {
 			fmt.Fprintf(&b, "  %s,\n", tomlString(rel))
 		}
 		fmt.Fprintf(&b, "]\n\n")
@@ -386,38 +547,85 @@ func renderConfig(name, mainDir, baseBranch string, prefixes []string, prefixFro
 	fmt.Fprintf(&b, "# Nothing ignores that plugin until you say so, so it reads as untracked\n")
 	fmt.Fprintf(&b, "# everywhere it lands — \"treewright doctor\" says so too. Remove this key\n")
 	fmt.Fprintf(&b, "# for a window with no agent in it.\n")
-	if agent == "" {
+	if s.agent == "" {
 		fmt.Fprintf(&b, "# agent = \"claude\"\n\n")
 	} else {
-		fmt.Fprintf(&b, "agent = %s\n\n", tomlString(agent))
+		fmt.Fprintf(&b, "agent = %s\n\n", tomlString(s.agent))
 	}
 
+	// From here down are the keys setup never guesses, so a fresh config shows
+	// each as the commented default it is running on. What makes them worth
+	// writing out at all is --refresh: a file that set one has it written back,
+	// under the same commentary, rather than losing it to a regeneration.
 	fmt.Fprintf(&b, "# What to launch in the tmux window. command is used by new and base,\n")
 	fmt.Fprintf(&b, "# resume_command by resume; the two default independently, and either\n")
 	fmt.Fprintf(&b, "# overrides what agent supplies. {prompt} is where --prompt's text lands,\n")
 	fmt.Fprintf(&b, "# shell-quoted; without a prompt the placeholder disappears.\n")
-	fmt.Fprintf(&b, "# command        = %s\n", tomlString(config.DefaultCommand))
-	fmt.Fprintf(&b, "# resume_command = %s\n\n", tomlString(config.DefaultResumeCommand))
+	writeSetting(&b, "command", commandKeyWidth, s.command, config.DefaultCommand)
+	writeSetting(&b, "resume_command", commandKeyWidth, s.resumeCommand, config.DefaultResumeCommand)
+	fmt.Fprintln(&b)
 
 	fmt.Fprintf(&b, "# Run in the background in each new worktree, for dependency installation.\n")
 	fmt.Fprintf(&b, "# Either one command, or a list of them run in order, stopping at the first\n")
 	fmt.Fprintf(&b, "# failure.\n")
-	fmt.Fprintf(&b, "# post_create = \"npm install\"\n")
-	fmt.Fprintf(&b, "# post_create = [\"npm install\", \"npm run codegen\"]\n\n")
+	switch {
+	case len(s.postCreate) == 1:
+		// Written back in the shape it was set in: one command as the string it
+		// is, several as a list. A single command rewritten as a one-element list
+		// would mean the same thing and would still be an edit nobody made.
+		fmt.Fprintf(&b, "post_create = %s\n", tomlString(s.postCreate[0]))
+		fmt.Fprintf(&b, "# post_create = [\"npm install\", \"npm run codegen\"]\n\n")
+	case len(s.postCreate) > 1:
+		fmt.Fprintf(&b, "post_create = [\n")
+		for _, c := range s.postCreate {
+			fmt.Fprintf(&b, "  %s,\n", tomlString(c))
+		}
+		fmt.Fprintf(&b, "]\n\n")
+	default:
+		fmt.Fprintf(&b, "# post_create = \"npm install\"\n")
+		fmt.Fprintf(&b, "# post_create = [\"npm install\", \"npm run codegen\"]\n\n")
+	}
 
 	fmt.Fprintf(&b, "# Regexp whose first submatch names the tmux window, so a slug like\n")
 	fmt.Fprintf(&b, "# eng-142-white-screen opens a window called ENG-142. Pin it to your own\n")
 	fmt.Fprintf(&b, "# ticket scheme to stop it matching any letters-dash-digits word, or set\n")
 	fmt.Fprintf(&b, "# it to \"\" if this repository's work has no ticket behind it — then the\n")
 	fmt.Fprintf(&b, "# slug always names the window, cut to ten characters if it is longer.\n")
-	fmt.Fprintf(&b, "# ticket_pattern = %s\n", tomlString(config.DefaultTicketPattern))
-	fmt.Fprintf(&b, "# ticket_pattern = \"\"\n\n")
+	if s.ticketPatternSet {
+		// Written on whether the key was there rather than on whether it holds
+		// anything: ticket_pattern = "" is the opt-out, and a refresh that dropped
+		// it for looking empty would turn every window name back into a ticket
+		// hunt in the one repository that said not to.
+		fmt.Fprintf(&b, "ticket_pattern = %s\n\n", tomlString(s.ticketPattern))
+	} else {
+		fmt.Fprintf(&b, "# ticket_pattern = %s\n", tomlString(config.DefaultTicketPattern))
+		fmt.Fprintf(&b, "# ticket_pattern = \"\"\n\n")
+	}
 
 	fmt.Fprintf(&b, "# The tmux session holding this repository's windows, so that they stay\n")
-	fmt.Fprintf(&b, "# separate from every other repository's. Defaults to %q.\n", name)
-	fmt.Fprintf(&b, "# tmux_session = %s\n", tomlString(name))
+	fmt.Fprintf(&b, "# separate from every other repository's. Defaults to %q.\n", s.name)
+	writeSetting(&b, "tmux_session", 0, s.tmuxSession, s.name)
 
 	return b.String()
+}
+
+// commandKeyWidth lines the two command keys up with each other where both are
+// shown as commented defaults, which is every config setup writes itself.
+const commandKeyWidth = len("resume_command")
+
+// writeSetting writes one key: as a live line when the config set it, and as the
+// commented default otherwise.
+//
+// Only the commented form is padded. Aligning the live one too would put a run
+// of spaces before the "=" of a value somebody actually set, to line it up with
+// a comment — and a file where every key is set would be padded to a width
+// nothing in it needs.
+func writeSetting(b *strings.Builder, key string, width int, value, fallback string) {
+	if value == "" {
+		fmt.Fprintf(b, "# %-*s = %s\n", width, key, tomlString(fallback))
+		return
+	}
+	fmt.Fprintf(b, "%s = %s\n", key, tomlString(value))
 }
 
 // writePrefixesHint mentions the list form in a config that got a single prefix,

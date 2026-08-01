@@ -543,6 +543,49 @@ func HasBindings() (bool, error) {
 	return strings.Contains(out, "treewright"), nil
 }
 
+// ServerOption reads a global user option — a name beginning with "@" — off the
+// running server, or "" when nothing has set it.
+//
+// It takes the name rather than declaring one, because the options treewright
+// asks about here are set by text treewright prints for a server to source:
+// internal/tmuxinit owns the line, so it owns the spelling, and this is only the
+// reader. tmux answers an unset user option with an error rather than an empty
+// value, which is the same "nobody set it" this returns "" for.
+//
+// Only ask once a server is known to be running: like list-keys, show-options
+// starts one otherwise, and a question about what a server holds would bring the
+// emptiness it then reports into existence.
+func ServerOption(name string) string {
+	value, err := run("show-options", "-gv", name)
+	if err != nil {
+		return ""
+	}
+	return value
+}
+
+// BoundKeys reports which prefix keys currently run treewright's two popups, as
+// the server holds them, with "" for either that nothing is bound to.
+//
+// It exists so that reloading the integration can put the bindings back on the
+// keys they are on rather than on the defaults. A user who moved them with
+// --resume-key did so in their tmux.conf, and a reload that silently bound T and
+// N as well would hand back the keys they deliberately gave up — including,
+// where those keys are now something else of theirs, by taking them.
+//
+// The same caveat as ServerOption: ask only once a server is up, since list-keys
+// starts one.
+func BoundKeys() (resume, create string) {
+	out, err := run("list-keys", "-T", "prefix")
+	if err != nil {
+		return "", ""
+	}
+	// The same match popup.go uses to name a key in a hint. " new " and " resume"
+	// each appear in one binding's command and in neither's surroundings: the
+	// prompt in the new binding spells "new worktree:" against a quote rather
+	// than a space.
+	return parseBoundKey(out, "treewright", " resume"), parseBoundKey(out, "treewright", " new ")
+}
+
 // Prefix is the key that introduces a tmux binding, as tmux spells it — "C-b"
 // by default, whatever the user chose otherwise. Empty outside tmux.
 func Prefix() string {

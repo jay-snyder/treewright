@@ -206,6 +206,39 @@ a stale install is `doctor`, which compares the installed files with the ones
 `agent-init` would write today: a byte comparison, with no false positives, and
 the check the pasted fragment made impossible.
 
+### The copy in a worktree, and why it needed a command of its own
+
+The plugin is treewright's to rewrite, and for a long time only one of its copies
+was actually rewritten. `agent-init` writes to the main checkout — run from
+inside a worktree it resolves the config and writes to the main checkout too, not
+to where you are standing — and the copy in a worktree is made once, by the
+carry, at `new` time. Nothing looked at it again: `doctor` inspected the main
+checkout and the user-level directory and enumerated no worktrees at all.
+
+So a worktree created the day before an upgrade ran its agent against the old
+hooks and the old skill for as long as the worktree lived, no command fixed it,
+and the report said `ok`. That is the frozen snapshot this whole design exists to
+abolish — "a copy of treewright's wiring in a file treewright would never read
+again" — reintroduced one directory below the file that abolished it. Rename a
+signal verb and every pre-upgrade worktree errors on every agent transition,
+invisibly.
+
+Two things close it. `doctor` walks the repository's worktrees and byte-compares
+each carried copy the way it already did for the main checkout, reporting at most
+two findings — the copies that are out of date, and the worktrees that never got
+one — each carrying its worktrees as a list rather than a finding apiece. And
+`refresh` rewrites every copy at once, which is the command those findings name.
+A missing copy is only worth reporting where the config carries the plugin: a
+worktree with nothing in it and no carry configured is the "reaches no worktree"
+finding already said once about the repository, and saying it again per worktree
+would turn one misconfiguration into a column of them.
+
+The carry itself stays a one-time copy, deliberately. Making `new` the moment the
+plugin is checked would put a byte comparison of every plugin file in the path of
+the command whose whole job is to be fast, to catch a staleness that only arises
+between releases. The check belongs where the question is asked — see "Upgrading
+treewright itself" in [`design-notes.md`](design-notes.md).
+
 ### Where the wiring goes, and the trap between the placements
 
 Per-repo is the default, and it is the main checkout's
@@ -270,8 +303,9 @@ gets — and one commented line to remove when it guessed wrong.
 
 **What `doctor` asks about the wiring**, in order: is the plugin installed, in
 the checkout or at user level; is what is installed what this treewright would
-write; does the per-repo copy reach the worktrees; does git either ignore it or
-track it; and is there a hooks paste left in a settings file. The paste is the
+write; does the per-repo copy reach the worktrees; is each worktree's own copy
+what this treewright would write; does git either ignore it or track it; and is
+there a hooks paste left in a settings file. The paste is the
 upgrade path — one an older treewright printed still works, because Claude Code
 runs hooks from every scope it loads, so it is reported as wiring nothing can
 update when it is all there is, and as a duplicate to delete once the plugin is

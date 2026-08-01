@@ -12,7 +12,9 @@ import (
 	"github.com/jay-snyder/treewright/internal/agentinit"
 	"github.com/jay-snyder/treewright/internal/config"
 	"github.com/jay-snyder/treewright/internal/git"
+	"github.com/jay-snyder/treewright/internal/shellinit"
 	"github.com/jay-snyder/treewright/internal/tmux"
+	"github.com/jay-snyder/treewright/internal/tmuxinit"
 	"github.com/jay-snyder/treewright/internal/ui"
 )
 
@@ -175,6 +177,7 @@ func cmdDoctor(env *Env, args []string) error {
 	checkTmux(&r)
 	checkTmuxIntegration(&r)
 	checkShellIntegration(env, &r)
+	checkRelease(env, &r)
 	names := checkRegistry(env, &r)
 	checkCurrentRepo(&r)
 	// A section per config, each holding everything about that repository —
@@ -184,7 +187,7 @@ func cmdDoctor(env *Env, args []string) error {
 	sessions := make(map[string][]string)
 	for _, name := range names {
 		r.in(name)
-		checkConfig(&r, name)
+		checkConfig(env, &r, name)
 		checkSession(&r, name, sessions)
 	}
 	r.in(installGroup)
@@ -251,8 +254,19 @@ func checkTmuxIntegration(r *report) {
 	case err != nil:
 		// The server stopped between the two questions. Nothing worth saying.
 		return
-	case bound:
+	case bound && tmux.ServerOption(tmuxinit.VersionOption) == tmuxinit.Version():
 		r.addf(levelOK, "tmux integration", "loaded")
+	case bound:
+		// A binding mentioning treewright and a binding this treewright wrote are
+		// not the same fact, which is what "loaded" used to conflate. A tmux
+		// server routinely outlives an upgrade by weeks — the keys keep working
+		// the whole time, and whatever the upgrade changed about the snippet is
+		// not in there. The stamp is what tells the two apart; an unstamped server
+		// is one loaded by a treewright from before there was one, which is the
+		// same answer.
+		r.addf(levelWarn, "tmux integration", "loaded, but not by this treewright\n"+
+			"the keys work — what the upgrade changed about them is not in the server\n"+
+			"reload it:  treewright refresh")
 	default:
 		// Three lines because there are three things here: what is wrong, what it
 		// costs, and the line that fixes it. The line to paste goes last, where a
@@ -307,9 +321,31 @@ func checkSharedSessions(r *report, owners map[string][]string) {
 // eval file it sets. Nothing else can tell: the binary cannot see its parent's
 // function table, so the presence of the variable the wrapper exports is the only
 // evidence available.
+//
+// Which is also why the shim now exports a second variable. "A wrapper is
+// loaded" was the whole of what could be asked, and it says nothing about which
+// treewright emitted the one in this shell — a terminal open since two releases
+// ago answers it exactly as one opened a minute ago does. The fingerprint the
+// shim carries is what separates them, and any of the three shells' fingerprints
+// counts: what is wanted is "one of mine", not "the one for $SHELL", which is
+// the login shell rather than the running one and so answers a different
+// question.
 func checkShellIntegration(env *Env, r *report) {
 	if env.EvalFile != "" {
-		r.addf(levelOK, "shell integration", "loaded")
+		loaded := os.Getenv(shellinit.VersionVar)
+		switch {
+		case shellinit.Current(loaded):
+			r.addf(levelOK, "shell integration", "loaded")
+		default:
+			// An empty variable and a stale one are one finding: both mean the
+			// function in this shell came from a binary that is no longer the one
+			// running, and the fix — a shell that evaluates the line again — is the
+			// same. treewright cannot do it from here, a process having no way to
+			// define a function in its parent.
+			r.addf(levelWarn, "shell integration", "loaded, but not by this treewright\n"+
+				"the wrapper in this shell is the one it started with\n"+
+				"open a new terminal, or re-run the line in your startup file")
+		}
 		return
 	}
 	// The same three lines the tmux check uses, and in the same order: what is
@@ -324,6 +360,32 @@ func checkShellIntegration(env *Env, r *report) {
 		r.addf(levelWarn, "shell integration", notLoaded+"add to your config:  treewright shell-init fish | source")
 	default:
 		r.addf(levelWarn, "shell integration", notLoaded+"see \"%s help shell-init\" for the line your shell wants", env.Argv0)
+	}
+}
+
+// checkRelease says whether a newer treewright has been published.
+//
+// The one check here that leaves the machine, and it happens because somebody
+// ran doctor: an upgrade check on `new` or `ls` would be a network call in the
+// middle of a command with no reason to make one. See internal/cli/release.go
+// for why there is no cache and no background check either.
+//
+// Two of the four outcomes produce no finding at all. Being unable to reach the
+// API is not a fault of the installation — an offline laptop must not come back
+// from doctor with a warning about the network it is not on — and it is bounded
+// by a short timeout, since doctor is what a person runs when something is
+// already wrong. A build with no release version reports that rather than
+// guessing: "dev" is not older than anything.
+func checkRelease(env *Env, r *report) {
+	switch state, latest := checkForNewerRelease(env.Version); state {
+	case releaseBehind:
+		r.addf(levelWarn, "release", "treewright %s is out, and this is %s\n%s",
+			latest, env.Version, releaseUpgradeAdvice())
+	case releaseCurrent:
+		r.addf(levelOK, "release", "%s, the latest", latest)
+	case releaseIncomparable:
+		r.addf(levelOK, "release", "%s is not a released version, so nothing was compared", env.Version)
+	case releaseUnreachable:
 	}
 }
 
@@ -360,12 +422,13 @@ func checkRegistry(env *Env, r *report) []string {
 	return names
 }
 
-func checkConfig(r *report, name string) {
+func checkConfig(env *Env, r *report, name string) {
 	cfg, err := config.Load(filepath.Join(config.Dir(), name+".toml"))
 	if err != nil {
 		r.addf(levelFail, "config", "%v", err)
 		return
 	}
+	checkConfigVersion(env, r, cfg)
 
 	repo := git.Repo{Dir: cfg.MainDir}
 	if _, err := os.Stat(cfg.MainDir); err != nil {
@@ -429,7 +492,42 @@ func checkConfig(r *report, name string) {
 		}
 	}
 
-	checkAgentWiring(r, cfg)
+	checkAgentWiring(env, r, cfg)
+}
+
+// checkConfigVersion reports a config file written for a different revision of
+// the generator than this treewright's.
+//
+// It is a warning and never a failure, in both directions. An old config works —
+// every key it holds still means what it meant, which is the point of a format
+// that has never renamed one — and what it is missing is the keys added since,
+// the commentary rewritten since, and any default the generator now spells out.
+// A config from a *newer* treewright works too, right up until it uses a setting
+// this one has never heard of, at which point Load refuses it with the
+// unknown-key error that now mentions version skew.
+//
+// Nothing is said when the versions agree, unlike the checks around it. A report
+// is read for what is wrong with it, and "your config is the current one" is a
+// line every healthy repository would carry forever to say nothing.
+func checkConfigVersion(env *Env, r *report, cfg *config.Config) {
+	regenerate := fmt.Sprintf("regenerate it:  %s setup --refresh %s", env.Argv0, cfg.Name)
+	switch {
+	case cfg.Version > config.FormatVersion:
+		r.addf(levelWarn, "config version", "%d, from a newer treewright than this one\n"+
+			"a setting it added would read here as a typo\n%s",
+			cfg.Version, releaseUpgradeAdvice())
+	case !cfg.Explicit("version"):
+		// Every config in the wild predates the key, so this is the finding most
+		// people see first and it has to be worth the line: what it costs is real,
+		// and it is one command to answer.
+		r.addf(levelWarn, "config version", "not recorded, so this file predates version %d\n"+
+			"it is missing whatever setup has learned to write since\n%s",
+			config.FormatVersion, regenerate)
+	case cfg.Version < config.FormatVersion:
+		r.addf(levelWarn, "config version", "%d, where this treewright writes %d\n"+
+			"it is missing whatever setup has learned to write since\n%s",
+			cfg.Version, config.FormatVersion, regenerate)
+	}
 }
 
 // pluginState is how much of a module's plugin is present at a directory.
@@ -461,7 +559,7 @@ const (
 // like a current one. The plugin is treewright's own to write, so the question
 // becomes whether the files are what agent-init would write today, which is a
 // byte comparison and admits no false positives.
-func checkAgentWiring(r *report, cfg *config.Config) {
+func checkAgentWiring(env *Env, r *report, cfg *config.Config) {
 	module, ok := agentModuleFor(cfg)
 	if !ok || len(module.Plugin) == 0 {
 		return
@@ -499,6 +597,7 @@ func checkAgentWiring(r *report, cfg *config.Config) {
 	// under the user's home directory, where no repository has an opinion.
 	if project != pluginAbsent {
 		checkPluginIsIgnored(r, cfg, module)
+		checkWorktreePlugins(env, r, cfg, module)
 	}
 
 	// Said as well as, not instead of, whatever the plugin's own state was: the
@@ -545,6 +644,71 @@ func checkPluginIsIgnored(r *report, cfg *config.Config, module agentinit.Agent)
 		"it reads as untracked here and in every worktree treewright makes\n"+
 		"commit it to hand the wiring to everyone who clones\n"+
 		"or add to .gitignore:  %s/", dir, dir)
+}
+
+// checkWorktreePlugins compares each worktree's copy of the plugin with the one
+// this treewright would write.
+//
+// This is the gap the carry left. A worktree receives the plugin once, when
+// `new` copies it in, and until now nothing ever looked at it again: doctor
+// inspected the main checkout and the user-level directory and enumerated no
+// worktrees at all, `agent-init` run from inside a worktree resolved the config
+// and wrote to the *main* checkout, and so a worktree made the day before an
+// upgrade ran its agent against the old hooks and the old skill for the rest of
+// its life while the report stayed green. Rename a signal verb and every
+// pre-upgrade worktree errors on every agent transition, invisibly.
+//
+// That is the same frozen-copy problem the plugin exists to abolish — a snapshot
+// in a file treewright would never read again — reintroduced one directory
+// further down, which is why it is checked here rather than left to be noticed.
+//
+// Two findings at most, and each carries its worktrees as a list rather than a
+// finding apiece: a repository with six worktrees would otherwise turn one
+// upgrade into eighteen lines of report, all of them the same sentence, and a
+// report nobody reads to the end of catches nothing.
+func checkWorktreePlugins(env *Env, r *report, cfg *config.Config, module agentinit.Agent) {
+	managed, err := repoFor(cfg).Managed()
+	if err != nil || len(managed) == 0 {
+		// A repository with no worktrees is the ordinary state of a new one, and a
+		// git call that failed here has already been reported by main_dir.
+		return
+	}
+
+	var stale, missing []string
+	for _, wt := range managed {
+		switch inspectPlugin(module, filepath.Join(wt.Dir, filepath.FromSlash(module.ProjectPlugin))) {
+		case pluginStale:
+			stale = append(stale, wt.Slug)
+		case pluginAbsent:
+			missing = append(missing, wt.Slug)
+		case pluginCurrent:
+		}
+	}
+
+	// The subject of both findings is the plugin rather than the worktrees,
+	// which is what keeps one sentence serving a repository with one worktree
+	// and a repository with six: "1 worktree carries" and "2 worktrees carry"
+	// would need the message to conjugate, and count() exists to stop messages
+	// doing that.
+	refresh := fmt.Sprintf("bring every checkout up to date:  %s refresh %s", env.Argv0, cfg.Name)
+	if len(stale) > 0 {
+		r.addf(levelWarn, "agent plugin", "out of date in %s%s\n"+
+			"an agent there runs whatever wiring its copy was made from\n%s",
+			count(len(stale), "worktree", "worktrees"), asLines(stale), refresh)
+	}
+	// Missing is only worth a finding where the config carries the plugin, since
+	// that is what makes an empty worktree wrong rather than merely unwired: it
+	// is a worktree older than the carry. Without one, "the plugin reaches no
+	// worktree" is already the finding above, said once about the repository
+	// instead of once per worktree.
+	if len(missing) > 0 && (cfg.Agent == module.Name || carriesPlugin(module, cfg)) {
+		r.addf(levelWarn, "agent plugin", "missing from %s%s\n"+
+			"an agent there reports nothing and knows nothing about treewright\n%s",
+			count(len(missing), "worktree", "worktrees"), asLines(missing), refresh)
+	}
+	if len(stale) == 0 && len(missing) == 0 {
+		r.addf(levelOK, "agent plugin", "current in %s", count(len(managed), "worktree", "worktrees"))
+	}
 }
 
 // inspectPlugin reads what is installed at dir and compares it with what

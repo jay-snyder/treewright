@@ -21,7 +21,9 @@
 package shellinit
 
 import (
+	"crypto/sha256"
 	_ "embed"
+	"encoding/hex"
 	"fmt"
 	"sort"
 	"strings"
@@ -37,13 +39,75 @@ func Shells() []string {
 	return names
 }
 
+// versionPlaceholder is where a script writes the fingerprint of itself. Filled
+// here rather than written into the file, for the obvious reason: a file cannot
+// hold a digest of its own bytes.
+const versionPlaceholder = "{{version}}"
+
 // Script returns the integration snippet for a shell.
 func Script(shell string) (string, error) {
 	s, ok := scripts[shell]
 	if !ok {
 		return "", fmt.Errorf("unsupported shell %q (supported: %s)", shell, strings.Join(Shells(), ", "))
 	}
-	return s, nil
+	return strings.ReplaceAll(s, versionPlaceholder, fingerprint(s)), nil
+}
+
+// VersionVar is the variable each shim exports, holding the fingerprint of the
+// shim itself.
+//
+// It exists because the shell integration is the one part of treewright that
+// cannot be asked about. A binding is a thing a tmux server holds and a plugin
+// is a file on disk, but a shell function lives in the user's own shell, and a
+// child process cannot read its parent's function table. Until now doctor
+// inferred "loaded" from TREEWRIGHT_EVAL_FILE being set — which says a wrapper
+// is there and nothing whatever about which binary emitted it, in a shell that
+// may have been open since two releases ago.
+//
+// So the shim carries its own version out to every child, and doctor compares.
+// The value is exported rather than merely set because doctor is a child
+// process; it is a fingerprint rather than a release number because a shim built
+// from an unstamped tree still has to be distinguishable from an older one.
+const VersionVar = "TREEWRIGHT_SHELL_INIT_VERSION"
+
+// Version is the fingerprint the shim for shell exports.
+func Version(shell string) (string, error) {
+	s, ok := scripts[shell]
+	if !ok {
+		return "", fmt.Errorf("unsupported shell %q (supported: %s)", shell, strings.Join(Shells(), ", "))
+	}
+	return fingerprint(s), nil
+}
+
+// Current reports whether v is the fingerprint of a shim this binary emits.
+//
+// Any shim, rather than a named shell's, so that nothing has to work out which
+// shell the caller's wrapper came from — a question the environment answers
+// badly, $SHELL being the login shell rather than the running one. A fingerprint
+// identifies its script on its own, so "is this one of mine" is the whole
+// question and it has an exact answer.
+func Current(v string) bool {
+	if v == "" {
+		return false
+	}
+	for _, s := range scripts {
+		if fingerprint(s) == v {
+			return true
+		}
+	}
+	return false
+}
+
+// fingerprint digests a script's checked-in bytes, placeholder and all, which is
+// what makes it stable: the value names the file rather than the rendering.
+//
+// Twelve hex characters, as internal/tmuxinit uses for the same purpose. The two
+// are deliberately not shared — four lines of digest in each beats a package
+// existing to hold four lines — but they answer the same question and so are
+// spelled the same way.
+func fingerprint(script string) string {
+	sum := sha256.Sum256([]byte(script))
+	return hex.EncodeToString(sum[:])[:12]
 }
 
 var scripts = map[string]string{

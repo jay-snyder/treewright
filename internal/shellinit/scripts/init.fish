@@ -1,4 +1,11 @@
 # treewright shell integration for fish. Load with: treewright shell-init fish | source
+
+# Which treewright emitted the wrapper below, for "treewright doctor" to compare
+# against itself. A shell keeps whatever it loaded at start, and a binary cannot
+# read its parent's function table, so this is the only way the two can be told
+# apart. Exported because doctor is a child process.
+set -gx TREEWRIGHT_SHELL_INIT_VERSION "{{version}}"
+
 function treewright
     set -l tmp /tmp
     if set -q TMPDIR
@@ -36,10 +43,12 @@ complete -c treewright -n __fish_use_subcommand -a doctor     -d 'check the inst
 complete -c treewright -n __fish_use_subcommand -a shell-init -d 'print the shell integration'
 complete -c treewright -n __fish_use_subcommand -a tmux-init  -d 'print the tmux integration'
 complete -c treewright -n __fish_use_subcommand -a agent-init -d 'install the plugin that wires an agent to treewright'
+complete -c treewright -n __fish_use_subcommand -a refresh    -d 'bring every checkout and the tmux server up to date with this treewright'
+complete -c treewright -n __fish_use_subcommand -a version    -d 'print the version, and with --check say whether a newer one is out'
 complete -c treewright -n '__fish_seen_subcommand_from new' -a '(command treewright __complete prefixes)' -d 'branch prefix'
 complete -c treewright -n '__fish_seen_subcommand_from rm' -a '(command treewright __complete slugs)'
 complete -c treewright -n '__fish_seen_subcommand_from resume cd' -a '(command treewright __complete targets)'
-complete -c treewright -n '__fish_seen_subcommand_from ls prune base config attach' -a '(command treewright __complete repos)'
+complete -c treewright -n '__fish_seen_subcommand_from ls prune base config attach refresh' -a '(command treewright __complete repos)'
 complete -c treewright -n '__fish_seen_subcommand_from shell-init' -a '(command treewright __complete shells)'
 complete -c treewright -n '__fish_seen_subcommand_from signal' -a '(command treewright __complete states)'
 complete -c treewright -n '__fish_seen_subcommand_from agent-init' -a '(command treewright __complete agents)'
@@ -48,6 +57,8 @@ complete -c treewright -n '__fish_seen_subcommand_from rm' -s y -l yes -d 'do no
 complete -c treewright -n '__fish_seen_subcommand_from prune' -s y -l yes -d 'actually remove them, instead of listing'
 complete -c treewright -n '__fish_seen_subcommand_from ls' -l json -d 'print machine-readable output'
 complete -c treewright -n '__fish_seen_subcommand_from setup' -s n -l dry-run -d 'print the config instead of writing it'
+complete -c treewright -n '__fish_seen_subcommand_from setup' -l refresh -d 'regenerate an existing config in place'
+complete -c treewright -n '__fish_seen_subcommand_from version' -l check -d 'say whether a newer treewright has been released'
 complete -c treewright -n '__fish_seen_subcommand_from tmux-init' -l apply -d 'load it into the running tmux server'
 complete -c treewright -n '__fish_seen_subcommand_from tmux-init' -l resume-key -r -d 'prefix key that switches worktrees'
 complete -c treewright -n '__fish_seen_subcommand_from tmux-init' -l new-key -r -d 'prefix key that starts a worktree'

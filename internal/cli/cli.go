@@ -359,7 +359,7 @@ something running in them.`,
 		},
 		{
 			name:    "setup",
-			args:    "[-n] [name]",
+			args:    "[-n] [--refresh] [name]",
 			summary: "write a config for the repository you are standing in",
 			long: `Registers the current repository by writing a config file for it,
 filling in what can be detected: the main checkout, the base branch from
@@ -371,9 +371,17 @@ record, not this command, and it says which values were read off the repository
 and which were guessed. It refuses to overwrite an existing config.
 
 The name defaults to the repository's directory name, and is what you pass to
-commands that take a [repo].`,
+commands that take a [repo].
+
+--refresh regenerates a config that already exists, in place. Nothing is
+detected again: every setting the file holds is written back as it stands, and
+what changes is the version stamp, the commentary, and any key the generator has
+learned to write since. That is how a repository registered two releases ago
+gets the file treewright writes today. With no name it refreshes the config in
+force where you are standing; with -n it prints the result instead.`,
 			flags: []flagDoc{
 				{"-n, --dry-run", "print the config instead of writing it"},
+				{"--refresh", "regenerate an existing config in place, keeping its settings"},
 			},
 			run: cmdSetup,
 		},
@@ -488,6 +496,52 @@ they run. It is also the one form that needs no repository.`,
 				{"--print", "print the plugin's files instead of installing them"},
 			},
 			run: cmdAgentInit,
+		},
+		{
+			name:    "refresh",
+			args:    argRepo,
+			summary: "bring every checkout and the tmux server up to date with this treewright",
+			long: `The command to run after upgrading treewright. It reinstalls the
+agent plugin in the main checkout and in every worktree, and reloads the tmux
+key bindings into the running server, reporting what moved in each place.
+
+The worktrees are the reason it exists. A worktree gets its copy of the plugin
+once, when it is created, and nothing looked at it again — so a worktree made
+before an upgrade ran its agent against the old hooks and the old skill for as
+long as it lived. This is what replaces them.
+
+It refreshes what is installed and installs nothing new. A repository with no
+plugin in it is left alone, with "treewright agent-init" named; the tmux
+bindings are reloaded only if the server already holds some, on the keys they
+are already on, so keys moved with --resume-key stay where you put them.
+
+The one thing it cannot reach is your shell: a wrapper function lives in the
+shell that loaded it, and no process can replace its parent's. Where the loaded
+one is out of date it says so, and opening a new terminal is the fix.
+
+"treewright doctor" is what says whether any of this is needed.`,
+			run: cmdRefresh,
+		},
+		{
+			name:    "version",
+			args:    "[--check]",
+			summary: "print the version, and with --check say whether a newer one is out",
+			long: `Prints the version this binary reports. A release build is stamped
+with its tag; a build from source reports what the go command recorded, which is
+a tag with "+dirty" on it, a pseudo-version, or "dev" for a tree the toolchain
+knows no version for.
+
+--check asks GitHub for the newest published release and says whether this is
+it, naming the upgrade command for the way treewright was installed. It is the
+only thing here that touches the network, it happens only when asked, and it is
+skipped in silence when there is nothing to compare or nowhere to ask — an
+offline laptop gets no complaint, and neither does a build with no version to
+compare. The result goes to stderr, so the version on stdout stays the one line
+it has always been.`,
+			flags: []flagDoc{
+				{"--check", "ask whether a newer treewright has been released"},
+			},
+			run: cmdVersion,
 		},
 		{
 			name:    "__complete",
@@ -609,9 +663,11 @@ func Run(env Env) error {
 		}
 		writeOverview(env.Stdout, env.Argv0)
 		return nil
-	case "-v", "--version", "version":
-		fmt.Fprintf(env.Stdout, "treewright %s\n", env.Version)
-		return nil
+	case "-v", "--version":
+		// The flag spellings stay here, where every program's do; the word is a
+		// command in the table like any other, because it grew a flag of its own
+		// and a flag needs somewhere to be documented, parsed and completed.
+		return cmdVersion(&env, nil)
 	}
 
 	cmd := lookup(name)
