@@ -597,16 +597,42 @@ func TestWindowName(t *testing.T) {
 		want     string
 	}{
 		{"ticket key", DefaultTicketPattern, "proj-142-fix", "", "PROJ-142"},
-		{"long slug truncates", DefaultTicketPattern, "refactor-payments", "", "REFACTOR-P..."},
+		{"ticket key alone", DefaultTicketPattern, "bug-7", "", "BUG-7"},
 		{"short slug as-is", DefaultTicketPattern, "hotfix", "", "HOTFIX"},
 		{"override wins", DefaultTicketPattern, "proj-1", "billing", "BILLING"},
-		{"exactly ten chars is not truncated", DefaultTicketPattern, "abcdefghij", "", "ABCDEFGHIJ"},
+		{"exactly the cap is not shortened", DefaultTicketPattern, "abcdefghij", "", "ABCDEFGHIJ"},
 		// The default pattern accepts any issue-key scheme, which means any
-		// letters-dash-digits prefix reads as a ticket. A repo that wants
-		// stricter matching pins its own pattern, as below.
+		// whole letters-dash-digits word reads as a ticket. A repo that wants
+		// stricter matching pins its own pattern, and one that tracks no tickets
+		// at all turns the pattern off — both below.
 		{"generalized default matches any key", DefaultTicketPattern, "fix-2-bugs", "", "FIX-2"},
 		{"pinned pattern ignores other keys", `(?i)^(proj-[0-9]+)`, "fix-2-bugs", "", "FIX-2-BUGS"},
 		{"pinned pattern matches its own", `(?i)^(proj-[0-9]+)`, "proj-142-fix", "", "PROJ-142"},
+
+		// A digit run that does not end the word is part of a description, not a
+		// key: "fix-2fa-login" is work on two-factor login, and naming its window
+		// FIX-2 named nothing. It is shortened like any other description.
+		{"digits mid-word are not a key", DefaultTicketPattern, "fix-2fa-login", "", "FIX-2FA-LO…"},
+
+		// Work with no ticket behind it: the slug is the whole name, and the same
+		// cap applies to it, because the status line is the same width either way.
+		{"no pattern leaves the slug alone", "", "proj-1-fix", "", "PROJ-1-FIX"},
+		{"long slug is cut at the cap", "", "flaky-payment-test", "", "FLAKY-PAYM…"},
+
+		// A cut landing just after a hyphen would leave one against the mark,
+		// where it reads as punctuation rather than as part of the name.
+		{"no hyphen is left against the mark", "", "dark-mode-toggle", "", "DARK-MODE…"},
+
+		// One over the cap is where the guard against shortening to the same width
+		// bites: ten runes and a mark is eleven columns, which is what it started
+		// at.
+		{"shortening never lengthens", "", "rewrite-css", "", "REWRITE-CSS"},
+		{"one over the cap is left whole", "", "abcdefghijk", "", "ABCDEFGHIJK"},
+
+		// Counted in runes, not bytes. refname forbids control characters and
+		// git's metacharacters, not the rest of Unicode, so a byte-wise cut here
+		// would both misjudge the width and split the "é" in half.
+		{"multi-byte slug is cut by rune", "", "café-refactor-plan", "", "CAFÉ-REFAC…"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -615,6 +641,47 @@ func TestWindowName(t *testing.T) {
 				t.Errorf("WindowName(%q, %q) = %q, want %q", tc.slug, tc.override, got, tc.want)
 			}
 		})
+	}
+}
+
+// An empty ticket_pattern has to survive Load, which is where every other empty
+// string in the file is replaced by a default. It is how a repository that
+// tracks no tickets says so, and defaulting it would leave that repository with
+// no way to turn ticket matching off at all.
+func TestLoadKeepsAnEmptyTicketPatternEmpty(t *testing.T) {
+	dir := registry(t, map[string]string{
+		"off":    "main_dir = '/tmp/repo'\nticket_pattern = ''\n",
+		"unset":  "main_dir = '/tmp/repo'\n",
+		"pinned": "main_dir = '/tmp/repo'\nticket_pattern = '(?i)^(proj-[0-9]+)'\n",
+	})
+
+	off, err := Load(filepath.Join(dir, "off.toml"))
+	if err != nil {
+		t.Fatalf("load off: %v", err)
+	}
+	if off.TicketPattern != "" {
+		t.Errorf("ticket_pattern = '' loaded as %q, want it left empty", off.TicketPattern)
+	}
+	// A slug the default pattern would have read as key PROJ-1, kept short enough
+	// that the cap is not what this test ends up measuring.
+	if got, want := off.WindowName("proj-1-fix", ""), "PROJ-1-FIX"; got != want {
+		t.Errorf("WindowName with matching off = %q, want %q", got, want)
+	}
+
+	unset, err := Load(filepath.Join(dir, "unset.toml"))
+	if err != nil {
+		t.Fatalf("load unset: %v", err)
+	}
+	if unset.TicketPattern != DefaultTicketPattern {
+		t.Errorf("unset ticket_pattern = %q, want the default", unset.TicketPattern)
+	}
+
+	pinned, err := Load(filepath.Join(dir, "pinned.toml"))
+	if err != nil {
+		t.Fatalf("load pinned: %v", err)
+	}
+	if pinned.TicketPattern != `(?i)^(proj-[0-9]+)` {
+		t.Errorf("pinned ticket_pattern = %q, want what the file set", pinned.TicketPattern)
 	}
 }
 

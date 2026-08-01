@@ -80,7 +80,7 @@ treewright gives each piece of work its own git worktree, tmux window, and
 agent session, created and torn down together. In a repository it manages,
 reach for it before ` + "`git worktree`, `git branch`, or `git checkout -b`" + `:
 it also copies gitignored env files into the new checkout, runs the configured
-install step, names the tmux window after the ticket, and guards teardown.
+install step, names the tmux window after the work, and guards teardown.
 
 Run it as ` + "`treewright`" + `. The short ` + "`tw`" + ` is a shell function
 from the interactive shell's startup file, and may not exist in the shell

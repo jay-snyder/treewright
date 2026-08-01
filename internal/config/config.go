@@ -41,8 +41,19 @@ const (
 
 	// DefaultTicketPattern recognizes a leading issue key such as "proj-142" or
 	// "bug-7" in a slug, so the tmux window can be named after the ticket rather
-	// than after a truncated slug. Submatch 1 becomes the window name.
-	DefaultTicketPattern = `(?i)^([a-z]+-[0-9]+)`
+	// than after a shortened slug. Submatch 1 becomes the window name.
+	//
+	// The key has to be a whole word — the trailing (?:-|$) — because without it
+	// the digits ended wherever they liked and ordinary English slugs came back
+	// as ticket keys: "fix-2fa-login" opened a window called FIX-2. A repository
+	// that does track work by ticket loses nothing to the anchor, since a key is
+	// followed by the description or by the end of the slug either way.
+	//
+	// It is still a guess, and "refactor-2-pass-parser" is a key by any pattern
+	// that does not know the scheme. Two ways out, both in the config: pin the
+	// pattern to your own scheme, or — for work that has no ticket behind it at
+	// all — set ticket_pattern = "" and let the slug name the window.
+	DefaultTicketPattern = `(?i)^([a-z]+-[0-9]+)(?:-|$)`
 )
 
 // Config is one repository's settings.
@@ -297,7 +308,11 @@ func Load(path string) (*Config, error) {
 	if c.ResumeCommand == "" {
 		c.ResumeCommand = DefaultResumeCommand
 	}
-	if c.TicketPattern == "" {
+	// Read through explicit rather than off the value, because here an empty
+	// string is a decision and not an omission: a repository whose work is not
+	// tracked by ticket writes ticket_pattern = "" and gets windows named after
+	// the slug. Only a file that never mentions the key takes the default.
+	if !c.Explicit("ticket_pattern") {
 		c.TicketPattern = DefaultTicketPattern
 	}
 	if _, err := regexp.Compile(c.TicketPattern); err != nil {
@@ -464,23 +479,78 @@ func (c *Config) AgentCarries() []string {
 //
 // Precedence: an explicit override wins; else a ticket key matched by
 // TicketPattern (so "proj-142-white-screen" becomes "PROJ-142"); else the slug,
-// truncated with an ellipsis past 10 characters to keep the tmux status line
-// readable.
+// shortened by shorten to keep the tmux status line readable.
+//
+// An empty TicketPattern is the opt-out, and reaches here only from a config
+// that wrote ticket_pattern = "" itself: no ticket scheme in this repository, so
+// nothing is looked for and the slug always names the window.
 func (c *Config) WindowName(slug, override string) string {
 	if override != "" {
 		return strings.ToUpper(override)
 	}
-	// Compiled here rather than cached because this runs at most once per
-	// command; Load has already proven the pattern compiles.
-	if re, err := regexp.Compile(c.TicketPattern); err == nil {
-		if m := re.FindStringSubmatch(slug); len(m) > 1 && m[1] != "" {
-			return strings.ToUpper(m[1])
+	if c.TicketPattern != "" {
+		// Compiled here rather than cached because this runs at most once per
+		// command; Load has already proven the pattern compiles.
+		if re, err := regexp.Compile(c.TicketPattern); err == nil {
+			if m := re.FindStringSubmatch(slug); len(m) > 1 && m[1] != "" {
+				return strings.ToUpper(m[1])
+			}
 		}
 	}
-	if len(slug) > 10 {
-		return strings.ToUpper(slug[:10]) + "..."
+	return strings.ToUpper(shorten(slug))
+}
+
+// maxWindowName caps a window named after its slug, in columns of the tmux
+// status line those names share.
+//
+// Ten is a ticket key's width, and a slug-named window is held to the same one on
+// purpose: the status line is the same width whichever a repository uses, and a
+// name that fits is worth more than a name that is whole. A description is cut
+// mid-word by that, which is a real cost and the deliberate one.
+//
+// Cutting at a word boundary instead was the alternative, and it loses at this
+// width. It has to give back a whole word to find the boundary, so
+// "flaky-payment-test" arrives as FLAKY… rather than FLAKY-PAYM…, and — because
+// cutting further escapes the guard below — "rewrite-css" arrives as REWRITE…
+// where the blunt cut hands it back whole. It only pays at a cap wide enough that
+// the nearest boundary is usually near it.
+const maxWindowName = 10
+
+// ellipsis marks a name something was dropped from. The character rather than
+// three periods, because it is one column where "..." is three and the whole
+// point of shortening is columns in a status line — and because ui.Table already
+// measures in runes, so the table it lands in stays aligned either way.
+const ellipsis = "…"
+
+// shorten trims a slug to maxWindowName columns plus the ellipsis.
+//
+// Counted in runes rather than bytes: the cap is a number of columns, and a slug
+// may hold anything git will take in a ref — refname forbids control characters
+// and git's own metacharacters, not the rest of Unicode. Cutting by byte would
+// both misjudge the width and split a multi-byte character down the middle.
+//
+// The result is used only when it is narrower than what it replaces, which is
+// what keeps an eleven-character slug whole: "rewrite-css" cut to ten and marked
+// is eleven columns again, one character spent to say a character is missing.
+func shorten(slug string) string {
+	r := []rune(slug)
+	if len(r) <= maxWindowName {
+		return slug
 	}
-	return strings.ToUpper(slug)
+	// A cut landing just after a hyphen would leave one against the ellipsis,
+	// where it reads as punctuation rather than as part of the name —
+	// "dark-mode-toggle" as DARK-MODE-… rather than DARK-MODE…. A slug may not
+	// begin with a hyphen, so this can never trim everything away.
+	kept := r[:maxWindowName]
+	for len(kept) > 0 && kept[len(kept)-1] == '-' {
+		kept = kept[:len(kept)-1]
+	}
+	// The ellipsis is one rune wide, which is the whole reason it is that
+	// character and not three periods.
+	if len(kept)+1 >= len(r) {
+		return slug
+	}
+	return string(kept) + ellipsis
 }
 
 // ---- path helpers ----------------------------------------------------------
