@@ -193,6 +193,20 @@ template without the placeholder is refused *before anything is created*.
 `openWindow` reports created-vs-found so callers can warn when a prompt landed
 on a window that was already open and its command never ran.
 
+**treewright writes its own registry and nothing else outside a repository.**
+The whole list is `<config dir>/<name>.toml`, `.git/treewright/post-create-*`
+inside the repo, and the worktrees. Everything else — the shell line, the tmux
+line, the agent's hooks, the skill, any `.gitignore` entry — is *printed for a
+person to place*, and `shell-init`/`tmux-init`/`agent-init` are three spellings
+of that one pattern. `tmux-init --apply` is not an exception: it sets bindings
+on a running server and writes no file.
+
+A new feature that wants to edit a dotfile, a settings file or a `.gitignore`
+must print instead. There is no uninstall script, so every file written outside
+a repository is one a developer has to hunt down by hand the day they stop using
+treewright — and a tool that cannot be cleanly abandoned is harder to adopt. See
+"What treewright is allowed to write" in `docs/design-notes.md`.
+
 **Anything that is a fact about a particular agent lives in `internal/agentinit`.**
 Core stays agent-agnostic: it provides protocols (`signal`, `command`, the
 carry), and a module provides the wiring. `agent = "claude"` is a defaults

@@ -746,6 +746,47 @@ Closing a session's last window ends the session, which moves an attached client
 elsewhere or detaches it, so the prompt says when that is what is about to
 happen. Normally it is not: the base window outlives every worktree.
 
+## What treewright is allowed to write
+
+Setup touches as few files outside a repository as it can, and never a file it
+does not own. Two reasons, and the second is the one that binds.
+
+It is somebody's machine. A tool that appends to shell startup files, tmux
+configuration and agent settings on the way in has made itself a fact about the
+whole system to solve a problem about one repository.
+
+And **there is no uninstall.** treewright ships a binary and nothing that undoes
+what it did, so every file it writes outside a repository is a file a developer
+has to find and reverse by hand on the day they stop using it — from memory,
+possibly months later, in a config they have edited fifty times since. The
+smaller that list, the more honestly the tool can be tried at all. A trial you
+cannot cleanly abandon is not a trial.
+
+What it writes, in full:
+
+| Path | Why it is unavoidable |
+|---|---|
+| `<config dir>/<name>.toml` | The registry *is* the configuration; there is no treewright without it. One directory, `rm -r` and it is gone. |
+| `<main_dir>/.git/treewright/post-create-*` | A background step's log and failure marker, inside the repository's own `.git`, which goes when the repository does. |
+| The worktrees themselves | What the tool is for, and `rm` takes each one back. |
+
+Everything else is *printed for a person to place*, which is why `shell-init`,
+`tmux-init` and `agent-init` are three spellings of one pattern. The line in
+your `.zshrc`, the line in your `.tmux.conf`, the hooks in a settings file, the
+skill in a checkout — treewright wrote none of them, so a developer removing
+them is undoing edits they made themselves rather than hunting for edits a
+program made while they were not looking. `agent-init` states it outright:
+*nothing is applied for you, deliberately.*
+
+`tmux-init --apply` looks like the exception and is not: it applies key bindings
+to a running tmux server, in memory, and writes nothing. The one line in
+`~/.tmux.conf` that invokes it is still yours to add.
+
+This is also why no `.gitignore` is generated. The per-project agent artifacts
+land in files a repository may or may not want tracked, and that judgment
+belongs to whoever owns the repository — a tool that edited `.gitignore` on the
+way past would be writing into the project's history to tidy up after itself.
+
 ## Configuration
 
 One TOML file per repository, in
