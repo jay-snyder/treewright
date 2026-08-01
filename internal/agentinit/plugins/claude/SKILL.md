@@ -62,6 +62,27 @@ else entirely, which is the opposite of what the tool is for. That agent starts
 with none of this conversation, so whatever it needs — the plan, the file to
 start from, what finished looks like — belongs in the prompt.
 
+The symptom is concrete, and it shows up long before the work is done:
+**editing files under a worktree path you just created means you have already
+got this wrong.** The path `new` prints is where that window's agent works, not
+a directory to go and work in yourself, so an Edit or a Write beneath it is the
+handoff not having happened. Notice it at the first one rather than at the end
+of the task.
+
+Recovering from it is not what it looks like. `resume --prompt` does not repair
+a worktree whose agent was never told what to do: the window `new` opened is
+still there with that idle agent in it, so it is switched to, with the prompt
+warned as undelivered, and the instructions still reach nobody. Remove the
+worktree and make it again with the prompt it should have carried:
+
+    treewright rm eng-142-null-user
+    treewright new eng-142-null-user --prompt "the instructions that should have gone in"
+
+While the worktree is clean and holds no commits that costs nothing, which is
+the state it is in whenever this is caught early. A refusal from rm is the guard
+under Clean up doing its job — there is work in there that exists nowhere else,
+and that is the person's to decide about rather than yours to force past.
+
 Without `--prompt` the window opens on an agent waiting to be told what to do,
 which is a legitimate thing to want: a worktree readied for a person, or for
 work whose instructions do not exist yet. It is a choice to make rather than the
@@ -127,9 +148,20 @@ prints `tmux kill-window -t @<id>` for each one rather than asking. That line
 is not homework to hand back: put the question to the person with
 AskUserQuestion, and run the command yourself if they say yes. Ask with the
 caveat treewright printed above it — a window that is the last in its session
-ends the session with it, and detaches whoever was attached. The window you
-are running in is the exception — `tmux display-message -p '#{window_id}'`
-names it — since closing that one ends this session mid-answer.
+ends the session with it, and detaches whoever was attached.
+
+**The window you are running in is asked about like every other one**, and it is
+the case the question exists for. An agent asked to tear down the worktree it is
+standing in meets that window every time, so exempting it is an exception that
+swallows the rule: nothing gets asked, and the person is handed back exactly the
+printed command the paragraph above refuses to hand back. `tmux display-message
+-p '#{window_id}'` tells you which id is your own.
+
+What being your own window changes is the ordering, not the question. Closing it
+ends this session, so a yes on it is honoured last — after the final message
+rather than instead of it. Report the teardown, say whatever is left to say, and
+then kill the window as the closing action of the turn: it is the final step of
+the cleanup you were asked for, and the session ending is what that step costs.
 
 ## Leave to the machinery
 
