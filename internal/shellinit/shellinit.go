@@ -21,6 +21,7 @@
 package shellinit
 
 import (
+	_ "embed"
 	"fmt"
 	"sort"
 	"strings"
@@ -67,180 +68,24 @@ var scripts = map[string]string{
 // table by a test, so a command added to treewright cannot silently go missing from
 // completion.
 
-const zshScript = `# treewright shell integration for zsh. Load with: eval "$(treewright shell-init zsh)"
-# Note: rc, not status — status is a special parameter in zsh and cannot be a local.
-treewright() {
-  local evalfile rc
-  evalfile="$(command mktemp "${TMPDIR:-/tmp}/treewright-eval.XXXXXX")" || return 1
-  # "command" skips this function and runs the real binary, and shields mktemp
-  # and rm from any alias of the same name.
-  TREEWRIGHT_EVAL_FILE="$evalfile" command treewright "$@"
-  rc=$?
-  [[ -s "$evalfile" ]] && source "$evalfile"
-  command rm -f "$evalfile"
-  return $rc
-}
+// Each script is checked in under scripts/ and embedded by name, so what a
+// contributor reads and what a shell parses are the same bytes — shell as
+// shell, in a file its own tooling understands, rather than 173 lines of it
+// quoted inside Go where nothing highlights or checks it.
+//
+// Named one //go:embed at a time, never a pattern that walks scripts/, for the
+// reason the agent plugin's files are: this text is eval'd into the user's
+// interactive shell at every start, so a file must ship because somebody wrote
+// its name here, not because it was sitting in a folder. The other direction is
+// TestEveryScriptIsDeclared, which fails on a file in scripts/ that no shell
+// claims — inert is its own kind of surprise.
+var (
+	//go:embed scripts/init.zsh
+	zshScript string
 
-_treewright() {
-  local -a cmds
-  cmds=(
-    'new:create a worktree and branch, and open a tmux window in it'
-    'resume:reopen a window on an existing worktree'
-    'cd:move your shell into a worktree'
-    'base:open a window on the main checkout'
-    'popup:run a treewright command in a tmux popup sized to its output'
-    'attach:attach this terminal to the repository tmux session'
-    'signal:record the state of the agent running in this worktree'
-    'ls:list worktrees with their status'
-    'rm:tear down a worktree and its branch'
-    'prune:remove every merged, clean worktree'
-    'setup:write a config for the repository you are standing in'
-    'config:print the settings in force, defaults included'
-    'doctor:check the installation and every registered config'
-    'shell-init:print the shell integration'
-    'tmux-init:print the tmux integration'
-    'agent-init:print the hooks that make an agent report its state'
-  )
-  if (( CURRENT == 2 )); then
-    _describe -t commands 'treewright command' cmds
-    return
-  fi
-  # A word being typed as a flag gets that command's flags, which treewright
-  # reports from the same table that renders its help.
-  if [[ "$words[CURRENT]" == -* ]]; then
-    compadd -- ${(f)"$(command treewright __complete flags "$words[2]" 2>/dev/null)"}
-    return
-  fi
-  case "$words[2]" in
-    new)                         compadd -S '' -- ${(f)"$(command treewright __complete prefixes 2>/dev/null)"} ;;
-    rm)                          compadd -- ${(f)"$(command treewright __complete slugs 2>/dev/null)"} ;;
-    resume|cd)                   compadd -- ${(f)"$(command treewright __complete targets 2>/dev/null)"} ;;
-    ls|prune|base|config|attach) compadd -- ${(f)"$(command treewright __complete repos 2>/dev/null)"} ;;
-    shell-init)                  compadd -- ${(f)"$(command treewright __complete shells 2>/dev/null)"} ;;
-    signal)                      compadd -- ${(f)"$(command treewright __complete states 2>/dev/null)"} ;;
-    agent-init)                  compadd -- ${(f)"$(command treewright __complete agents 2>/dev/null)"} ;;
-  esac
-}
-# tw calls the treewright *function*, resolved at call time, so the eval-file
-# protocol works identically under either name. That call runs the binary as
-# "command treewright", which erases the name the user typed from argv[0] — so
-# tw reports it in TREEWRIGHT_ARGV0 instead, and help and hints answer as "tw".
-tw() { local -x TREEWRIGHT_ARGV0=tw; treewright "$@" }
-(( $+functions[compdef] )) && compdef _treewright treewright tw
-`
+	//go:embed scripts/init.bash
+	bashScript string
 
-const bashScript = `# treewright shell integration for bash. Load with: eval "$(treewright shell-init bash)"
-treewright() {
-  local evalfile rc
-  evalfile="$(command mktemp "${TMPDIR:-/tmp}/treewright-eval.XXXXXX")" || return 1
-  # "command" skips this function and runs the real binary, and shields mktemp
-  # and rm from any alias of the same name.
-  TREEWRIGHT_EVAL_FILE="$evalfile" command treewright "$@"
-  rc=$?
-  [[ -s "$evalfile" ]] && source "$evalfile"
-  command rm -f "$evalfile"
-  return $rc
-}
-
-_treewright_completions() {
-  local cur="${COMP_WORDS[COMP_CWORD]}"
-  if [[ $COMP_CWORD -eq 1 ]]; then
-    COMPREPLY=($(compgen -W "new resume cd base attach popup signal ls rm prune setup config doctor shell-init tmux-init agent-init" -- "$cur"))
-    return
-  fi
-  if [[ "$cur" == -* ]]; then
-    COMPREPLY=($(compgen -W "$(command treewright __complete flags "${COMP_WORDS[1]}" 2>/dev/null)" -- "$cur"))
-    return
-  fi
-  local candidates=""
-  case "${COMP_WORDS[1]}" in
-    new)
-      candidates="$(command treewright __complete prefixes 2>/dev/null)"
-      # A branch prefix is half a word — the slug is typed straight onto it — so the
-      # space bash appends would have to be deleted again. compopt arrived in bash 4;
-      # under the 3.2 that macOS ships, the space simply stays.
-      type compopt >/dev/null 2>&1 && compopt -o nospace
-      ;;
-    rm)                          candidates="$(command treewright __complete slugs 2>/dev/null)" ;;
-    resume|cd)                   candidates="$(command treewright __complete targets 2>/dev/null)" ;;
-    ls|prune|base|config|attach) candidates="$(command treewright __complete repos 2>/dev/null)" ;;
-    shell-init)                  candidates="$(command treewright __complete shells 2>/dev/null)" ;;
-    signal)                      candidates="$(command treewright __complete states 2>/dev/null)" ;;
-    agent-init)                  candidates="$(command treewright __complete agents 2>/dev/null)" ;;
-  esac
-  COMPREPLY=($(compgen -W "$candidates" -- "$cur"))
-}
-# tw calls the treewright *function*, resolved at call time, so the eval-file
-# protocol works identically under either name. That call runs the binary as
-# "command treewright", which erases the name the user typed from argv[0] — so
-# tw reports it in TREEWRIGHT_ARGV0 instead, and help and hints answer as "tw".
-tw() { local -x TREEWRIGHT_ARGV0=tw; treewright "$@"; }
-complete -F _treewright_completions treewright tw
-`
-
-const fishScript = `# treewright shell integration for fish. Load with: treewright shell-init fish | source
-function treewright
-    set -l tmp /tmp
-    if set -q TMPDIR
-        set tmp $TMPDIR
-    end
-    set -l evalfile (command mktemp $tmp/treewright-eval.XXXXXX)
-    or return 1
-    # "command" skips this function and runs the real binary. fish resolves
-    # functions at call time rather than expanding aliases at definition time, so
-    # this is for consistency with the other shims rather than for safety.
-    set -lx TREEWRIGHT_EVAL_FILE $evalfile
-    command treewright $argv
-    set -l saved $status
-    if test -s $evalfile
-        source $evalfile
-    end
-    command rm -f $evalfile
-    return $saved
-end
-
-complete -c treewright -f
-complete -c treewright -n __fish_use_subcommand -a new        -d 'create a worktree and branch, and open a tmux window in it'
-complete -c treewright -n __fish_use_subcommand -a resume     -d 'reopen a window on an existing worktree'
-complete -c treewright -n __fish_use_subcommand -a cd         -d 'move your shell into a worktree'
-complete -c treewright -n __fish_use_subcommand -a base       -d 'open a window on the main checkout'
-complete -c treewright -n __fish_use_subcommand -a attach     -d 'attach this terminal to the repository tmux session'
-complete -c treewright -n __fish_use_subcommand -a popup      -d 'run a treewright command in a tmux popup sized to its output'
-complete -c treewright -n __fish_use_subcommand -a signal     -d 'record the state of the agent running in this worktree'
-complete -c treewright -n __fish_use_subcommand -a ls         -d 'list worktrees with their status'
-complete -c treewright -n __fish_use_subcommand -a rm         -d 'tear down a worktree and its branch'
-complete -c treewright -n __fish_use_subcommand -a prune      -d 'remove every merged, clean worktree'
-complete -c treewright -n __fish_use_subcommand -a setup      -d 'write a config for the repository you are standing in'
-complete -c treewright -n __fish_use_subcommand -a config     -d 'print the settings in force, defaults included'
-complete -c treewright -n __fish_use_subcommand -a doctor     -d 'check the installation and every registered config'
-complete -c treewright -n __fish_use_subcommand -a shell-init -d 'print the shell integration'
-complete -c treewright -n __fish_use_subcommand -a tmux-init  -d 'print the tmux integration'
-complete -c treewright -n __fish_use_subcommand -a agent-init -d 'print the hooks that make an agent report its state'
-complete -c treewright -n '__fish_seen_subcommand_from new' -a '(command treewright __complete prefixes)' -d 'branch prefix'
-complete -c treewright -n '__fish_seen_subcommand_from rm' -a '(command treewright __complete slugs)'
-complete -c treewright -n '__fish_seen_subcommand_from resume cd' -a '(command treewright __complete targets)'
-complete -c treewright -n '__fish_seen_subcommand_from ls prune base config attach' -a '(command treewright __complete repos)'
-complete -c treewright -n '__fish_seen_subcommand_from shell-init' -a '(command treewright __complete shells)'
-complete -c treewright -n '__fish_seen_subcommand_from signal' -a '(command treewright __complete states)'
-complete -c treewright -n '__fish_seen_subcommand_from agent-init' -a '(command treewright __complete agents)'
-complete -c treewright -n '__fish_seen_subcommand_from rm' -s f -l force -d 'remove even when unsaved work would be lost'
-complete -c treewright -n '__fish_seen_subcommand_from rm' -s y -l yes -d 'do not ask before closing the tmux window'
-complete -c treewright -n '__fish_seen_subcommand_from prune' -s y -l yes -d 'actually remove them, instead of listing'
-complete -c treewright -n '__fish_seen_subcommand_from ls' -l json -d 'print machine-readable output'
-complete -c treewright -n '__fish_seen_subcommand_from setup' -s n -l dry-run -d 'print the config instead of writing it'
-complete -c treewright -n '__fish_seen_subcommand_from tmux-init' -l apply -d 'load it into the running tmux server'
-complete -c treewright -n '__fish_seen_subcommand_from tmux-init' -l resume-key -r -d 'prefix key that switches worktrees'
-complete -c treewright -n '__fish_seen_subcommand_from tmux-init' -l new-key -r -d 'prefix key that starts a worktree'
-complete -c treewright -n '__fish_seen_subcommand_from new' -s p -l prompt -r -d 'text the agent starts working on'
-complete -c treewright -n '__fish_seen_subcommand_from resume' -s p -l prompt -r -d 'text for the resumed agent'
-complete -c treewright -n '__fish_seen_subcommand_from agent-init' -l skill -d 'print the skill that teaches the agent to drive treewright'
-
-# tw calls the treewright function, and --wraps inherits its completions. The
-# function runs the binary as "command treewright", which erases the name the
-# user typed from argv[0] — so tw reports it in TREEWRIGHT_ARGV0 instead, and
-# help and hints answer as "tw".
-function tw --wraps treewright
-    set -lx TREEWRIGHT_ARGV0 tw
-    treewright $argv
-end
-`
+	//go:embed scripts/init.fish
+	fishScript string
+)

@@ -285,9 +285,17 @@ func TestAgentKeyIsADefaultsBundle(t *testing.T) {
 			bare.Command, bare.ResumeCommand, DefaultCommand, DefaultResumeCommand)
 	}
 	// Every per-project artifact the module has, not just its settings: the
-	// skill placed in the main checkout and not carried would reach the MAIN
-	// window and no worktree, which is the trap the carry closes.
-	want := []string{".claude/settings.local.json", ".claude/skills/treewright/SKILL.md"}
+	// plugin placed in the main checkout and not carried would reach the MAIN
+	// window and no worktree, which is the trap the carry closes. A tree is
+	// carried file by file, since a directory is not what carry_files copies —
+	// so all three of the plugin's files are named here, and a worktree cannot
+	// arrive with the skill and no hooks.
+	want := []string{
+		".claude/settings.local.json",
+		".claude/skills/treewright/SKILL.md",
+		".claude/skills/treewright/.claude-plugin/plugin.json",
+		".claude/skills/treewright/hooks/hooks.json",
+	}
 	if got := bare.AgentCarries(); !slices.Equal(got, want) {
 		t.Errorf("AgentCarries() = %v, want %v", got, want)
 	}

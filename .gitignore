@@ -9,9 +9,11 @@
 /coverage.rows
 /coverage.total
 
-# The driving skill, written by `treewright agent-init claude --skill` and
-# carried into every worktree by the agent key. Local wiring rather than the
-# project's: a contributor who does not use treewright should not be handed it.
-.claude/skills/treewright/SKILL.md
+# The plugin written by `treewright agent-init claude` — the skill and the
+# hooks that report agent state — carried into every worktree by the agent key.
+# Local wiring rather than the project's: a contributor who does not use
+# treewright should not be handed it. The source of those files is checked in,
+# under internal/agentinit/plugins/claude; this is only where they land.
+.claude/skills/treewright/
 
 .DS_Store

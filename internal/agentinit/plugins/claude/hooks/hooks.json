@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      { "hooks": [{ "type": "command", "command": "treewright signal working" }] }
+    ],
+    "Notification": [
+      { "hooks": [{ "type": "command", "command": "treewright signal waiting" }] }
+    ],
+    "Stop": [
+      { "hooks": [{ "type": "command", "command": "treewright signal done" }] }
+    ],
+    "SessionEnd": [
+      { "hooks": [{ "type": "command", "command": "treewright signal clear" }] }
+    ]
+  }
+}
