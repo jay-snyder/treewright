@@ -1,6 +1,6 @@
 package agentinit
 
-import "embed"
+import _ "embed"
 
 // The Claude Code module.
 //
@@ -58,26 +58,48 @@ var claude = Agent{
 	UserSettings:    "~/.claude/settings.json",
 	ProjectPlugin:   ".claude/skills/treewright",
 	UserPlugin:      "~/.claude/skills/treewright",
-	Plugin:          pluginFiles(claudeFiles, claudeRoot),
+	// The plugin's manifest, in both senses. Each file is checked in under
+	// plugins/claude and named here, so the bytes are a real file a contributor
+	// can read, lint and point `claude plugin validate` at — while what *ships*
+	// is this list and nothing else.
+	//
+	// Walking the directory was the first shape, on the appealing logic that
+	// the folder is the plugin and a file added to it should simply work. It is
+	// the wrong trade for what a plugin directory can hold. Claude Code loads
+	// `bin/` as executables on the Bash tool's PATH and `.mcp.json` as servers
+	// to start, so a file appearing in that folder is not new documentation, it
+	// is new code running on the machine of everyone who installs — and "a file
+	// was added" is the easiest thing to miss in a diff, especially one whose
+	// name begins with a dot. A stray editor artifact would ride along the same
+	// way, quietly, into every checkout and every worktree.
+	//
+	// So a file ships because someone wrote its name in Go, and the directory
+	// is held to this list from the other side too: a file checked in and not
+	// named here fails TestThePluginShipsOnlyWhatItDeclares rather than sitting
+	// there inert, since silently ignored is its own kind of surprise.
+	Plugin: []PluginFile{
+		{"SKILL.md", claudeSkill},
+		{".claude-plugin/plugin.json", claudeManifest},
+		{"hooks/hooks.json", claudeHooks},
+	},
 }
 
-// claudeFiles is the plugin as it is checked in, which is the plugin as it is
-// installed: what agent-init writes into a checkout is these bytes, and what a
-// contributor reads to learn the layout is the same files rather than a
-// rendering of a Go string they have to imagine unquoted. `claude plugin
-// validate internal/agentinit/plugins/claude` therefore validates the real
-// thing, and the JSON is JSON its editor will format and lint.
-//
-// The `all:` prefix is load-bearing: without it //go:embed skips paths whose
-// name begins with a dot, and .claude-plugin/plugin.json — the one file that
-// makes the directory a plugin at all — would be silently absent from the
-// build. Dot directories do survive into a module zip, so `go install` gets
-// the same tree.
-//
-//go:embed all:plugins/claude
-var claudeFiles embed.FS
+// The three files, embedded by name. Naming each one rather than the directory
+// is what keeps anything unnamed out of the binary entirely — an embed pattern
+// that walks a directory takes whatever it finds, where these take exactly what
+// they say. Dot directories are no obstacle to a pattern that names the file:
+// the rule skipping paths that begin with a dot is a rule about walking, which
+// is the other thing these deliberately do not do.
+var (
+	//go:embed plugins/claude/SKILL.md
+	claudeSkill string
 
-const claudeRoot = "plugins/claude"
+	//go:embed plugins/claude/.claude-plugin/plugin.json
+	claudeManifest string
+
+	//go:embed plugins/claude/hooks/hooks.json
+	claudeHooks string
+)
 
 // SKILL.md is claude's own document, whole, and that is a decision rather than
 // duplication waiting to be factored out. An earlier shape kept the driving

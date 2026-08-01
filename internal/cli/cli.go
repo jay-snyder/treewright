@@ -456,7 +456,7 @@ worth reading first.`,
 		},
 		{
 			name:    "agent-init",
-			args:    "[--user] [--print] <agent>",
+			args:    "[--global] [--print] <agent>",
 			summary: "install the plugin that wires an agent to treewright",
 			long: `Installs an agent's plugin into the main checkout of the repository
 you are standing in. It holds two things, one in each direction: the agent's
@@ -479,13 +479,13 @@ stdout is the directory, so the path can be piped. Run it again after
 upgrading treewright: the files are treewright's own, so a second run updates
 the wiring rather than leaving a second copy of it somewhere.
 
---user installs it for every repository instead, treewright-managed or not,
+--global installs it for every repository instead, treewright-managed or not,
 which is safe: outside a treewright window, signal does nothing, quietly.
 
 --print writes nothing and prints the files, for reading the hooks before
 they run. It is also the one form that needs no repository.`,
 			flags: []flagDoc{
-				{"--user", "install it for every repository instead of this one"},
+				{"--global", "install it for every repository instead of this one"},
 				{"--print", "print the plugin's files instead of installing them"},
 			},
 			run: cmdAgentInit,

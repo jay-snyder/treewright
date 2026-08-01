@@ -292,8 +292,8 @@ func TestAgentKeyIsADefaultsBundle(t *testing.T) {
 	// arrive with the skill and no hooks.
 	want := []string{
 		".claude/settings.local.json",
-		".claude/skills/treewright/.claude-plugin/plugin.json",
 		".claude/skills/treewright/SKILL.md",
+		".claude/skills/treewright/.claude-plugin/plugin.json",
 		".claude/skills/treewright/hooks/hooks.json",
 	}
 	if got := bare.AgentCarries(); !slices.Equal(got, want) {

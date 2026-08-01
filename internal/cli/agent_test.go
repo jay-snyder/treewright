@@ -18,7 +18,7 @@ import (
 
 // agentFixture is a fixture whose HOME is this test's own, so the developer's
 // real ~/.claude can never decide what these tests see — in either direction —
-// and so a test of --user has somewhere harmless to install.
+// and so a test of --global has somewhere harmless to install.
 func agentFixture(t *testing.T, extraConfig string) *fixture {
 	t.Helper()
 	f := newFixture(t, extraConfig)
@@ -134,17 +134,17 @@ func TestAgentInitPrintWritesNothing(t *testing.T) {
 	}
 }
 
-// TestAgentInitUserScopeNeedsNoRepository covers the placement offered second:
+// TestAgentInitGlobalNeedsNoRepository covers the placement offered second:
 // every repository at once, treewright-managed or not, which is safe because
 // signal is silent outside a treewright window.
-func TestAgentInitUserScopeNeedsNoRepository(t *testing.T) {
+func TestAgentInitGlobalNeedsNoRepository(t *testing.T) {
 	f := agentFixture(t, "")
 	home := os.Getenv("HOME")
 	t.Chdir(t.TempDir()) // outside any repository at all
 
-	r := f.exec("agent-init", "claude", "--user")
+	r := f.exec("agent-init", "claude", "--global")
 	if r.err != nil {
-		t.Fatalf("agent-init claude --user: %v\n%s", r.err, r.both())
+		t.Fatalf("agent-init claude --global: %v\n%s", r.err, r.both())
 	}
 	if got, want := strings.TrimSpace(r.stdout), filepath.Join(home, ".claude", "skills", "treewright"); got != want {
 		t.Errorf("stdout = %q, want %q", got, want)
@@ -171,7 +171,7 @@ func TestAgentInitOutsideARepositorySaysWhatToDo(t *testing.T) {
 	if r.err == nil {
 		t.Fatalf("agent-init claude succeeded outside a repository:\n%s", r.both())
 	}
-	if !strings.Contains(r.err.Error(), "--user") {
+	if !strings.Contains(r.err.Error(), "--global") {
 		t.Errorf("err = %v, want the placement that needs no config named", r.err)
 	}
 }
@@ -299,8 +299,8 @@ func TestConfigReportsWhatTheAgentKeySupplies(t *testing.T) {
 		// Every per-project artifact the module carries, marked as the module's
 		// rather than the file's: the settings file and all three files of the
 		// plugin, since a directory is not what the carry copies.
-		".claude/settings.local.json, .claude/skills/treewright/.claude-plugin/plugin.json",
-		".claude/skills/treewright/SKILL.md, .claude/skills/treewright/hooks/hooks.json  (from agent)",
+		".claude/settings.local.json, .claude/skills/treewright/SKILL.md",
+		".claude/skills/treewright/.claude-plugin/plugin.json, .claude/skills/treewright/hooks/hooks.json  (from agent)",
 		"claude {prompt}  (from agent)",
 	} {
 		if !strings.Contains(out, want) {

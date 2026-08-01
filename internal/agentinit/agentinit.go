@@ -33,66 +33,25 @@
 // file, could not — JSON has no eval, and the pasted copy was frozen at the
 // version that printed it. A plugin directory is a place of treewright's own to
 // write, so the wiring is a file treewright can rewrite rather than a copy it
-// can only hope is current. See "Agent modules" in docs/design-notes.md.
+// can only hope is current. See "Agent modules" in docs/agents.md.
 package agentinit
 
 import (
-	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
 	"sort"
-	"strings"
 )
-
-// pluginFiles reads a module's plugin out of the files checked in beside it,
-// one PluginFile per file, in the order fs.WalkDir yields them — which is
-// lexical, so a listing of the directory and the order agent-init reports
-// writing them in are the same order.
-//
-// The directory is the plugin, and no Go code here touches a byte of it: a file
-// added to the folder ships, is installed, and is carried into every worktree
-// with no list to update anywhere. That is the derived-list rule from
-// LocalState below taken one step further back, to the artifacts themselves,
-// and it is why a module is a folder plus a dozen lines of Go rather than a
-// wall of quoted JSON — the plugin a contributor reads is the plugin that gets
-// written, and `claude plugin validate` can be pointed at the checkout.
-//
-// The panic is unreachable by construction: the only argument ever passed is an
-// embed.FS whose root //go:embed already proved exists at compile time, and
-// reading from one cannot fail at runtime. It is here because the alternative
-// is a discarded error, which would turn a broken embed directive into a plugin
-// silently missing a file.
-func pluginFiles(fsys fs.FS, root string) []PluginFile {
-	var out []PluginFile
-	err := fs.WalkDir(fsys, root, func(p string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
-			return err
-		}
-		body, err := fs.ReadFile(fsys, p)
-		if err != nil {
-			return err
-		}
-		out = append(out, PluginFile{
-			Path: strings.TrimPrefix(strings.TrimPrefix(p, root), "/"),
-			Body: string(body),
-		})
-		return nil
-	})
-	if err != nil {
-		panic("agentinit: reading the embedded plugin under " + root + ": " + err.Error())
-	}
-	return out
-}
 
 // PluginFile is one file of the plugin a module installs: a path relative to
 // the plugin's own directory, and the body treewright writes there.
 //
-// Kept as a list rather than as a field per artifact because two things read it
-// and both want all of them at once — agent-init writes every file, and doctor
-// compares every file against what agent-init would write, which is how a
-// plugin installed by an older treewright is reported as out of date rather
-// than mistaken for current.
+// Kept as a list rather than as a field per artifact because three things read
+// it and all of them want every file at once — agent-init writes them, doctor
+// compares them against what agent-init would write, and LocalState turns them
+// into the carry. The list is also the module's declaration of what may ship at
+// all: see the note on claude's, which is where the reasoning for naming each
+// file rather than embedding the folder lives.
 type PluginFile struct {
 	// Path is slash-separated and relative to the plugin root, in the layout
 	// the agent expects. Never absolute, and never leading out of the plugin.
@@ -127,8 +86,12 @@ type Agent struct {
 	// ProjectPlugin is the directory the agent loads treewright's plugin from,
 	// relative to a checkout's root, and is where the wiring belongs by
 	// default: a repository you use treewright in gets it, and one you do not
-	// stays untouched. UserPlugin is the same made global, for someone who
-	// wants every repository covered at once.
+	// stays untouched. UserPlugin is the agent's own user-level directory —
+	// what `agent-init --global` installs into — for someone who wants every
+	// repository covered at once. It keeps the User prefix to match
+	// UserSettings beside it, those being one place in the agent's own terms;
+	// the flag is spelled for what it does to the machine rather than for where
+	// the agent happens to keep it.
 	ProjectPlugin string
 	UserPlugin    string
 

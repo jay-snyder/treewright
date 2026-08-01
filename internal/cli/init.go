@@ -109,9 +109,9 @@ func cmdTmuxInit(env *Env, args []string) error {
 // default; unlike the default path it needs no repository, so it is also how
 // agent-init still answers outside git entirely.
 func cmdAgentInit(env *Env, args []string) error {
-	var user, dump bool
+	var global, dump bool
 	positional, err := parseArgs("agent-init", args,
-		map[string]*bool{"--user": &user, "--print": &dump}, nil, 1)
+		map[string]*bool{"--global": &global, "--print": &dump}, nil, 1)
 	if err != nil {
 		return err
 	}
@@ -125,24 +125,25 @@ func cmdAgentInit(env *Env, args []string) error {
 	}
 
 	if dump {
-		return dumpPlugin(env, agent, user)
+		return dumpPlugin(env, agent, global)
 	}
-	if user {
+	if global {
 		return installAgentPlugin(env, agent, expandHome(agent.UserPlugin), nil)
 	}
 	// The repository decides where a per-repo plugin goes, so this is the one
 	// path that needs a config — and having one is what lets the carry warning
 	// below know whether it applies. Someone with no config yet still has
-	// --user and --print, and the error says so.
+	// --global and --print, and the error says so.
 	cfg, err := resolveConfig("")
 	if err != nil {
-		return fmt.Errorf("%w — or install it for every repository with \"%s agent-init %s --user\"", err, env.Argv0, agent.Name)
+		return fmt.Errorf("%w — or install it for every repository with \"%s agent-init %s --global\"", err, env.Argv0, agent.Name)
 	}
 	return installAgentPlugin(env, agent, filepath.Join(cfg.MainDir, filepath.FromSlash(agent.ProjectPlugin)), cfg)
 }
 
 // installAgentPlugin writes the plugin into dir and says what happened. A nil
-// cfg means user scope, where nothing has to be carried anywhere.
+// cfg means --global, where nothing has to be carried anywhere: the agent's own
+// user-level directory already covers whatever directory it is started in.
 func installAgentPlugin(env *Env, agent agentinit.Agent, dir string, cfg *config.Config) error {
 	written, err := agent.Install(dir)
 	if err != nil {
@@ -173,16 +174,16 @@ func installAgentPlugin(env *Env, agent agentinit.Agent, dir string, cfg *config
 	// treewright's own invention, so nothing ignores it until someone says so,
 	// and a committed plugin is treewright imposed on everyone who clones.
 	env.progressf("git will not ignore it on its own — add %s/ to .gitignore unless you mean to hand it to everyone who clones", agent.ProjectPlugin)
-	env.progressf("use --user instead to cover every repository at once: outside a treewright window, signal does nothing, quietly")
+	env.progressf("use --global instead to cover every repository at once: outside a treewright window, signal does nothing, quietly")
 	return nil
 }
 
 // dumpPlugin prints the plugin's files rather than installing them, each under
 // the path it would be written to. The headers are cat's own multi-file form,
 // because that is what the output is: several files at once, for reading.
-func dumpPlugin(env *Env, agent agentinit.Agent, user bool) error {
+func dumpPlugin(env *Env, agent agentinit.Agent, global bool) error {
 	dir := agent.ProjectPlugin
-	if user {
+	if global {
 		dir = agent.UserPlugin
 	}
 	for i, f := range agent.Plugin {

@@ -15,7 +15,7 @@ import (
 // The signal protocol's contract has two halves, and the tests here mirror
 // them: in scope, the state lands on the worktree's window and shows wherever
 // windows do; out of scope, silence. See the "Agent state" section of
-// docs/design-notes.md for why each half is the way it is.
+// docs/agents.md for why each half is the way it is.
 
 // stateOn reads the agent state off a window the way a status line would —
 // through a format, which renders an option nobody set as the empty string

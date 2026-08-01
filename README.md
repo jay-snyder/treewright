@@ -201,15 +201,20 @@ gets a `!` in front of its name in the tmux status line. Agents that report
 nothing cost nothing: the column only exists once something has signaled.
 
 Any agent that can run a command when its state changes can report this way, and
-`tw agent-init claude` prints the wiring for the ones it knows. Add `--skill` and
-it prints the other direction too: a skill teaching the agent to drive treewright
-— read what's in flight, spawn a sibling worktree with a prompt, respect the
-teardown guards — so you can ask the agent in your MAIN window to farm three jobs
-out to three worktrees and it knows exactly how.
+`tw agent-init claude` installs the wiring for the ones it knows. What it writes
+is a plugin — `.claude/skills/treewright/` in your main checkout, which claude
+loads whole on its next start — and it goes both directions: the hooks that fill
+the AGENT column, and a skill teaching the agent to drive treewright. Read
+what's in flight, spawn a sibling worktree with a prompt, respect the teardown
+guards — so you can ask the agent in your MAIN window to farm three jobs out to
+three worktrees and it knows exactly how.
 
-Both go in the main checkout's `.claude/`, and `agent = "claude"` in the config
-carries them into every new worktree: the repos you use treewright in are wired,
-and the ones you don't are untouched.
+Nothing else is edited: no settings file, no dotfile, no `.gitignore`. Set
+`agent = "claude"` in the config and the plugin is carried into every new
+worktree, so the repos you use treewright in are wired and the ones you don't
+are untouched. Run it again after upgrading treewright and it updates the
+wiring in place — that's the reason it's a directory of treewright's own rather
+than a fragment you paste somewhere.
 
 Hit `prefix + T` and that same table becomes a menu, in a popup sized to fit it:
 
@@ -243,7 +248,7 @@ move around on you.
 | `tw doctor` | Check your install and every config you've registered |
 | `tw shell-init <shell>` | Print the shell integration for zsh, bash, or fish |
 | `tw tmux-init [--apply]` | Print the tmux integration, or load it straight into the server |
-| `tw agent-init <agent>` | Print the hooks that make an agent report its state |
+| `tw agent-init [--global] [--print] <agent>` | Install the plugin that wires an agent to treewright — hooks in, skill out |
 
 `tw help <command>` has the details on any of them. There's also `tw popup`,
 which is what the key bindings run, and `tw signal`, which is what agent hooks
@@ -369,5 +374,7 @@ moving you.
 
 - `tw help <command>` for detail on anything above.
 - [`docs/design-notes.md`](docs/design-notes.md) if you want to know why it
-  behaves the way it does.
+  behaves the way it does — with [`docs/tmux.md`](docs/tmux.md) for sessions,
+  windows and key bindings, and [`docs/agents.md`](docs/agents.md) for how an
+  agent reports what it is doing.
 - [`CLAUDE.md`](CLAUDE.md) if you're working on treewright itself.

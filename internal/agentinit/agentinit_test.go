@@ -2,6 +2,7 @@ package agentinit
 
 import (
 	"encoding/json"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path"
@@ -92,10 +93,11 @@ func TestClaudeHooksParseAsJSON(t *testing.T) {
 // component inside .claude-plugin/ is the mistake the documentation calls out by
 // name, and it fails quietly: the plugin loads, without the part that was moved.
 //
-// It is also what guards the `all:` prefix on the //go:embed directive. Without
-// it the manifest — the one file whose name begins with a dot, and the one that
-// makes the directory a plugin at all — is dropped from the build, and every
-// other test here still passes.
+// It also names the three files outright, which is the check that survives a
+// module dropping one. `.claude-plugin/plugin.json` is the file to lose: it is
+// the one that makes the directory a plugin at all, and without it the skill
+// still loads — as a plain, un-namespaced skill, with the hooks beside it read
+// by nothing.
 func TestTheClaudePluginIsLaidOutAsClaudeCodeExpects(t *testing.T) {
 	byPath := map[string]string{}
 	for _, f := range claude.Plugin {
@@ -135,6 +137,64 @@ func TestTheClaudePluginIsLaidOutAsClaudeCodeExpects(t *testing.T) {
 	}
 	if manifest.Description == "" || manifest.Version == "" {
 		t.Errorf("manifest = %+v, want a description and a version for the /plugin list to show", manifest)
+	}
+}
+
+// TestThePluginShipsOnlyWhatItDeclares is the gate on the folder, and it looks
+// both ways.
+//
+// A plugin directory is not documentation. Claude Code loads `bin/` as
+// executables on the Bash tool's PATH and `.mcp.json` as servers to start, so a
+// file that appears under plugins/ and ships is code running on the machine of
+// everyone who installs — and it would be carried into every worktree besides.
+// Each module names its files in Go, which is the review gate: a file arrives
+// in the binary because someone wrote its name, never because it was sitting in
+// a folder. This test closes the other direction, where a file is checked in
+// and quietly ships nothing — an editor artifact committed by accident, or a
+// contributor who added hooks/extra.json and is now debugging why it has no
+// effect. Either way the answer is a failure naming the file.
+//
+// It reads the real directory rather than an embedded copy of it, deliberately:
+// what is embedded is exactly what was declared, so an embedded tree could not
+// see the stray file this exists to find.
+func TestThePluginShipsOnlyWhatItDeclares(t *testing.T) {
+	declared := map[string]bool{}
+	for _, name := range Names() {
+		module, _ := Lookup(name)
+		for _, f := range module.Plugin {
+			// The folder is named after the module, which this asserts by
+			// relying on it: a module whose files live somewhere else reports
+			// every one of them as undeclared.
+			declared[path.Join(name, f.Path)] = true
+		}
+	}
+
+	checkedIn := map[string]bool{}
+	root := "plugins"
+	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		rel, err := filepath.Rel(root, p)
+		if err != nil {
+			return err
+		}
+		checkedIn[filepath.ToSlash(rel)] = true
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk %s: %v", root, err)
+	}
+
+	for p := range checkedIn {
+		if !declared[p] {
+			t.Errorf("%s/%s is checked in but no module ships it — name it in the module's Plugin list, or delete it", root, p)
+		}
+	}
+	for p := range declared {
+		if !checkedIn[p] {
+			t.Errorf("a module ships %s/%s, which is not checked in", root, p)
+		}
 	}
 }
 

@@ -7,220 +7,18 @@ the alternatives that were tried, and what made them lose.
 Most of it also lives as comments next to the code it explains. Where the two
 disagree, the code comment is the one being maintained.
 
+Two subsystems are large enough, and separate enough, to be read on their own:
+
+- **[`tmux.md`](tmux.md)** — sessions, window identity, terminal titles, and the
+  key bindings that reach treewright from a window running an agent.
+- **[`agents.md`](agents.md)** — the agent-state protocol, the agent modules and
+  the plugin they install, and the kickoff prompt.
+
+What stays here is everything else: what a worktree and its branch are called,
+what the commands promise their output looks like, what refuses to run, and how
+a repository is configured.
+
 ---
-
-## One session per repository
-
-Every repository's windows live in a tmux session of its own, named after its
-config: the base window in the main checkout, and one window per worktree.
-
-```
-tmux session "storefront"                      tmux session "checkout-api"
-├── MAIN      ~/code/storefront                ├── MAIN    ~/code/checkout-api
-├── ENG-2318  ~/code/storefront-eng-2318       └── PAY-88  ~/code/checkout-api-pay-88
-└── ENG-2324  ~/code/storefront-eng-2324
-```
-
-The alternative — opening windows in whatever session the caller happens to be
-attached to — mixes repositories in one status line, where two windows named
-`MAIN` belong to different projects and a ticket key says nothing about which
-checkout it is in. Worse, it made `resume` a silent no-op across sessions:
-selecting a window in a session your client is not attached to succeeds and
-changes nothing you can see.
-
-What follows from it:
-
-- **`new` creates the session** when it is not running yet, so the first command
-  of the day establishes it. `resume` and `base` do the same.
-- **`base` is the same window every time.** A window already sitting in the main
-  checkout is selected rather than a second one opened beside it — and being the
-  session's first window, it is what keeps the session alive as worktrees come
-  and go.
-- **Commands follow their window across sessions.** Resuming a worktree while
-  attached to another repository's session switches you there.
-- **Outside tmux nothing is skipped.** The session and window are created
-  detached, and treewright says to run `treewright attach` — its own command
-  rather than a `tmux attach` to copy, because that spelling names the session
-  exactly and finds the right server under `TREEWRIGHT_TMUX_LABEL`. A window that
-  turns out to be in some *other* session is the exception: `attach` takes a
-  repository and would send you to this repository's session, which is not where
-  the window is and may not be running at all, so that message spells out the
-  `tmux attach-session` for the session the window is really in.
-- **A window in the wrong session is used rather than duplicated** — one you
-  opened by hand, or one from before the repository had a session of its own.
-  `ls` shows it as `session:window`, and `resume` switches to it there.
-- **Except the pane you are typing into.** Standing in the main checkout is
-  where you are when you type `tw base`, so the shell you type it from is found
-  as the window on that directory — and switching to it is a switch to the
-  session the client is already in. `base` warned that the window was in another
-  session "rather than" one that did not exist yet, then did nothing: no session,
-  no window, no agent, and an attach hint pointing at the session it had just
-  failed to create. A window treewright opened on the directory is exempt, so
-  `base` inside the base window, and `resume` inside a worktree's own window,
-  stay the no-ops they should be — you are already there.
-
-`tmux_session` overrides the name, for one already taken by something else or
-two repositories that deliberately want to share. `tw doctor` reports which
-session each repository maps to, and warns when two configs name the same one.
-
-**Session names are matched as prefixes by tmux.** With only `checkout-api`
-running, a target of `checkout` resolves to it, so a repo named `checkout` would
-silently drop its windows into the other project's session. Every session target in
-`internal/tmux` is therefore written in tmux's exact form, `=api`. The one
-command that does not understand that form is `set-option`, which is why nothing
-in that package sets session options.
-
-## Window identity
-
-Every window treewright opens carries the worktree it belongs to, as tmux user
-options:
-
-| Option | Value |
-|---|---|
-| `@treewright_repo` | The config's name. |
-| `@treewright_worktree` | The checkout the window was opened on. |
-| `@treewright_slug` | The worktree. Unset on the base window, which is not one. |
-| `@treewright_branch` | The branch that worktree is on. |
-| `@treewright_agent_state` | What the agent in it last signaled. Written by `signal`, not at creation — see "Agent state" below. |
-
-Of these, the worktree is what *identifies* a window. A pane's
-directory moves with every `cd`, and two windows can stand in one directory at
-once — the base window does exactly that after `tw cd` — so which window a
-worktree owns cannot be read off where its shell happens to be standing.
-
-Before the stamp existed, `list-panes -a` walked windows in index order and two
-windows standing in one directory resolved to whichever the user had arranged
-first: a wrong name in `ls`, the wrong window focused by `resume`, and the wrong
-window offered up for closing by `rm`, all changing under a `swap-window`. The
-resolution order is now rank (stamped for this worktree beats unstamped beats
-stamped for another), then the repository's own session, then the older window
-id. See `Window.beats` in `internal/tmux/tmux.go`.
-
-The stamp is carried on `Window` as the path it holds rather than as a bool,
-because two questions are asked of it and only one of them is "did treewright
-open this window". `openWindow` asks the other — did treewright open it *on this
-directory* — to tell the checkout's own window apart from a shell standing in it,
-and a bool cannot answer that. `Window.Stamped` remains for the callers that only
-want the first, such as deciding whose window name treewright may decorate.
-
-The options are written at creation, so a window treewright merely finds and
-switches to keeps whatever it already had. The rest are there for your own status
-line — `#{@treewright_repo}` costs nothing to render, where the alternative is
-shelling out to git on every status interval. They keep the full `@treewright_`
-prefix because they are a public, greppable interface, and a cryptic `@tw_` would
-save nothing anyone types by hand.
-
-## Terminal and tab titles
-
-Attaching tends to leave the terminal tab titled with the command line that
-attached rather than with the session. tmux is not the one writing it:
-`set-titles` is off by default, so tmux never sets a title at all, and whatever
-the shell wrote before it started — under kitty, iTerm2, or any terminal with
-shell integration, the command being run — stays there until the next prompt,
-which inside tmux never comes.
-
-`tw tmux-init` turns it on, which is the one thing in that snippet not about
-treewright:
-
-```tmux
-set -g set-titles on
-set -g set-titles-string "#S: #W"
-```
-
-`#S` is the session, so the repository, and `#W` the window, so the worktree.
-
-It is set there rather than by treewright itself, per session, for two reasons.
-Session options are set with `set-option -t`, whose target does not accept the
-exact-match `=name` form, so treewright would be back to the prefix matching the
-section above avoids. And a title format is yours: a file you loaded on purpose
-can change it, a `tw new` should not.
-
-## Reaching treewright from inside a worktree
-
-treewright runs your agent as the tmux window's own command, so a worktree's pane
-*is* the agent — there is no shell in it to type `tw resume` into. Reaching
-treewright from inside a worktree meant splitting a pane or going to find a
-window that has a prompt. The key bindings close that gap by opening treewright
-in a popup over whatever is running.
-
-**Why the bindings go through `tw popup` rather than `display-popup` directly.**
-tmux fixes a popup's size when it creates one, and `-w`/`-h` take only cells or a
-percentage of the terminal. A percentage is the wrong unit for a picker, whose
-height is the number of worktrees and whose width is the widest slug — neither of
-which grows when the terminal does. Three worktrees need 83×8; 70%×60% of a
-237×62 terminal is 165×37, ten times the area. Working the size out needs a
-program, and `run-shell` is the only way a binding can run one.
-
-**Why the bindings pass `#{client_tty}`.** A tmux command run from a backgrounded
-`run-shell` has no association with the client that asked for it, so tmux falls
-back to the most recently active one — and with two terminals attached, the popup
-opens over whichever has been busier.
-
-**Why the bindings pass `#{pane_current_path}`.** `run-shell` does not run in the
-calling pane's directory. It runs in the tmux server's, which is wherever the
-server was started — one repository's checkout, usually, and never the pane's.
-Left to work out where it is, a popup therefore answers about that one repository
-from every window on the server, and marks its worktree as the one you are
-standing in. The visible symptom is the `ls` table putting its asterisk on the
-same row whichever worktree the key was pressed in; the part that matters is that
-`resume` in a second repository's window offers the first one's worktrees. It
-hides behind the single-config fallback, which is why it survived so long: with
-one config registered, `config.Resolve` returns it whatever directory you ask
-from, and the wrong answer and the right one coincide.
-
-`run-shell` has a `-c` flag that takes a start directory, and it is not the fix:
-it will not expand a format into one, so `-c "#{pane_current_path}"` lands in the
-home directory. The path has to travel inside the command string, where formats
-are expanded, exactly as the client does. In the `new` binding its quotes are
-escaped, that string already being the double-quoted argument of a `run-shell`
-held by `command-prompt` — a directory can contain a space where a tty cannot, so
-the quoting is load-bearing rather than decorative.
-
-`--dir` is then acted on by moving into it, rather than being threaded through as
-an argument, because everything downstream reads the working directory: sizing
-resolves the config to count the worktrees, the popup starts where the process
-stands, and the command inside it resolves the repository the same way again. The
-process is put back afterwards, since the tests call `Run` in-process and a
-command that wandered off and stayed there would decide where the next one thinks
-it is.
-
-**Why a binding that cannot find treewright says nothing at all.** tmux resolves
-the command in the server's environment, which is whatever the server was started
-from rather than the shell that edited the config, and it discards what a
-`run-shell` at config load reports. A binary that is not on that `PATH` therefore
-produces no bindings and no message — the keys simply do nothing, which reads as a
-treewright bug rather than an installation one. Two things compound it: a server
-keeps the environment it started with, so making the binary reachable afterwards
-takes a `kill-server` rather than a new window; and the check that would report it,
-`checkTmuxIntegration`, has to skip when no server is running, because `list-keys`
-would start the very server whose emptiness it then described. So the one session
-where the keys never loaded is also the one where nothing says so.
-
-**Why `-EE` and not `-E`.** A single `-E` closes the popup however the command
-exited, so anything it reported on the way out is gone before it can be read.
-Doubled, tmux closes it only on success. That is also why `PopupHint` exists:
-inside a popup, a non-zero exit leaves text on screen with nothing saying how to
-dismiss it.
-
-**Why cancelling `resume` exits 0 but cancelling `cd` does not.** Declining a
-menu is not a failure, and in a popup a non-zero exit made Escape need pressing
-twice — once to dismiss the picker, once to clear the popup holding "cancelled"
-on screen. But `cd`'s answer is a path, and `cd "$(tw cd)"` succeeding with
-nothing to print would send the shell home. So the two callers treat the same
-cancellation differently, deliberately.
-
-**The keys.** Being unbound is the smaller half of choosing one; the larger half
-is what a missed shift does, since these get reached for in a hurry. `t` is
-clock-mode and `n` is next-window, both harmless. The first version bound
-`prefix + W`, for the mnemonic with tmux's own `w` window picker — but a great
-many configs rebind lowercase `w` to `kill-window`, and there a missed shift
-destroys the very window the binding exists to reach. Hence `T` and `N`, and
-hence the flags that move them.
-
-Keys are validated as letters, digits, dashes, and underscores, which covers `G`,
-`C-n`, `M-Left`, and `F5`. Anything with punctuation tmux reads as config syntax
-is refused; writing that binding by hand in the printed file is the documented
-way to have it.
 
 ## The base checkout
 
@@ -468,7 +266,7 @@ stdout carries the answer and nothing else, so any command can be piped:
 | `setup` | the config file's path, or the config itself with `--dry-run` |
 | `config`, `doctor` | the report you asked for |
 | `shell-init`, `tmux-init`, `help`, `version` | the script or text you asked for |
-| `agent-init` | the hooks fragment alone, or the skill with `--skill` — pipeable either way, with where to put it on stderr |
+| `agent-init` | the plugin directory it installed into, or the plugin's files with `--print` — with what it wrote, and where else it could go, on stderr |
 | `signal` | nothing — the answer is the stamp on the window, and out of scope it is silent on stderr too |
 
 Progress, warnings, prompts, and errors go to stderr, prefixed `warning:` or
@@ -515,189 +313,6 @@ That synthetic commit is written to the object database as a dangling object, so
 Its author, committer, and dates are fixed, so its hash depends only on the tree
 and parent being tested: repeated runs reuse the same object rather than leaving
 a new one behind each time, and `git gc` reaps it.
-
-## Agent state
-
-treewright's whole point is several agents running in parallel, and the question
-the ls table could not answer from git alone is *which one needs me?* An agent
-blocked on a permission prompt looks exactly like one deep in a refactor: a
-window name in a status line. `signal` closes that gap, and it is one half of a
-deliberate split: treewright provides the agent-neutral protocol, and each
-agent's own hook configuration provides the wiring that calls it. Nothing in
-treewright knows any agent's name.
-
-**The vocabulary is closed, and chosen from the human's chair**: `working`
-(leave it alone), `waiting` (blocked on you), `done` (a result to look at), and
-`clear` (no agent state). Free-form states lose the way free-form branch
-prefixes would: every consumer — the AGENT column, its colors, the name marker —
-needs to know what a state *means*, and a vocabulary nobody shares is a column
-nobody can read.
-
-**State lives on the window, not on disk.** A treewright window runs the agent
-as the window's own command, so the agent dying *is* the window closing *is*
-the option evaporating: no marker file to garbage-collect, no stale "working"
-from an agent that crashed days ago. The post_create marker went the other way —
-a file beside the log — because a failed install outlives any window; an agent's
-state never outlives its window, except in one case treewright itself creates:
-a failed command's window is deliberately held open so its output stays
-readable, and there the hold-open wrapper clears the state and the name marker
-itself, best-effort, straight through tmux.
-
-**`signal` never makes noise.** It exits 0 and prints nothing everywhere except
-being invoked wrong: outside tmux, outside a registered repository, in a
-checkout with no window — silence, not a warning. The hooks that run it fire in
-*every* session the agent has — plain terminals, ssh, repositories treewright
-has never heard of — and each of those is out of scope, not broken. This is the
-one command deliberately outside the "a background failure needs somewhere to be
-reported" rule, and the reason is that a no-op signal is not a failure; a hook
-that warns is an integration that nags, and those get ripped out.
-
-**`waiting` — only waiting — marks the window's name** (`!ENG-2318`), because it
-is the one state that needs to reach you across the room, and a name shows in
-any status line with nothing added to tmux.conf. The alternatives lose
-concretely: setting `window-status-format` overwrites a format that is the
-user's own — the same reasoning that keeps `set-titles` in the tmux-init snippet
-rather than in the binary — and ringing the pane's bell requires being the pane.
-The marker is display, not identity: `Windows` strips it as it parses, so every
-message, table cell, and JSON field carries the name underneath, and only
-windows treewright opened (stamped ones) are ever decorated — a window the user
-opened by hand on a worktree's directory keeps its name however loudly its agent
-waits. A custom status line can render `#{@treewright_agent_state}` directly,
-like the other `@treewright_` options.
-
-**Nothing clears a state on focus.** Switching to a waiting window is arrival,
-not help; the agent's own next transition is the truth, and the protocol stays a
-one-way street — agents write, treewright displays.
-
-**The AGENT column appears only when some window carries a state**, the same
-rule as the current-worktree marker column and for a stronger reason: for the
-user whose `command` is `nvim`, the whole feature is invisible, which is the
-agent-agnosticism promise kept in the table itself. `--json` always carries
-`agent_state`, empty when nothing has signaled — a consumer's schema should not
-depend on whether anyone happens to be signaling today.
-
-**Two option names are reserved, not designed**, so nothing else squats on
-them while the states prove whether they are enough:
-`@treewright_agent_message` for a short "why" (the permission being asked for,
-from a hook's stdin payload), and `@treewright_agent_since` for when the state
-was set ("waiting for 25m" in `ls`).
-
-## Agent modules
-
-`signal` is half of a deliberate split: treewright's core provides agent-neutral
-protocols, and everything that is a fact about a *particular* agent — what
-launches it, what resumes it, which gitignored files hold its per-project
-state, how its hooks are wired to `signal` — lives in `internal/agentinit`, one
-module per agent. Supporting another agent is a file beside `claude.go`, not
-edits across the tree. The modules are the third instance of a pattern the repo
-already had twice: like the shell shims and the tmux snippet, the hook
-configuration is emitted by the binary (`agent-init claude`), so it can never
-drift from the `signal` vocabulary it targets.
-
-**`agent-init` prints; it does not apply.** tmux-init's `--apply` is safe
-because `source-file` is additive; applying hooks means rewriting a settings
-file the user owns, which a JSON merge would reorder and reformat. Printing the
-fragment and naming the file is the honest version until there is a merge
-strategy worth trusting.
-
-**Where the wiring goes, and the trap between the placements.** Per-repo is the
-default, and it is the main checkout's `.claude/settings.local.json`: treewright
-is a tool you use in *some* repositories, and the wiring should follow that
-rather than assert itself in every checkout on the machine. User-level
-(`~/.claude/settings.json`) is offered second, for someone who does want every
-repository covered at once, and costs little because `signal` silently no-ops
-outside treewright windows.
-
-The per-repo placement has a trap, and closing it is what `agent = "claude"` is
-for. Those files are gitignored, so **every worktree treewright creates starts
-without them**, and wiring placed there reaches the MAIN window and no worktree
-at all unless something carries it. That half-configured state looks finished,
-which is why `doctor` checks for exactly it. The committed project file would
-work mechanically and is not offered: it imposes treewright on every teammate
-who clones the repo.
-
-**What is per-project is what is carried, derived rather than listed.**
-`Agent.LocalState()` is computed from the module's project paths instead of
-being a field beside them, because a module that named a per-project artifact
-and forgot to carry it would recreate the trap one directory deeper — which is
-exactly what happened to the skill, whose first version was user-level only.
-Deriving the list means a module cannot describe a per-project file it does not
-also carry. Whether any of it ends up in git is the repository's business:
-treewright writes to no `.gitignore` and generates none.
-
-**The `agent` config key is a defaults bundle, and the carry is the point.**
-`agent = "claude"` names a module and takes its command and resume_command as
-defaults — explicit keys still win field-by-field, so agent-plus-command is
-override rather than a load error; the file still says which command runs. What
-the key adds that has no other spelling is the carry: the module's local-state
-files are copied into every new worktree as if `carry_files` listed them, which
-dissolves the placement trap and gives every worktree the "always allow"
-permission decisions already granted in the main checkout, hooks or no hooks.
-The implicit carry differs from an explicit entry in exactly one way — absent
-from the main checkout it is skipped silently, because unlike a `carry_files`
-entry nobody asserted it exists. An unknown agent name is a load error naming
-the modules there are: the key's whole value is the module it names, and a
-misspelling that fell back to the global defaults would leave the carry quietly
-not happening.
-
-**The module is never inferred from `command`.** Two configs saying
-`command = "claude"` behaving differently on an invisible guess is the kind of
-rule the config format exists to avoid; the key is one line, and writing it is
-what asks for the bundle. The one place a guess is allowed is `doctor`'s
-wiring check, which may sniff the command's first word — a warn-level hint can
-rest on a guess in a way behavior never can. `setup` writes the key when it
-finds the agent's binary on PATH, which is as close to consent as detection
-gets — and one commented line to remove when it guessed wrong.
-
-**The skill is the module's second artifact, and its knowledge is core's.**
-`agent-init --skill` prints a document teaching the agent to *drive*
-treewright — read the estate with `ls --json`, spawn parallel work with `new`
-and a `--prompt`, respect the teardown guards, leave `signal` to the hooks.
-The text lives in `internal/agentinit` as a shared, agent-neutral guide, with
-each module contributing only its packaging (for claude, SKILL.md frontmatter
-and `.claude/skills/treewright/SKILL.md`, carried like the settings beside it):
-the CLI is the same whoever runs
-it, so a second agent wraps the same words. It needed no new core surface at
-all, which is the sign the protocol boundary was drawn right — and it is held
-to the code by tests, so a command it names cannot be renamed out from under
-it. Its commands spell `treewright`, never `tw`, and here the Argv0 rule bites
-hardest: the reader is an agent running commands in a non-interactive shell,
-where the `tw` function from a startup file may simply not exist.
-
-## The kickoff prompt
-
-`new` used to open a window whose agent sat waiting to be told what the ticket
-was, when the person typing the command knew perfectly well. `--prompt` closes
-that gap on `new` and `resume` both, and the mechanism is a placeholder in the
-command template — `command = "claude {prompt}"` — because where an agent's
-CLI wants its prompt is a fact about the agent, and the template saying so is
-what keeps treewright out of guessing.
-
-Three rules, each load-bearing:
-
-- **With a prompt, the placeholder becomes the shell-quoted text**: one
-  literal argument however many spaces and quotes the prompt holds, through
-  the same `shellQuote` the eval file trusts.
-- **Without one, the placeholder is removed entirely — never substituted as
-  `''`.** An empty argument is not the absence of an argument: to most agents
-  it is an instruction, an empty one, and `claude ''` opening every window
-  with a blank prompt to answer is the bug this rule avoids. Every consumer of
-  `command` and `resume_command` fills the template, `base` included, or the
-  literal `{prompt}` would leak into a shell line.
-- **A prompt aimed at a template with no placeholder is refused, not
-  appended.** Appending happens to be right for claude and is still a guess
-  about an arbitrary agent's CLI; the error names the setting and shows where
-  the text belongs. It is checked before anything is created, so the refusal
-  never leaves a half-made worktree behind an error about a flag.
-
-**A prompt that reached no agent is warned about.** The command carrying it
-runs only in a window that was actually created, and `resume` mostly finds
-windows rather than creating them — so `openWindow` reports which of the two
-happened, and a prompt that landed on an already-open window gets a warning
-naming the recovery: paste it there. Silently dropping text the user typed
-once and cannot retype from memory would be the quiet failure everything else
-here refuses to be. `base` takes no `--prompt` at all, since reusing its one
-window is its normal case — the flag would warn more often than it worked.
 
 ## Reporting what failed
 
@@ -788,15 +403,24 @@ What it writes, in full:
 |---|---|
 | `<config dir>/<name>.toml` | The registry *is* the configuration; there is no treewright without it. One directory, `rm -r` and it is gone. |
 | `<main_dir>/.git/treewright/post-create-*` | A background step's log and failure marker, inside the repository's own `.git`, which goes when the repository does. |
+| `<main_dir>/.claude/skills/treewright/` | The agent plugin, written by `agent-init` — inside the repository, in a directory treewright named and nothing else writes to. `rm -r` and it is gone, and `claude plugin disable treewright@skills-dir` stops it loading without deleting anything. |
+| `~/.claude/skills/treewright/` | The same plugin, when `agent-init --global` is asked for it. The only thing on this list outside a repository besides the registry, and the flag *is* the consent: it is not written unless it is named. |
 | The worktrees themselves | What the tool is for, and `rm` takes each one back. |
 
-Everything else is *printed for a person to place*, which is why `shell-init`,
-`tmux-init` and `agent-init` are three spellings of one pattern. The line in
-your `.zshrc`, the line in your `.tmux.conf`, the hooks in a settings file, the
-skill in a checkout — treewright wrote none of them, so a developer removing
-them is undoing edits they made themselves rather than hunting for edits a
-program made while they were not looking. `agent-init` states it outright:
-*nothing is applied for you, deliberately.*
+Everything else is *printed for a person to place*, which is why `shell-init`
+and `tmux-init` exist at all. The line in your `.zshrc`, the line in your
+`.tmux.conf` — treewright wrote neither, so a developer removing them is
+undoing edits they made themselves rather than hunting for edits a program made
+while they were not looking.
+
+**`agent-init` is the one that writes, and the rule it is held to is the same
+one.** The test was never "does it write" but "whose file is it". The hooks
+used to be printed because they belonged in a settings file the user owns,
+where applying them would have meant a merge reordering somebody else's JSON;
+moved into a plugin directory of treewright's own, there is no file of the
+user's to touch. One directory, named after the tool, holding nothing a person
+put there — which is a thing you can find and delete on the day you stop using
+treewright, and the whole point of keeping this list short.
 
 `tmux-init --apply` looks like the exception and is not: it applies key bindings
 to a running tmux server, in memory, and writes nothing. The one line in
@@ -909,3 +533,4 @@ help and every runtime hint answer in the name the user actually typed. What
 keeps the canonical name is help prose and anything destined for a file —
 tmux.conf lines, shell startup evals — which programs read and shell functions
 never reach.
+

@@ -9,7 +9,7 @@ import (
 )
 
 // The kickoff prompt: --prompt's text lands at the command template's {prompt},
-// and the three rules of docs/design-notes.md's account each get the test that
+// and the three rules of docs/agents.md's account each get the test that
 // would catch their absence — quoting, removal-not-emptying, and refusal.
 
 // TestNewDeliversThePromptShellQuoted proves the prompt arrives as one literal

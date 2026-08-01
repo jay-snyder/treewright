@@ -10,11 +10,31 @@ companions:
 - **`README.md`** — the user-facing tour: pitch, install, quickstart, command and
   config reference. Deliberately short and non-technical. When user-visible
   behavior changes, it changes with it — but keep new rationale out of it.
-- **`docs/design-notes.md`** — why the behavior is what it is: session per repo,
-  window identity, popup sizing, the base checkout, squash-merge detection, the
-  full output contract, safety rules, the eval-file protocol. Read the relevant
+- **`docs/`** — why the behavior is what it is, in three files. Read the relevant
   section before changing behavior in that area; add to it when you decide
   something a future reader would otherwise re-litigate.
+  - **`design-notes.md`** — the base checkout, worktree and window naming, branch
+    prefixes, the full output contract, statuses and squash-merge detection,
+    what gets reported when a background step fails, the safety rules, what
+    treewright is allowed to write, configuration, the eval-file protocol.
+  - **`tmux.md`** — session per repo, window identity, terminal titles, popup
+    sizing and the key bindings.
+  - **`agents.md`** — the agent-state protocol, agent modules and the plugin
+    they install, the kickoff prompt.
+
+## Committing is the maintainer's call, every time
+
+**Never run `git commit`, `git push`, or open a pull request without being asked
+for that specific action.** Permission for one commit is not permission for the
+next one, and a task description that says "commit as you go" describes the
+shape of the work rather than granting it in advance.
+
+Finish the work and leave it in the working tree. Then say what you would
+commit and with what message, and wait. The point is that what lands in this
+repository's history is read before it lands, not audited afterwards — a commit
+made unasked is not a step forward, it is work the maintainer now has to inspect
+and undo. If one was made in error, `git reset --soft HEAD~1` puts every change
+back in the working tree with nothing lost.
 
 ## Build, test, lint
 
@@ -107,7 +127,7 @@ ldflags. Validate config changes with `goreleaser check`.
 | `internal/ui` | Picker, table, color. |
 | `internal/shellinit` | zsh/bash/fish shims, as Go string constants. |
 | `internal/tmuxinit` | tmux key bindings and titles, as Go string constants. |
-| `internal/agentinit` | Facts about coding agents, one module per agent: launch/resume defaults, local-state carries, the hooks and driving-guide skill `agent-init` prints. |
+| `internal/agentinit` | Facts about coding agents, one module per agent: launch/resume defaults, local-state carries, and the plugin `agent-init` installs — checked in under `plugins/<agent>/`, embedded file by named file. |
 | `internal/gittest` | Scratch-repo builder for tests (bare origin + checkout). |
 | `internal/testenv` | Whether a missing tool is a skip or, under `CI`, a failure. |
 
@@ -204,19 +224,22 @@ template without the placeholder is refused *before anything is created*.
 `openWindow` reports created-vs-found so callers can warn when a prompt landed
 on a window that was already open and its command never ran.
 
-**treewright writes its own registry and nothing else outside a repository.**
-The whole list is `<config dir>/<name>.toml`, `.git/treewright/post-create-*`
-inside the repo, and the worktrees. Everything else — the shell line, the tmux
-line, the agent's hooks, the skill, any `.gitignore` entry — is *printed for a
-person to place*, and `shell-init`/`tmux-init`/`agent-init` are three spellings
-of that one pattern. `tmux-init --apply` is not an exception: it sets bindings
-on a running server and writes no file.
+**treewright writes its own registry, its own plugin directory, and nothing
+else.** The whole list is `<config dir>/<name>.toml`,
+`.git/treewright/post-create-*` inside the repo, the worktrees, and
+`.claude/skills/treewright/` — `~/.claude/skills/treewright/` only when
+`agent-init --global` names it. Everything else — the shell line, the tmux line,
+any `.gitignore` entry — is *printed for a person to place*. `tmux-init
+--apply` is not an exception: it sets bindings on a running server and writes
+no file.
 
-A new feature that wants to edit a dotfile, a settings file or a `.gitignore`
-must print instead. There is no uninstall script, so every file written outside
-a repository is one a developer has to hunt down by hand the day they stop using
-treewright — and a tool that cannot be cleanly abandoned is harder to adopt. See
-"What treewright is allowed to write" in `docs/design-notes.md`.
+The test is not "does it write" but **whose file is it**. A new feature that
+wants to edit a dotfile, a settings file or a `.gitignore` must print instead;
+a directory named after treewright, holding nothing a person put there, is
+treewright's to rewrite. There is no uninstall script, so every path on that
+list has to be one a developer can find and delete the day they stop using
+treewright. See "What treewright is allowed to write" in
+`docs/design-notes.md`.
 
 **Anything that is a fact about a particular agent lives in `internal/agentinit`.**
 Core stays agent-agnostic: it provides protocols (`signal`, `command`, the
@@ -226,16 +249,35 @@ the branch_prefix pair, setting both is not an error), and the module's
 local-state files are carried into new worktrees *silently when absent*, which
 is the one way `AgentCarries()` differs from `carry_files`. The module is never
 inferred from `command`'s first word for behavior; only doctor's warn-level
-wiring check may sniff it. See "Agent modules" in `docs/design-notes.md`.
+wiring check may sniff it. See "Agent modules" in `docs/agents.md`.
 
 **A module's per-project artifacts are carried, and the list is derived.**
-`Agent.LocalState()` is computed from `ProjectSettings` and `ProjectSkillPath`
-rather than written out beside them, so a module cannot name a per-project file
-it forgets to carry — that omission puts the file in the main checkout and in no
-worktree, which is the trap `agent = "claude"` exists to close. Per-repo is the
+`Agent.LocalState()` is computed from `ProjectSettings` and the plugin's own
+files rather than written out beside them, so a module cannot name a
+per-project file it forgets to carry — that omission puts the file in the main
+checkout and in no worktree, which is the trap `agent = "claude"` exists to
+close. It names each plugin file rather than the directory, because `carryOne`
+copies files and skips directories, and a `carry_files` entry naming a
+directory has no meaning for the warn-when-missing rule. Per-repo is the
 placement `agent-init` leads with, because treewright is a tool you use in some
-repositories and not others; the `User*` paths are the second option it names,
-never the first. treewright writes to no `.gitignore` and generates none.
+repositories and not others; `--global` is the second option it names, never the
+first. treewright writes to no `.gitignore` and generates none.
+
+**A module's plugin is checked in, and every file of it is named in Go.**
+The bytes live under `internal/agentinit/plugins/<agent>/`, so the tree a
+contributor reads and lints is byte for byte the tree `agent-init` writes — but
+each file reaches the binary through a `//go:embed` naming *it*, never a pattern
+that walks the folder. **Nothing ships because it was sitting in the
+directory.** A plugin directory is not documentation: Claude Code loads `bin/`
+as executables on the Bash tool's PATH and `.mcp.json` as servers to start, so a
+file appearing there is code running on every installer's machine and carried
+into every worktree, and "a file was added" is the easiest thing to miss in a
+diff. `TestThePluginShipsOnlyWhatItDeclares` closes the other direction, failing
+on a file that is checked in and declared by nobody — silently inert is its own
+surprise. Nothing in Go touches a byte of those files, including the driving
+guide: each module owns its whole skill, because a skill is written for a
+particular reader, and what holds the copies to the CLI is
+`TestThePluginTeachesTheCLIThatExists` rather than a shared file.
 
 **Branch-name rules live in `internal/refname`, not in the code that uses them.**
 `CheckSlug` runs in `new`, `CheckPrefix` runs in `config.Load`, and both are
@@ -264,7 +306,7 @@ option `@treewright_agent_state`, never on disk — the agent is the window's
 command, so agent death is state death — and the `!` waiting marker is display
 only: `tmux.Windows` strips it at parse, so `Window.Name` is always the clean
 name. The held-open wrapper is the one place a window outlives its agent, and it
-clears both itself. See "Agent state" in `docs/design-notes.md`.
+clears both itself. See "Agent state" in `docs/agents.md`.
 
 **Read-only-looking commands still write to `.git`.** Squash-merge detection
 synthesizes a dangling commit object (`IsMerged`), with fixed author/committer

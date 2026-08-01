@@ -47,6 +47,20 @@ jobs:
             command -v "$tool" || brew install "$tool"
           done
 
+      # The agent plugin is validated by asking claude itself — `claude plugin
+      # validate`, which checks the manifest and hooks.json against the schema
+      # that actually loads them, where a strings.Contains against a layout this
+      # repo believes in would keep passing after that layout changed. It is the
+      # same move as parsing the shell shims with each shell.
+      #
+      # It runs unauthenticated: validate reads files and exits, and touches the
+      # network only to be installed. The suite's own claude tests never launch
+      # an agent — internal/cli stubs an inert one first on PATH.
+      - name: Install claude
+        run: |
+          curl -fsSL https://claude.ai/install.sh | bash
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
       - name: gofmt
         run: |
           unformatted="$(gofmt -l .)"
