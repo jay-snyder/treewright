@@ -22,22 +22,25 @@ package agentinit
 // or resumed. The templates must agree with the config package's defaults,
 // which a test holds them to.
 var claude = Agent{
-	Name:          "claude",
-	Command:       "claude {prompt}",
-	ResumeCommand: "claude --continue {prompt}",
-	LocalState:    []string{".claude/settings.local.json"},
-	UserSettings:  "~/.claude/settings.json",
-	Hooks:         claudeHooks,
-	Skill:         claudeSkill,
-	SkillPath:     "~/.claude/skills/treewright/SKILL.md",
+	Name:             "claude",
+	Command:          "claude {prompt}",
+	ResumeCommand:    "claude --continue {prompt}",
+	ProjectSettings:  ".claude/settings.local.json",
+	UserSettings:     "~/.claude/settings.json",
+	ProjectSkillPath: ".claude/skills/treewright/SKILL.md",
+	UserSkillPath:    "~/.claude/skills/treewright/SKILL.md",
+	Hooks:            claudeHooks,
+	Skill:            claudeSkill,
 }
 
 // claudeSkill packages the shared driving guide as a Claude Code skill. The
 // frontmatter's description is what decides when Claude loads it, so it names
 // the moments the guide is for — starting parallel work, checking what is in
 // flight, tearing down — and claims the ground `git worktree` would otherwise
-// take. User-level rather than per-project, like the hooks: the knowledge is
-// about the tool, not about any repository.
+// take. Per-project by default and carried into every worktree, like the
+// hooks: the knowledge is about the tool, but wanting the tool is a fact about
+// a repository, and a globally installed skill teaches every checkout to reach
+// for a command that repository has no config for.
 const claudeSkill = `---
 name: treewright
 description: Manage parallel work in repositories that use treewright (tw) — a git worktree, tmux window, and agent session per piece of work. Use when starting a task in parallel, spawning another agent on one, checking which worktrees and agents are in flight or need attention, resuming earlier work, or cleaning up merged branches. Use instead of raw git worktree in a treewright-managed repository.

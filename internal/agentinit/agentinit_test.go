@@ -80,8 +80,17 @@ func TestClaudeModuleFacts(t *testing.T) {
 	if module.Command != "claude {prompt}" || module.ResumeCommand != "claude --continue {prompt}" {
 		t.Errorf("launch defaults = %q / %q, want the {prompt} template forms", module.Command, module.ResumeCommand)
 	}
-	if !slices.Contains(module.LocalState, ".claude/settings.local.json") {
-		t.Errorf("LocalState = %v, want the gitignored settings file", module.LocalState)
+	// Both per-project artifacts are carried, which is what keeps a repository
+	// you use treewright in wired and one you do not untouched. The skill is on
+	// this list for the same reason the hooks are: placed in the main checkout
+	// and not carried, it would reach the MAIN window and no worktree.
+	for _, want := range []string{".claude/settings.local.json", ".claude/skills/treewright/SKILL.md"} {
+		if !slices.Contains(module.LocalState(), want) {
+			t.Errorf("LocalState() = %v, want it to carry %s", module.LocalState(), want)
+		}
+	}
+	if module.ProjectSettings != ".claude/settings.local.json" {
+		t.Errorf("ProjectSettings = %q, want the checkout's own settings file", module.ProjectSettings)
 	}
 	if module.UserSettings != "~/.claude/settings.json" {
 		t.Errorf("UserSettings = %q, want the user-level file", module.UserSettings)
@@ -116,7 +125,12 @@ func TestClaudeSkillIsWellFormed(t *testing.T) {
 	if !strings.Contains(body, drivingGuide) {
 		t.Error("the claude skill does not carry the shared driving guide")
 	}
-	if claude.SkillPath == "" {
-		t.Error("no SkillPath — agent-init has nowhere to tell the user to put it")
+	if claude.ProjectSkillPath == "" || claude.UserSkillPath == "" {
+		t.Error("a skill path is missing — agent-init has nowhere to tell the user to put it")
+	}
+	// The project path is the one the carry moves, so a module that named one
+	// without carrying it would put the skill where no worktree sees it.
+	if !slices.Contains(claude.LocalState(), claude.ProjectSkillPath) {
+		t.Errorf("LocalState() = %v, want it to carry ProjectSkillPath %q", claude.LocalState(), claude.ProjectSkillPath)
 	}
 }

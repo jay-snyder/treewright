@@ -110,21 +110,19 @@ func cmdAgentInit(env *Env, args []string) error {
 
 	if skill {
 		fmt.Fprint(env.Stdout, agent.Skill)
-		env.progressf("save it where %s looks for skills:", agent.Name)
+		env.progressf("save it in the main checkout, where agent = %q carries it into every new worktree:", agent.Name)
 		env.progressf("  mkdir -p %s && treewright agent-init %s --skill > %s",
-			filepath.Dir(agent.SkillPath), agent.Name, agent.SkillPath)
+			filepath.Dir(agent.ProjectSkillPath), agent.Name, agent.ProjectSkillPath)
 		env.progressf("it teaches the agent to drive treewright — starting parallel work, reading the estate, guarded teardown")
+		env.progressf("use %s instead to teach it in every repository, treewright-managed or not", agent.UserSkillPath)
 		return nil
 	}
 
 	fmt.Fprint(env.Stdout, agent.Hooks)
-	env.progressf("add these hooks to %s — they run \"treewright signal\" as %s works, and the AGENT column of \"%s ls\" says which window wants you",
-		agent.UserSettings, agent.Name, env.Argv0)
-	env.progressf("they are safe to keep global: outside a treewright window, signal does nothing, quietly")
-	if len(agent.LocalState) > 0 {
-		env.progressf("prefer per-repo? put them in %s under the main checkout instead, and set agent = %q in the repo's config so every new worktree gets a copy",
-			agent.LocalState[0], agent.Name)
-	}
+	env.progressf("add these hooks to %s in the main checkout — they run \"treewright signal\" as %s works, and the AGENT column of \"%s ls\" says which window wants you",
+		agent.ProjectSettings, agent.Name, env.Argv0)
+	env.progressf("set agent = %q in the repo's config so every new worktree gets a copy — without it the hooks reach the main checkout and no worktree at all", agent.Name)
+	env.progressf("use %s instead to cover every repository at once: outside a treewright window, signal does nothing, quietly", agent.UserSettings)
 	return nil
 }
 

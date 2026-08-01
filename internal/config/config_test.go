@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -283,8 +284,12 @@ func TestAgentKeyIsADefaultsBundle(t *testing.T) {
 		t.Errorf("module defaults = %q / %q, want the global defaults %q / %q",
 			bare.Command, bare.ResumeCommand, DefaultCommand, DefaultResumeCommand)
 	}
-	if got := bare.AgentCarries(); len(got) != 1 || got[0] != ".claude/settings.local.json" {
-		t.Errorf("AgentCarries() = %v, want the agent's settings file", got)
+	// Every per-project artifact the module has, not just its settings: the
+	// skill placed in the main checkout and not carried would reach the MAIN
+	// window and no worktree, which is the trap the carry closes.
+	want := []string{".claude/settings.local.json", ".claude/skills/treewright/SKILL.md"}
+	if got := bare.AgentCarries(); !slices.Equal(got, want) {
+		t.Errorf("AgentCarries() = %v, want %v", got, want)
 	}
 
 	// agent-plus-command is override, not a load error: the file still says
@@ -298,9 +303,10 @@ func TestAgentKeyIsADefaultsBundle(t *testing.T) {
 	}
 
 	// Writing the same path in carry_files changes nothing but the semantics —
-	// the explicit entry warns when missing, so it must own the copy.
-	if got := load("listed").AgentCarries(); len(got) != 0 {
-		t.Errorf("AgentCarries() = %v, want nothing left after the explicit entry", got)
+	// the explicit entry warns when missing, so it must own the copy. The
+	// module's other artifacts are unaffected and still carried implicitly.
+	if got := load("listed").AgentCarries(); slices.Contains(got, ".claude/settings.local.json") {
+		t.Errorf("AgentCarries() = %v, want the explicitly listed entry deduped out", got)
 	}
 
 	if got := load("none").AgentCarries(); len(got) != 0 {
