@@ -81,6 +81,7 @@ func cmdNew(env *Env, args []string) error {
 			if err := repo.AddWorktreeNewBranch(dir, branch, "origin/"+cfg.BaseBranch); err != nil {
 				return err
 			}
+			warnIfBaseIsAhead(env, repo, cfg)
 		} else if repo.BranchExists(cfg.BaseBranch) {
 			// Offline: a local base branch is a stale but usable fork point.
 			env.warnf("origin unreachable — forking from the local %s instead\nit may be behind what is on origin", cfg.BaseBranch)
@@ -117,6 +118,38 @@ func cmdNew(env *Env, args []string) error {
 	}
 	warnIfPromptUndelivered(env, prompt, created, err)
 	return nil
+}
+
+// warnIfBaseIsAhead says so when the base branch holds commits origin has not
+// got, on the path that forks from origin.
+//
+// Nothing is wrong here — the fork point is the one treewright promises, and
+// pushing is the user's own call — but what is easy to miss is what it means
+// for the worktree just made: work committed in the base checkout and not
+// pushed is not in it, and files that exist only in those commits do not exist
+// there at all. That is a message worth one line now rather than an empty file
+// three steps into the work, which is where it otherwise surfaces.
+//
+// The comparison is the local base branch against origin's, not whatever the
+// base checkout happens to have out: the branch is what `new` would have forked
+// from, and a checkout parked elsewhere is a separate question that `base`
+// already asks.
+//
+// Three lines, in the order every message here takes: the finding, what it
+// costs, then what to do about it with the copyable part last. Said as one
+// sentence it ran to three clauses hung off each other, and the reader who most
+// needs it is the one who has just watched a worktree open and is already
+// typing in it.
+func warnIfBaseIsAhead(env *Env, repo git.Repo, cfg *config.Config) {
+	ahead, _, ok := repo.AheadBehind(cfg.BaseBranch, cfg.BaseBranch)
+	if !ok || ahead == 0 {
+		return
+	}
+	env.warnf("%s has %s not on origin/%s\n"+
+		"the worktree forks from origin, so that work is not in it\n"+
+		"push %s and remake the worktree, or bring them over from inside it:  %s",
+		cfg.BaseBranch, count(ahead, "commit", "commits"), cfg.BaseBranch, cfg.BaseBranch,
+		env.copyable(fmt.Sprintf("git cherry-pick origin/%s..%s", cfg.BaseBranch, cfg.BaseBranch)))
 }
 
 // warnIfPromptUndelivered says so when a --prompt never reached an agent: the
@@ -159,11 +192,14 @@ func validateSlug(cfg *config.Config, slug string) error {
 	return nil
 }
 
-// carryFiles copies in the files git ignores and the app needs: .env files,
-// local credentials, editor settings. A new worktree starts without them.
+// carryFiles copies in what a new worktree starts without and the app needs:
+// .env files, local credentials, editor settings. Usually files git ignores,
+// which is why they are missing from a fresh checkout, but the rule is what the
+// worktree needs rather than what git hides.
 //
 // The agent module's local-state files ride along when the config names an
-// agent, differing in one way: missing ones are skipped silently. An explicit
+// agent — the plugin among them, which nothing ignores until the repository
+// says so — differing in one way: missing ones are skipped silently. An explicit
 // carry_files entry warns because the user asserted the file exists and a
 // missing one is a stale config; the agent's were asserted by nobody, and a
 // checkout that has never run the agent has nothing to carry yet.
@@ -529,18 +565,27 @@ func cmdLs(env *Env, args []string) error {
 	session := sessionFor(cfg)
 	windows := tmux.Windows(session)
 
-	// Nothing at all when there are no worktrees, in either mode. The base
-	// checkout heads the listing as it heads the menu, but a table holding only
-	// the row that is always there says nothing a repository with no worktrees
-	// needs to hear, and a JSON consumer counting what it can work on should not
-	// have to subtract the one row it can never remove.
+	// The base checkout heads the listing as it heads the menu, and in a
+	// repository with no worktrees yet the two modes part company: the table
+	// prints nothing, the JSON still carries the base row.
 	//
-	// This is the one state where the listing and the menu differ, and they
-	// differ because they are for different things. The menu is a way through, so
-	// it must offer the base checkout precisely when there is nothing else to
-	// offer. A listing is an answer, and "no worktrees" is the answer.
+	// They differ because they are for different things. The table is for a
+	// person, and one holding only the row that is always there says nothing a
+	// repository with no worktrees needs to hear — "no worktrees" is the answer,
+	// and it goes on stderr where an answer's readers will not trip over it.
+	// The JSON is a schema, and a row that appears only sometimes is not one: a
+	// consumer working out where to put a piece of work reads row 0, and having
+	// to check first whether row 0 exists makes every reader of the schema carry
+	// the special case.
+	//
+	// The empty array was also read as "this repository is not registered",
+	// which sent its reader through --help and the config files looking for a
+	// registration that was already there. That state has an answer of its own —
+	// an unregistered repo exits 1 with "no registered config matches repo
+	// <path>" — so the fault was never an unanswerable question, it was one
+	// schema saying two things.
 	infos := make([]git.Info, 0, len(managed)+1)
-	if len(managed) > 0 {
+	if asJSON || len(managed) > 0 {
 		infos = append(infos, repo.BaseCheckout(cfg.BaseBranch))
 	}
 	for _, wt := range managed {
@@ -557,8 +602,9 @@ func cmdLs(env *Env, args []string) error {
 	}()
 
 	if asJSON {
-		// An empty array, not a message: a caller parsing this needs valid JSON
-		// whether or not there is anything to report.
+		// An array, never a message: a caller parsing this needs valid JSON
+		// whether or not there is anything to report, and the base row is there
+		// in every repository this command can answer about.
 		return writeJSON(env, worktreesJSON(infos, windows))
 	}
 	if len(infos) == 0 {

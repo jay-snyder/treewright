@@ -205,7 +205,15 @@ func TestThePluginTeachesTheCLIThatExists(t *testing.T) {
 	if len(named) < 5 {
 		t.Fatalf("only %d commands found in the plugin — the extraction is likely broken: %v", len(named), named)
 	}
+	// help and version are dispatched by Run itself rather than from the command
+	// table, so lookup has never heard of them. They are commands all the same,
+	// and a guide pointing at "treewright help new" — which is where an agent
+	// finds the detail this file has no room for — points at something real.
+	runByDispatch := map[string]bool{"help": true, "version": true}
 	for name := range named {
+		if runByDispatch[name] {
+			continue
+		}
 		if lookup(name) == nil {
 			t.Errorf("the plugin teaches %q, which is not a command", name)
 		}
@@ -370,6 +378,37 @@ func TestDoctorNamesTheCarryTrap(t *testing.T) {
 	}
 	if !strings.Contains(out, "reports state through its plugin") {
 		t.Errorf("doctor = %q, want the wired state reported ok", out)
+	}
+}
+
+// TestDoctorNamesAPluginNothingIgnores covers the state agent-init can only
+// warn about once: a directory treewright invented, which nothing ignores, so
+// it reads as untracked in the main checkout and — being carried — in every
+// worktree made after it. The sentence at install time scrolls away; the state
+// does not, which is what doctor is for.
+func TestDoctorNamesAPluginNothingIgnores(t *testing.T) {
+	f := agentFixture(t, "agent = 'claude'\n")
+	f.mustRun("agent-init", "claude")
+
+	out, _ := f.run("doctor")
+	if !strings.Contains(flat(out), "git neither ignores nor tracks .claude/skills/treewright") {
+		t.Errorf("doctor = %q, want the unignored plugin named", out)
+	}
+
+	// Ignoring it is one way out, and it is the user's own edit — treewright
+	// writes to no .gitignore, so what doctor offers is a line to paste.
+	f.Write(f.MainDir, ".gitignore", ".env\n.claude/skills/treewright/\n")
+	if out, _ := f.run("doctor"); strings.Contains(out, "neither ignores nor tracks") {
+		t.Errorf("doctor = %q, want the warning gone once the plugin is ignored", out)
+	}
+
+	// Committing it is the other, and a real choice: a team can decide everyone
+	// who clones gets the wiring. Either way there is nothing left to report.
+	f.Write(f.MainDir, ".gitignore", ".env\n")
+	f.Git(f.MainDir, "add", ".claude/skills/treewright")
+	f.Git(f.MainDir, "commit", "--quiet", "-m", "wire treewright up for everyone")
+	if out, _ := f.run("doctor"); strings.Contains(out, "neither ignores nor tracks") {
+		t.Errorf("doctor = %q, want the warning gone once the plugin is committed", out)
 	}
 }
 

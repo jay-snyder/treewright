@@ -217,7 +217,8 @@ every repository covered at once, and costs little because `signal` silently
 no-ops outside treewright windows.
 
 The per-repo placement has a trap, and closing it is what `agent = "claude"` is
-for. That directory is gitignored — or at least uncommitted — so **every
+for. That directory is uncommitted — treewright invented the path, so nothing
+ignores it and nothing tracks it until somebody says which — so **every
 worktree treewright creates starts without it**, and wiring placed there reaches
 the MAIN window and no worktree at all unless something carries it. Project-scope
 plugins loading from the start directory rather than the repository root make
@@ -269,11 +270,27 @@ gets — and one commented line to remove when it guessed wrong.
 
 **What `doctor` asks about the wiring**, in order: is the plugin installed, in
 the checkout or at user level; is what is installed what this treewright would
-write; does the per-repo copy reach the worktrees; and is there a hooks paste
-left in a settings file. The last one is the upgrade path — a paste an older
-treewright printed still works, because Claude Code runs hooks from every scope
-it loads, so it is reported as wiring nothing can update when it is all there
-is, and as a duplicate to delete once the plugin is in.
+write; does the per-repo copy reach the worktrees; does git either ignore it or
+track it; and is there a hooks paste left in a settings file. The paste is the
+upgrade path — one an older treewright printed still works, because Claude Code
+runs hooks from every scope it loads, so it is reported as wiring nothing can
+update when it is all there is, and as a duplicate to delete once the plugin is
+in.
+
+The ignore check is the one `agent-init` already speaks to, and saying it twice
+is deliberate. `agent-init` says it unconditionally, at install time, because the
+answer costs a git call to learn and the sentence is worth reading either way —
+but that sentence is read once, by somebody in the middle of installing, and the
+state it warns about outlives it. A plugin neither ignored nor committed shows as
+untracked in the main checkout and, being carried, in every worktree made after
+it: a `??` beside a directory the developer did not create, in eight checkouts at
+once. `doctor` is where a half-configured repository gets asked again, and it is
+also where the question can be answered rather than assumed, git already being in
+hand. Both ways out are named because both are the repository's decision and not
+treewright's: ignoring keeps the wiring local to whoever wants it, committing
+hands it to everyone who clones, and a team may well want the second. treewright
+still writes to no `.gitignore` — what `doctor` reports is a state, and what it
+offers is a sentence.
 
 ## The kickoff prompt
 

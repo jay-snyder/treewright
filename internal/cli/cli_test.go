@@ -387,6 +387,43 @@ func TestNewCreatesWorktreeAndBranch(t *testing.T) {
 	}
 }
 
+// TestNewWarnsWhenTheBaseCheckoutIsAheadOfOrigin covers the gap between where a
+// branch forks from and where the user has been working: commits made in the
+// main checkout and not pushed are invisible to a worktree forked from origin,
+// so the files they added are simply not there. Discovering that from an empty
+// directory three steps into the work is what the warning is for.
+func TestNewWarnsWhenTheBaseCheckoutIsAheadOfOrigin(t *testing.T) {
+	f := newFixture(t, "")
+	f.Commit(f.MainDir, "groundwork nobody has pushed")
+
+	r := f.exec("new", "alpha")
+	if r.err != nil {
+		t.Fatalf("new: %v\n%s", r.err, r.both())
+	}
+	if !strings.Contains(flat(r.stderr), "main has 1 commit not on origin/main") {
+		t.Errorf("stderr = %q, want the unpushed base commits counted", r.stderr)
+	}
+	// The count alone would leave the reader to work out why it matters here,
+	// and knowing why is no use without the two ways out.
+	if !strings.Contains(flat(r.stderr), "so that work is not in it") {
+		t.Errorf("stderr = %q, want what it means for the worktree just made", r.stderr)
+	}
+	if !strings.Contains(flat(r.stderr), "git cherry-pick origin/main..main") {
+		t.Errorf("stderr = %q, want the command that brings the commits over", r.stderr)
+	}
+	// Warnings are not the answer: cd "$(treewright new alpha)" still gets a path.
+	if strings.TrimSpace(r.stdout) != f.DirFor("alpha") {
+		t.Errorf("stdout = %q, want the worktree path alone", r.stdout)
+	}
+
+	// Pushed, there is nothing to say — and nothing is said, since a warning
+	// that appears whatever the state is one nobody reads.
+	f.Push(f.MainDir, "main")
+	if r := f.exec("new", "beta"); strings.Contains(r.stderr, "not on origin/main") {
+		t.Errorf("stderr = %q, want silence once the base branch is pushed", r.stderr)
+	}
+}
+
 func TestNewStripsAnAlreadyPrefixedSlug(t *testing.T) {
 	f := newFixture(t, "")
 
@@ -1300,21 +1337,46 @@ func TestLsJSON(t *testing.T) {
 	// stubbed command exited, which is not this test's subject.
 }
 
-func TestLsJSONIsAnEmptyArrayWithNoWorktrees(t *testing.T) {
+// TestLsJSONCarriesTheBaseCheckoutWithNoWorktrees is where the two modes part
+// company. The table prints nothing, because "no worktrees" is the whole of
+// what a person wants to hear; the JSON keeps its shape, because a schema whose
+// first row appears only sometimes makes every consumer carry the special case
+// — and because an empty array was read as "this repository is not registered",
+// which is a state with an answer of its own.
+func TestLsJSONCarriesTheBaseCheckoutWithNoWorktrees(t *testing.T) {
 	f := newFixture(t, "")
 
-	// A caller parsing this needs valid JSON whether or not there is anything to
-	// report, so the empty case cannot be a prose message.
 	r := f.exec("ls", "--json")
 	if r.err != nil {
 		t.Fatalf("ls --json: %v", r.err)
 	}
-	var rows []map[string]any
+	var rows []struct {
+		Base   bool   `json:"base"`
+		Slug   string `json:"slug"`
+		Dir    string `json:"dir"`
+		Status string `json:"status"`
+	}
 	if err := json.Unmarshal([]byte(r.stdout), &rows); err != nil {
 		t.Fatalf("output is not valid JSON: %v\n%q", err, r.stdout)
 	}
-	if len(rows) != 0 {
-		t.Errorf("got %d rows, want none", len(rows))
+	if len(rows) != 1 {
+		t.Fatalf("got %d rows, want the base checkout alone: %s", len(rows), r.stdout)
+	}
+	if row := rows[0]; !row.Base || row.Status != "base" || row.Slug != "" || row.Dir != f.MainDir {
+		t.Errorf("row = %+v, want the main checkout flagged and unslugged", row)
+	}
+
+	// The table is unchanged: still nothing on stdout, still the explanation on
+	// the other stream.
+	if plain := f.exec("ls"); plain.stdout != "" {
+		t.Errorf("ls stdout = %q, want the table to stay empty", plain.stdout)
+	}
+
+	// And the state the empty array used to be mistaken for is still entirely
+	// different: an unregistered repository is an error naming what it looked in.
+	t.Setenv("TREEWRIGHT_CONFIG_DIR", t.TempDir())
+	if r := f.exec("ls", "--json"); r.err == nil {
+		t.Errorf("an unregistered repo answered with %q, want an error", r.stdout)
 	}
 }
 
@@ -1387,6 +1449,10 @@ func TestMessagesShareOneVoice(t *testing.T) {
 	f := newFixture(t, "carry_files = ['.env']\n")
 	f.mustRun("new", "alpha")
 	f.Commit(f.DirFor("alpha"), "local work")
+	// Unpushed in the main checkout too, which is what makes the next new warn
+	// that its worktree does not have it: a message that only appears in one
+	// state is one the voice check only sees if the state is arranged for.
+	f.Commit(f.MainDir, "unpushed groundwork")
 
 	var lines []string
 	for _, args := range [][]string{

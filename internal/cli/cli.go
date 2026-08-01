@@ -136,7 +136,9 @@ prints the command to attach with.
 
 The branch always forks from origin/<base_branch>; there is deliberately no flag
 to base it on anything else. When origin is unreachable, the local base branch is
-used instead and that is reported.
+used instead and that is reported. Commits sitting unpushed in your main checkout
+are not in the new worktree either, files and all, so that is reported too — push
+and recreate it, or cherry-pick them over.
 
 When a branch of that name already exists — your own earlier work, or a colleague's
 pull request you have fetched — it is checked out rather than recreated, so this is
@@ -299,8 +301,11 @@ is marked with an asterisk.
 The base checkout heads the listing, as it heads the resume menu, under the branch
 it is parked on. Its status is "base" rather than one of the removable ones, and
 its divergence is how far your main checkout has drifted from origin — whether
-what you are reading there is stale. Nothing is printed at all until there is at
-least one worktree.
+what you are reading there is stale.
+
+With no worktrees yet the table prints nothing, "no worktrees" being the whole of
+the answer, while --json still carries the base row: a schema whose first row
+comes and goes is one every reader has to test before using.
 
 Changes no working tree, branch, or ref, though detecting a squash merge writes a
 dangling object to the object database. It also does not fetch, so a branch that
@@ -362,7 +367,8 @@ origin/HEAD, a branch prefix from your git email, and any gitignored env files
 worth carrying into new worktrees.
 
 Everything it guesses is reported and written as editable TOML — the file is the
-record, not this command. It refuses to overwrite an existing config.
+record, not this command, and it says which values were read off the repository
+and which were guessed. It refuses to overwrite an existing config.
 
 The name defaults to the repository's directory name, and is what you pass to
 commands that take a [repo].`,
