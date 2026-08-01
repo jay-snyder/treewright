@@ -63,6 +63,12 @@ func TestAgentInitSkillPrintsTheGuideAndItsHome(t *testing.T) {
 	if !strings.Contains(r.stderr, "treewright agent-init claude --skill >") {
 		t.Errorf("stderr = %q, want the redirect one-liner", r.stderr)
 	}
+	// The project path is treewright's own invention, so nothing ignores it
+	// until someone says so — and a skill committed by accident is treewright
+	// imposed on everyone who clones the repository.
+	if !strings.Contains(r.stderr, ".gitignore") {
+		t.Errorf("stderr = %q, want the reader told the skill is not ignored for them", r.stderr)
+	}
 }
 
 // TestTheSkillTeachesTheCLIThatExists holds the driving guide to the command

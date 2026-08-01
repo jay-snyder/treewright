@@ -119,16 +119,14 @@ Add one line to `~/.tmux.conf`:
 run-shell 'treewright tmux-init --apply'
 ```
 
-That binds two keys:
+That binds two keys, which open a popup over whatever's running — a treewright
+window runs your agent as the window's command, so there's no shell in there to
+type into:
 
 | Key | What it does |
 |---|---|
 | `prefix + T` | Pick a worktree and jump to it |
 | `prefix + N` | Type a slug, get a worktree |
-
-You need them because a treewright window runs your agent as the window's
-command. There's no shell in there to type into. The keys open a popup on top of
-whatever's running, and close it again when you've picked.
 
 `run-shell` looks up `treewright` in the tmux server's `PATH`, not your shell's,
 and tmux says nothing when a line in your config fails. So if the keys do nothing,
@@ -202,26 +200,16 @@ AGENT column saying exactly that, and a window whose agent is waiting on you
 gets a `!` in front of its name in the tmux status line. Agents that report
 nothing cost nothing: the column only exists once something has signaled.
 
-Any agent that can run a command when its state changes can report this way,
-and treewright prints the wiring for the ones it knows:
+Any agent that can run a command when its state changes can report this way, and
+`tw agent-init claude` prints the wiring for the ones it knows. Add `--skill` and
+it prints the other direction too: a skill teaching the agent to drive treewright
+— read what's in flight, spawn a sibling worktree with a prompt, respect the
+teardown guards — so you can ask the agent in your MAIN window to farm three jobs
+out to three worktrees and it knows exactly how.
 
-```sh
-tw agent-init claude
-```
-
-That's the hooks, with instructions alongside. They go in the main checkout's
-`.claude/settings.local.json`, and `agent = "claude"` in the config carries that
-file into every new worktree — so the repos you use treewright in are wired and
-the ones you don't are untouched. If you'd rather cover everything at once,
-`~/.claude/settings.json` works too: outside a treewright window, `signal` does
-nothing, quietly.
-
-The same command teaches the agent the other direction. `tw agent-init claude
---skill` prints a skill that shows Claude how to drive treewright itself —
-list what's in flight, spawn a sibling worktree with a prompt, respect the
-teardown guards — so you can ask the agent in your MAIN window to farm three
-jobs out to three worktrees and it knows exactly how. It lives in the checkout's
-`.claude/skills/` and rides the same carry, so every worktree's agent knows it.
+Both go in the main checkout's `.claude/`, and `agent = "claude"` in the config
+carries them into every new worktree: the repos you use treewright in are wired,
+and the ones you don't are untouched.
 
 Hit `prefix + T` and that same table becomes a menu, in a popup sized to fit it:
 
@@ -264,8 +252,7 @@ run to fill the AGENT column; you won't type either yourself.
 You don't have to spell slugs out. `tw cd eng-2318` finds
 `eng-2318-cart-total-rounding` and tells you that's what it did. If a
 prefix matches two worktrees you get an error listing both, because guessing on
-`tw rm` is how people lose work. Several commands take a second name too, if the
-first isn't what came to mind: `create`, `remove`, `list`, `reopen`, `main`.
+`tw rm` is how people lose work.
 
 Output is pipe-friendly. stdout is the answer and nothing else, so
 `cd "$(tw new eng-2318)"` and `tw ls --json | jq` both do what you'd hope.
@@ -277,45 +264,24 @@ One TOML file per repo, written by `tw setup`, in
 commands that take a `[repo]`.
 
 ```toml
-main_dir      = "~/code/storefront"  # required: your main checkout
-base_branch   = "staging"            # fork from and compare against this (default: main)
-branch_prefix = "john/"              # branch name is <prefix><slug> (default: none)
-
-# Or, if your team namespaces by kind of work rather than by person, list them
-# instead and pick one by naming it: `tw new bug/eng-1` branches bug/eng-1, and
-# the worktree is still repo-eng-1. A bare slug gets the first. One key or the
-# other, not both.
-# branch_prefixes = ["feature/", "bug/", "chore/"]
-
-# Files git ignores, like your .env. A new worktree starts without them,
-# so treewright copies them in from your main checkout.
-carry_files = ["apps/api/.env", ".env.local"]
-
-# The agent these windows run. Fills in command and resume_command, and copies
-# the agent's own gitignored settings — permissions, hooks — into each new
-# worktree. `tw setup` writes it when it finds the agent installed.
-agent = "claude"
-
-# What the windows launch; either overrides what agent supplies. {prompt} is
-# where --prompt's text lands, shell-quoted. No prompt, no placeholder — it
-# just disappears.
-command        = "claude {prompt}"
+main_dir       = "~/code/storefront"  # required: your main checkout
+base_branch    = "staging"            # fork from and compare against this (default: main)
+branch_prefix  = "john/"              # branch is <prefix><slug> (default: none)
+# branch_prefixes = ["feature/", "bug/"]   # or several — pick one: `tw new bug/eng-1`
+carry_files    = ["apps/api/.env"]    # gitignored files copied into each new worktree
+agent          = "claude"             # fills in the two commands, carries the agent's own settings
+command        = "claude {prompt}"    # what the window launches; {prompt} takes --prompt's text
 resume_command = "claude --continue {prompt}"
-
-post_create    = "npm install"         # runs in the background after `new`
-
-# Or a list of commands, run in order and stopped at the first failure. Each one
-# is its own step, starting in the worktree root. `new` prints where the log is.
-# post_create = ["npm install", "npm run codegen", "npm run build"]
-
-ticket_pattern = '(?i)^(eng-[0-9]+)'   # first capture group names the window;
-                                       # "" if you don't track work by ticket
-tmux_session   = "shop"                # session for this repo (default: this file's name)
+post_create    = "npm install"        # background setup after `new`; a list runs in order
+ticket_pattern = '(?i)^(eng-[0-9]+)'  # names the window; "" if you don't track work by ticket
+tmux_session   = "shop"               # session for this repo (default: this file's name)
 ```
 
-`main_dir` is the only one you need. Misspell a key and you get an error instead
-of a setting that silently does nothing. If you're ever unsure what's in effect,
-`tw config` prints the lot with defaults filled in, and `tw doctor` checks it.
+`main_dir` is the only one you need, and `tw setup` writes the rest as a
+commented file explaining each one, so this is the shape rather than the manual.
+Misspell a key and you get an error instead of a setting that silently does
+nothing. If you're unsure what's in effect, `tw config` prints the lot with
+defaults filled in, and `tw doctor` checks it.
 
 Nothing that runs for you fails quietly. If `post_create` stops, the next `ls`,
 `cd` or `resume` for that worktree tells you which command it stopped at and where
@@ -338,6 +304,27 @@ standing, and that works from inside a worktree too.
   exists, so treewright offers to close it for you. If that window is the last
   one in the session, it says so first, because closing it would detach you.
 
+## Uninstalling
+
+There's no uninstall script, and the list is short on purpose: treewright writes
+its own registry and nothing else outside a repository. Everything else is a line
+you pasted in yourself.
+
+**Take the worktrees back first, while treewright is still here to do it** —
+afterwards they're ordinary git worktrees, removed one at a time by hand:
+
+```sh
+tw prune --yes                      # every merged, clean worktree
+tw rm <slug>                        # whatever prune left
+brew uninstall --cask treewright    # or: rm $(go env GOPATH)/bin/treewright
+rm -r ~/.config/treewright          # the one thing it wrote for itself
+```
+
+Then delete the `shell-init` line from your shell startup file and the
+`tmux-init` line from `~/.tmux.conf`. Agent hooks and skills were per-repo, so
+they leave with the repo. Leftover tmux sessions close with `tmux kill-session
+-t <repo>`.
+
 ## Questions you might have
 
 ### Why not just use `git worktree`?
@@ -349,30 +336,14 @@ you never pushed.
 
 ### Do I need a ticket system?
 
-No. Nothing in treewright reads a tracker or requires a key. A slug is just a
-name: `tw new dark-mode-toggle` gets you `~/code/app-dark-mode-toggle` on branch
-`john/dark-mode-toggle`, and `tw resume dark-mode` finds it by prefix like any
-other.
+No. Nothing reads a tracker or requires a key — a slug is just a name, and
+`tw new dark-mode-toggle` works exactly like the ticket examples above.
 
-The one place a ticket shows up is the tmux window's name, which is short
-because it sits in the status line. By default treewright looks for a leading
-key like `eng-142` and uses it; when there isn't one, the slug names the window,
-cut to ten characters with a `…` if it's longer:
-
-```
-tw new dark-mode-toggle        →  window DARK-MODE…
-tw new rewrite-css             →  window REWRITE-CSS
-```
-
-If your slugs sometimes *look* like keys and you'd rather they never be read as
-one, turn the search off:
-
-```toml
-ticket_pattern = ""    # no tickets here — the slug always names the window
-```
-
-You can also just say what you want the window called, per worktree:
-`tw new dark-mode-toggle DARKMODE`.
+The only place a ticket shows up is the tmux window's name, which has to be
+short. treewright uses a leading key like `eng-142` when it finds one, and
+otherwise the slug, cut to ten characters with a `…`. Set `ticket_pattern = ""`
+if your slugs sometimes *look* like keys and you'd rather they never be read as
+one, or name a window outright with `tw new dark-mode-toggle DARKMODE`.
 
 ### Do I need to be using an AI agent?
 

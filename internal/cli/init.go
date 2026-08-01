@@ -114,6 +114,14 @@ func cmdAgentInit(env *Env, args []string) error {
 		env.progressf("  mkdir -p %s && treewright agent-init %s --skill > %s",
 			filepath.Dir(agent.ProjectSkillPath), agent.Name, agent.ProjectSkillPath)
 		env.progressf("it teaches the agent to drive treewright — starting parallel work, reading the estate, guarded teardown")
+		// Said unconditionally rather than after a `git check-ignore`, which
+		// would make a pure printer need a repository to run in — agent-init
+		// works outside git entirely. The agent's settings file is
+		// conventionally ignored already and needs no such line; this path is
+		// treewright's own invention, so nothing ignores it until someone says
+		// so, and a committed skill is treewright imposed on everyone who
+		// clones.
+		env.progressf("git will not ignore it on its own — add it to .gitignore unless you mean to hand it to everyone who clones")
 		env.progressf("use %s instead to teach it in every repository, treewright-managed or not", agent.UserSkillPath)
 		return nil
 	}
