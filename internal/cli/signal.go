@@ -71,7 +71,7 @@ func cmdSignal(_ *Env, args []string) error {
 	// Best-effort from here down, in keeping with the silence above: the window
 	// was there a moment ago, and one that has closed since needs no state.
 	_ = tmux.SetAgentState(w.ID, value)
-	if w.Stamped {
+	if w.Stamped() {
 		// Only a window treewright opened gets its name decorated. One the user
 		// opened by hand on a worktree's directory still carries the state option —
 		// harmless, and their status line may read it — but its name is theirs.

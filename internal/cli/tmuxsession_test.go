@@ -284,6 +284,62 @@ func TestBaseSelectsTheOneBaseWindow(t *testing.T) {
 	}
 }
 
+// TestBaseDoesNotMistakeTheCallersOwnShellForTheBaseWindow is the reported bug:
+// `tw base`, typed at a shell standing in the main checkout in a session of the
+// user's own, did nothing at all. The shell was found as the window on the main
+// checkout, so treewright warned that it was switching to a window in another
+// session — naming a session that did not exist — and then switched the client to
+// the session it was already in, which is nothing anyone can see. No session, no
+// window, no agent.
+func TestBaseDoesNotMistakeTheCallersOwnShellForTheBaseWindow(t *testing.T) {
+	requireTmux(t)
+	f := newFixture(t, "command = 'sleep 300'\n")
+
+	// Where you are when you type it: a shell of your own, in the main checkout.
+	startSession(t, "elsewhere", "SHELL", f.MainDir)
+	insideSession(t, "elsewhere")
+
+	r := f.exec("base")
+	if r.err != nil {
+		t.Fatalf("base: %v\n%s", r.err, r.both())
+	}
+
+	if got := windowsIn(t, "proj"); len(got) != 1 || got[0] != "MAIN" {
+		t.Errorf("windows in session proj = %v, want the base window opened", got)
+	}
+	if strings.Contains(r.stderr, "rather than proj") {
+		t.Errorf("stderr = %q, want no switch to a window that is only the caller's own shell", r.stderr)
+	}
+	// And the shell is left where it was: this opens the window the user asked
+	// for, it does not take their own window over.
+	if got := windowsIn(t, "elsewhere"); len(got) != 1 || got[0] != "SHELL" {
+		t.Errorf("windows in session elsewhere = %v, want it untouched", got)
+	}
+}
+
+// TestBaseFromInsideTheBaseWindowStaysWhereItIs is the exemption that keeps the
+// rule above from opening a second window every time: a window treewright opened
+// on the checkout is that checkout's window however it is reached, so running
+// `base` inside it is the no-op it has always been — you are already there.
+func TestBaseFromInsideTheBaseWindowStaysWhereItIs(t *testing.T) {
+	requireTmux(t)
+	f := newFixture(t, "command = 'sleep 300'\n")
+
+	f.mustRun("base")
+	insideSession(t, "proj")
+
+	if r := f.exec("base"); r.err != nil {
+		t.Fatalf("base again: %v\n%s", r.err, r.both())
+	}
+
+	if got := windowsIn(t, "proj"); len(got) != 1 || got[0] != "MAIN" {
+		t.Errorf("windows in session proj = %v, want the one base window", got)
+	}
+	if got := panesOn(t, f.MainDir); got != 1 {
+		t.Errorf("%d panes in the main checkout, want 1", got)
+	}
+}
+
 // TestResumeUsesTheWindowOpenInAnotherSession covers the failure that made
 // resuming across sessions look like nothing at all: selecting a window in a
 // session your client is not attached to succeeds and changes nothing you can
@@ -307,6 +363,17 @@ func TestResumeUsesTheWindowOpenInAnotherSession(t *testing.T) {
 
 	if !strings.Contains(r.stderr, "window ENG-9 is in session elsewhere rather than proj") {
 		t.Errorf("stderr = %q, want the foreign session named", r.stderr)
+	}
+	// And the way in has to reach that session rather than this repository's,
+	// which `treewright attach proj` would — a session that here is not even
+	// running, so the advice would be a dead end. `attach` takes a repository, so
+	// a session belonging to none is spelled as the tmux command it is, aimed at
+	// the server treewright is talking to.
+	if !strings.Contains(r.stderr, "attach-session -t =elsewhere") {
+		t.Errorf("stderr = %q, want the way into the session the window is actually in", r.stderr)
+	}
+	if strings.Contains(r.stderr, "attach proj") {
+		t.Errorf("stderr = %q, want no attach to a session the window is not in", r.stderr)
 	}
 	if got := panesOn(t, wt.Dir); got != 1 {
 		t.Errorf("%d panes in the worktree, want 1 — a duplicate window was opened", got)

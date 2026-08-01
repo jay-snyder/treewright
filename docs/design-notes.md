@@ -41,10 +41,23 @@ What follows from it:
 - **Outside tmux nothing is skipped.** The session and window are created
   detached, and treewright says to run `treewright attach` — its own command
   rather than a `tmux attach` to copy, because that spelling names the session
-  exactly and finds the right server under `TREEWRIGHT_TMUX_LABEL`.
+  exactly and finds the right server under `TREEWRIGHT_TMUX_LABEL`. A window that
+  turns out to be in some *other* session is the exception: `attach` takes a
+  repository and would send you to this repository's session, which is not where
+  the window is and may not be running at all, so that message spells out the
+  `tmux attach-session` for the session the window is really in.
 - **A window in the wrong session is used rather than duplicated** — one you
   opened by hand, or one from before the repository had a session of its own.
   `ls` shows it as `session:window`, and `resume` switches to it there.
+- **Except the pane you are typing into.** Standing in the main checkout is
+  where you are when you type `tw base`, so the shell you type it from is found
+  as the window on that directory — and switching to it is a switch to the
+  session the client is already in. `base` warned that the window was in another
+  session "rather than" one that did not exist yet, then did nothing: no session,
+  no window, no agent, and an attach hint pointing at the session it had just
+  failed to create. A window treewright opened on the directory is exempt, so
+  `base` inside the base window, and `resume` inside a worktree's own window,
+  stay the no-ops they should be — you are already there.
 
 `tmux_session` overrides the name, for one already taken by something else or
 two repositories that deliberately want to share. `tw doctor` reports which
@@ -81,7 +94,14 @@ first: a wrong name in `ls`, the wrong window focused by `resume`, and the wrong
 window offered up for closing by `rm`, all changing under a `swap-window`. The
 resolution order is now rank (stamped for this worktree beats unstamped beats
 stamped for another), then the repository's own session, then the older window
-id. See `claim.beats` in `internal/tmux/tmux.go`.
+id. See `Window.beats` in `internal/tmux/tmux.go`.
+
+The stamp is carried on `Window` as the path it holds rather than as a bool,
+because two questions are asked of it and only one of them is "did treewright
+open this window". `openWindow` asks the other — did treewright open it *on this
+directory* — to tell the checkout's own window apart from a shell standing in it,
+and a bool cannot answer that. `Window.Stamped` remains for the callers that only
+want the first, such as deciding whose window name treewright may decorate.
 
 The options are written at creation, so a window treewright merely finds and
 switches to keeps whatever it already had. The rest are there for your own status
