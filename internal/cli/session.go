@@ -62,9 +62,11 @@ func openWindow(env *Env, cfg *config.Config, spec tmux.Spec) (created bool, err
 	command := spec.Command
 	spec.Command = heldOpenOnFailure(command)
 
-	// A window already sitting in that directory is the session being asked for,
-	// so switch to it rather than opening a duplicate beside it.
-	if w, ok := tmux.Windows(spec.Session)[spec.Dir]; ok {
+	// A window already sitting in that directory is the window being asked for, so
+	// switch to it rather than opening a duplicate beside it — unless it is the
+	// pane treewright is being typed into, which answers the request with the
+	// place the user is already standing.
+	if w, ok := tmux.Windows(spec.Session)[spec.Dir]; ok && !isTheCallersOwnShell(w, spec.Dir) {
 		if w.Session != spec.Session {
 			// Someone's own window, or one opened before this repo had a session
 			// of its own. Switching to it is still better than opening a second
@@ -90,6 +92,31 @@ func openWindow(env *Env, cfg *config.Config, spec tmux.Spec) (created bool, err
 	}
 	focusWindow(env, cfg, w, command)
 	return true, nil
+}
+
+// isTheCallersOwnShell reports that the window found on dir is the pane
+// treewright is being typed into, standing there without being the window
+// treewright opened on it — a shell you happened to cd into the checkout, rather
+// than the window that checkout's commands mean.
+//
+// That is the everyday state of affairs for `base`, since standing in the main
+// checkout is where you type it from. Left in, the shell was found as the base
+// window and treewright "switched" to it: a switch to the session the client was
+// already in, which does nothing anyone can see. The repository was left with no
+// session of its own, the agent never ran, and the only sign of any of it was a
+// warning that the window was in another session rather than one that did not yet
+// exist.
+//
+// A window treewright opened on this very directory is exempt, however it is
+// reached, so `base` typed in the base window — or `resume` in a worktree's own
+// window — stays the no-op it has always been: you are already there. So is any
+// window that is not the caller's own, wherever it sits, because switching to one
+// still beats opening a second window on the same checkout.
+func isTheCallersOwnShell(w tmux.Window, dir string) bool {
+	if w.Worktree == dir {
+		return false
+	}
+	return w.ID == tmux.CurrentWindow()
 }
 
 // heldOpenOnFailure wraps a window's command so that one which fails leaves its
@@ -155,15 +182,12 @@ func heldOpenOnFailure(command string) string {
 // be moved — or a window that has closed since — is news to report rather than
 // grounds for calling the whole thing a failure.
 //
-// The way out is given as `treewright attach <repo>` rather than as the tmux command
-// it runs, because that spelling stays correct: it names the session exactly, and
-// it reaches the right server when TREEWRIGHT_TMUX_LABEL has aimed treewright at one a
-// bare `tmux attach` would not find. Spelled with Argv0, so someone who typed tw
-// is answered in the name they use.
+// The way out comes from attachHint rather than being spelled here, because the
+// session a window turned out to be in is not always this repository's.
 func focusWindow(env *Env, cfg *config.Config, w tmux.Window, command string) {
 	switch err := tmux.Focus(w); {
 	case errors.Is(err, tmux.ErrNotFollowed):
-		env.warnf("could not switch to session %s — attach with: %s attach %s", w.Session, env.Argv0, cfg.Name)
+		env.warnf("could not switch to session %s — attach with: %s", w.Session, attachHint(env, cfg, w.Session))
 	case err != nil:
 		// The window was there a moment ago, so what changed is that it closed:
 		// tmux closes a window as soon as its command exits, and a command that
@@ -171,7 +195,29 @@ func focusWindow(env *Env, cfg *config.Config, w tmux.Window, command string) {
 		// this. Naming the command is what makes that guessable.
 		env.warnf("window %s closed as soon as it opened — did %q exit straight away?", w.Name, command)
 	case !tmux.Inside():
-		env.progressf("window %s is open in tmux session %s — attach with: %s attach %s",
-			w.Name, w.Session, env.Argv0, cfg.Name)
+		env.progressf("window %s is open in tmux session %s — attach with: %s",
+			w.Name, w.Session, attachHint(env, cfg, w.Session))
 	}
+}
+
+// attachHint says how to reach the session a window turned out to be in.
+//
+// The repository's own session is given as `treewright attach <repo>` rather than
+// as the tmux command it runs, because that spelling stays correct: it names the
+// session exactly, and it reaches the right server when TREEWRIGHT_TMUX_LABEL has
+// aimed treewright at one a bare `tmux attach` would not find. Spelled with Argv0,
+// so someone who typed tw is answered in the name they use.
+//
+// A window that ended up in some other session is not something `attach` can
+// reach: it takes a repository, and it would send the user to this repository's
+// session — which in the case that produced this message may not even be running.
+// Being told to attach to a session that does not exist, in order to reach a
+// window treewright has just said is somewhere else, is a dead end. So that one is
+// spelled as the tmux command it is, server flags included for the same reason
+// `attach` exists at all.
+func attachHint(env *Env, cfg *config.Config, session string) string {
+	if session == sessionFor(cfg) {
+		return env.Argv0 + " attach " + cfg.Name
+	}
+	return "tmux " + strings.Join(tmux.AttachArgs(session), " ")
 }

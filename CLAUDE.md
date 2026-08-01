@@ -151,8 +151,19 @@ every session target goes through `exact()` → `=name`. Window targets are wind
 ids (`@3`), which are server-unique.
 
 **Window identity comes from the `@treewright_worktree` option**, not from a
-pane's current directory — panes wander. See `claim.beats` in `tmux.go` for the
-resolution order.
+pane's current directory — panes wander. See `Window.beats` in `tmux.go` for the
+resolution order, and note that the option is kept on `Window` as the path it is
+rather than as a bool: "treewright opened this window" and "treewright opened this
+window *here*" are different questions, and the second is the one `openWindow`
+asks.
+
+**The pane treewright is typed into is not a window to switch to** —
+`isTheCallersOwnShell` in `session.go`. A window treewright opened on the
+directory answers for it however it is reached, but a shell that merely stands
+there is where the user already is, and "switching" to it is a no-op dressed up
+as an action. That is how `tw base`, typed in the main checkout from a session of
+the user's own, came to warn about switching to a session that did not exist and
+then do nothing at all — no session, no window, no agent.
 
 **Branches always fork from `origin/<base_branch>`.** No flag overrides this;
 offline falls back to the local base branch and says so.

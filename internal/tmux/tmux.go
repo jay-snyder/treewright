@@ -67,11 +67,15 @@ type Window struct {
 	Name    string // as shown in the status line, e.g. "ENG-142", minus any waiting marker
 	State   string // what the agent in it last signaled, "" when nothing has
 
-	// Stamped reports that treewright opened this window — it carries a worktree
-	// stamp. It gates the things treewright may do to its own windows but not to
-	// one the user happened to open on a worktree's directory, such as decorating
-	// the name.
-	Stamped bool
+	// Worktree is the checkout treewright opened this window on, empty for a
+	// window treewright did not open. It is what identifies a window, per the
+	// package comment.
+	//
+	// Kept as the path rather than flattened to a bool because "treewright opened
+	// this window" and "treewright opened this window *here*" are different
+	// questions, and the window whose pane has wandered into another worktree's
+	// directory is exactly the case that tells them apart.
+	Worktree string
 }
 
 // Available reports whether tmux is installed. Every operation here needs it, and
@@ -213,8 +217,8 @@ const paneFormat = "#{window_id}\t#{session_name}\t#{window_name}\t#{" + worktre
 // worktree that ended up in another session is a thing to report and to switch
 // to, and pretending it does not exist would open a duplicate beside it. Where
 // several panes share a directory — the base window standing in a worktree's
-// worktree after `treewright cd` is the everyday case — claim.beats decides between
-// them.
+// worktree after `treewright cd` is the everyday case — Window.beats decides
+// between them.
 func Windows(prefer string) map[string]Window {
 	out, err := run("list-panes", "-a", "-F", paneFormat)
 	if err != nil {
@@ -222,48 +226,6 @@ func Windows(prefer string) map[string]Window {
 		return nil
 	}
 	return parsePanes(out, prefer)
-}
-
-// claim is one pane's case for being the window a directory's commands mean: the
-// window it belongs to, and the worktree that window was opened on.
-type claim struct {
-	Window
-
-	worktree string
-}
-
-// rank scores how strong a claim on dir is. A window treewright opened on this very
-// worktree says so; a window treewright did not open says nothing; and a window
-// opened on a different worktree is positive evidence against — its shell has
-// wandered in here, but it is still the other worktree's window, and closing it or
-// switching to it in this one's name would be wrong.
-func (c claim) rank(dir string) int {
-	switch c.worktree {
-	case dir:
-		return 2
-	case "":
-		return 1
-	default:
-		return 0
-	}
-}
-
-// beats reports whether c is a better answer for dir than held.
-//
-// Rank first, then the repository's own session, then the older window. Nothing
-// consults the order of the listing, which is the bug this replaced:
-// list-panes -a walks windows in index order, so two windows standing in one
-// directory resolved to whichever the user had arranged first — a wrong name in
-// `ls`, the wrong window focused by `resume`, and the wrong window offered up for
-// closing by `rm`, all changing under a swap-window.
-func (c claim) beats(held claim, dir, prefer string) bool {
-	if a, b := c.rank(dir), held.rank(dir); a != b {
-		return a > b
-	}
-	if a, b := c.Session == prefer, held.Session == prefer; a != b {
-		return a
-	}
-	return olderWindow(c.ID, held.ID)
 }
 
 // olderWindow compares window ids by creation rather than as text, so "@9" comes
@@ -286,15 +248,15 @@ func parsePanes(out, prefer string) map[string]Window {
 	if out == "" {
 		return nil
 	}
-	best := make(map[string]claim)
-	stake := func(dir string, c claim) {
+	best := make(map[string]Window)
+	stake := func(dir string, w Window) {
 		if dir == "" {
 			return
 		}
-		if held, taken := best[dir]; taken && !c.beats(held, dir, prefer) {
+		if held, taken := best[dir]; taken && !w.beats(held, dir, prefer) {
 			return
 		}
-		best[dir] = c
+		best[dir] = w
 	}
 
 	for line := range strings.SplitSeq(out, "\n") {
@@ -302,36 +264,29 @@ func parsePanes(out, prefer string) map[string]Window {
 		if len(fields) != 6 {
 			continue
 		}
-		c := claim{
-			Window: Window{
-				ID:      fields[0],
-				Session: fields[1],
-				// The waiting marker comes off here, once, so the name every
-				// consumer sees is the one underneath treewright's own punctuation.
-				Name:    strings.TrimPrefix(fields[2], WaitingMarker),
-				State:   fields[4],
-				Stamped: fields[3] != "",
-			},
-			worktree: fields[3],
+		w := Window{
+			ID:      fields[0],
+			Session: fields[1],
+			// The waiting marker comes off here, once, so the name every consumer
+			// sees is the one underneath treewright's own punctuation.
+			Name:     strings.TrimPrefix(fields[2], WaitingMarker),
+			State:    fields[4],
+			Worktree: fields[3],
 		}
-		if c.ID == "" {
+		if w.ID == "" {
 			continue
 		}
-		stake(fields[5], c)
+		stake(fields[5], w)
 		// A window treewright opened answers for its own worktree wherever its pane
 		// is standing, so cd-ing a pane out of the directory no longer orphans the
 		// worktree's window and has a second one opened beside it.
-		stake(c.worktree, c)
+		stake(w.Worktree, w)
 	}
 
 	if len(best) == 0 {
 		return nil
 	}
-	windows := make(map[string]Window, len(best))
-	for dir, c := range best {
-		windows[dir] = c.Window
-	}
-	return windows
+	return best
 }
 
 // NewSession creates a repository's session, detached, holding one window. The
@@ -387,7 +342,46 @@ func newWindow(s Spec, args []string) (Window, error) {
 	stamp(id, slugOption, s.Slug)
 	stamp(id, branchOption, s.Branch)
 
-	return Window{ID: id, Session: s.Session, Name: s.Name, Stamped: true}, nil
+	return Window{ID: id, Session: s.Session, Name: s.Name, Worktree: s.Dir}, nil
+}
+
+// Stamped reports that treewright opened this window. It gates the things
+// treewright may do to its own windows but not to one the user happened to open
+// on a worktree's directory, such as decorating the name.
+func (w Window) Stamped() bool { return w.Worktree != "" }
+
+// rank scores how strong w's claim on dir is. A window treewright opened on this
+// very worktree says so; a window treewright did not open says nothing; and a
+// window opened on a different worktree is positive evidence against — its shell
+// has wandered in here, but it is still the other worktree's window, and closing
+// it or switching to it in this one's name would be wrong.
+func (w Window) rank(dir string) int {
+	switch w.Worktree {
+	case dir:
+		return 2
+	case "":
+		return 1
+	default:
+		return 0
+	}
+}
+
+// beats reports whether w is a better answer for dir than held.
+//
+// Rank first, then the repository's own session, then the older window. Nothing
+// consults the order of the listing, which is the bug this replaced:
+// list-panes -a walks windows in index order, so two windows standing in one
+// directory resolved to whichever the user had arranged first — a wrong name in
+// `ls`, the wrong window focused by `resume`, and the wrong window offered up for
+// closing by `rm`, all changing under a swap-window.
+func (w Window) beats(held Window, dir, prefer string) bool {
+	if a, b := w.rank(dir), held.rank(dir); a != b {
+		return a > b
+	}
+	if a, b := w.Session == prefer, held.Session == prefer; a != b {
+		return a
+	}
+	return olderWindow(w.ID, held.ID)
 }
 
 // SetAgentState records what the agent in a window says it is doing, or clears
@@ -468,6 +462,30 @@ func CurrentSession() string {
 		return ""
 	}
 	return name
+}
+
+// CurrentWindow names the window the calling pane is in, or "" when treewright
+// cannot tell — outside tmux, or in a pane tmux no longer knows about.
+//
+// The caller's own pane is asked through $TMUX_PANE, for the reason CurrentSession
+// gives: untargeted, display-message answers about the most recently active
+// window, which is the caller's own only by coincidence. A missing $TMUX_PANE is
+// answered with "" rather than with that guess, because the caller is deciding
+// whether a window it found is merely the one it is being typed into, and a
+// guessed id would have it disown a window that is nothing to do with the caller.
+func CurrentWindow() string {
+	if !Inside() {
+		return ""
+	}
+	pane := os.Getenv("TMUX_PANE")
+	if pane == "" {
+		return ""
+	}
+	id, err := run("display-message", "-p", "-t", pane, "#{window_id}")
+	if err != nil {
+		return ""
+	}
+	return id
 }
 
 // Focus brings a window to the foreground, following it across sessions.

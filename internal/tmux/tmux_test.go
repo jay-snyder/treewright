@@ -119,7 +119,7 @@ func TestParsePanes(t *testing.T) {
 				stamped("@2", "myrepo", "ENG-1", "/wt/eng-1", "/wt/eng-1"),
 			prefer: "myrepo",
 			want: map[string]Window{
-				"/wt/eng-1": {ID: "@2", Session: "myrepo", Name: "ENG-1", Stamped: true},
+				"/wt/eng-1": {ID: "@2", Session: "myrepo", Name: "ENG-1", Worktree: "/wt/eng-1"},
 			},
 		},
 		{
@@ -130,7 +130,7 @@ func TestParsePanes(t *testing.T) {
 				stamped("@2", "elsewhere", "ENG-1", "/wt/eng-1", "/wt/eng-1"),
 			prefer: "myrepo",
 			want: map[string]Window{
-				"/wt/eng-1": {ID: "@2", Session: "elsewhere", Name: "ENG-1", Stamped: true},
+				"/wt/eng-1": {ID: "@2", Session: "elsewhere", Name: "ENG-1", Worktree: "/wt/eng-1"},
 			},
 		},
 		{
@@ -140,8 +140,8 @@ func TestParsePanes(t *testing.T) {
 			out:    stamped("@2", "myrepo", "ENG-1", "/wt/eng-1", "/somewhere/else"),
 			prefer: "myrepo",
 			want: map[string]Window{
-				"/wt/eng-1":       {ID: "@2", Session: "myrepo", Name: "ENG-1", Stamped: true},
-				"/somewhere/else": {ID: "@2", Session: "myrepo", Name: "ENG-1", Stamped: true},
+				"/wt/eng-1":       {ID: "@2", Session: "myrepo", Name: "ENG-1", Worktree: "/wt/eng-1"},
+				"/somewhere/else": {ID: "@2", Session: "myrepo", Name: "ENG-1", Worktree: "/wt/eng-1"},
 			},
 		},
 		{
@@ -154,7 +154,7 @@ func TestParsePanes(t *testing.T) {
 			prefer: "myrepo",
 			want: map[string]Window{
 				"/wt/eng-1": {ID: "@5", Session: "myrepo", Name: "VISITOR"},
-				"/wt/eng-2": {ID: "@1", Session: "myrepo", Name: "ENG-2", Stamped: true},
+				"/wt/eng-2": {ID: "@1", Session: "myrepo", Name: "ENG-2", Worktree: "/wt/eng-2"},
 			},
 		},
 		{
@@ -183,7 +183,7 @@ func TestParsePanes(t *testing.T) {
 			out:    signaled("@2", "myrepo", "ENG-1", "/wt/eng-1", "waiting", "/wt/eng-1"),
 			prefer: "myrepo",
 			want: map[string]Window{
-				"/wt/eng-1": {ID: "@2", Session: "myrepo", Name: "ENG-1", State: "waiting", Stamped: true},
+				"/wt/eng-1": {ID: "@2", Session: "myrepo", Name: "ENG-1", State: "waiting", Worktree: "/wt/eng-1"},
 			},
 		},
 		{
@@ -194,7 +194,7 @@ func TestParsePanes(t *testing.T) {
 			out:    signaled("@2", "myrepo", "!ENG-1", "/wt/eng-1", "waiting", "/wt/eng-1"),
 			prefer: "myrepo",
 			want: map[string]Window{
-				"/wt/eng-1": {ID: "@2", Session: "myrepo", Name: "ENG-1", State: "waiting", Stamped: true},
+				"/wt/eng-1": {ID: "@2", Session: "myrepo", Name: "ENG-1", State: "waiting", Worktree: "/wt/eng-1"},
 			},
 		},
 		{
