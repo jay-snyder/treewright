@@ -120,8 +120,16 @@ went undelivered.
 rm refuses a worktree with uncommitted changes or commits on no origin ref;
 prune only takes worktrees that are both merged and clean. The refusals mean
 work that exists nowhere else: do not pass --force on your own judgment —
-surface the refusal and let the person decide. With no tty, window-closing
-prompts are skipped and treewright prints the command to run instead.
+surface the refusal and let the person decide.
+
+Removal empties the work's tmux window, and with no tty on this end treewright
+prints `tmux kill-window -t @<id>` for each one rather than asking. That line
+is not homework to hand back: put the question to the person with
+AskUserQuestion, and run the command yourself if they say yes. Ask with the
+caveat treewright printed above it — a window that is the last in its session
+ends the session with it, and detaches whoever was attached. The window you
+are running in is the exception — `tmux display-message -p '#{window_id}'`
+names it — since closing that one ends this session mid-answer.
 
 ## Leave to the machinery
 
@@ -129,3 +137,14 @@ prompts are skipped and treewright prints the command to run instead.
   not call it by hand.
 - `treewright setup`, `shell-init`, `tmux-init`, and `agent-init`
   change a person's configuration; run them only when asked to.
+
+## Trying it out is not free
+
+Driving real work through treewright is what this skill is for and needs no
+care beyond the above. Standing up a scratch repo to see what a command does is
+another thing: your shell inherits `$TMUX` from the session the person is
+attached to, so the scratch repo gets a tmux session of its own and
+`treewright new` switches their client into it — away from the work they were
+watching, and back only by detaching. Aim an experiment at a server nobody is
+attached to, with `TREEWRIGHT_TMUX_LABEL=twdemo` in its environment, or do not
+run it.
