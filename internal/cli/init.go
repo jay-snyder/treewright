@@ -136,7 +136,9 @@ func cmdAgentInit(env *Env, args []string) error {
 	// --global and --print, and the error says so.
 	cfg, err := resolveConfig("")
 	if err != nil {
-		return fmt.Errorf("%w — or install it for every repository with \"%s agent-init %s --global\"", err, env.Argv0, agent.Name)
+		return fmt.Errorf("%w%s", err, asFields(
+			field("or cover every repository", env.Argv0+" agent-init "+agent.Name+" --global"),
+		))
 	}
 	return installAgentPlugin(env, agent, filepath.Join(cfg.MainDir, filepath.FromSlash(agent.ProjectPlugin)), cfg)
 }
@@ -154,27 +156,51 @@ func installAgentPlugin(env *Env, agent agentinit.Agent, dir string, cfg *config
 	// Named rather than counted, because the interesting run is the second one:
 	// "wrote hooks/hooks.json" after an upgrade says exactly which part of the
 	// wiring had gone stale, where "wrote 1 file" says only that something did.
+	// Set out one per line, since the names are what the run is worth reading
+	// for and comma-joining them put three of them after an absolute path.
 	if len(written) == 0 {
-		env.progressf("%s is already what treewright would write — nothing to update", dir)
+		env.progressf("the %s plugin is already up to date%s", agent.Name, asFields(field("directory", dir)))
 	} else {
-		env.progressf("wrote %s to %s", strings.Join(written, ", "), dir)
+		env.progressf("wrote the %s plugin%s", agent.Name, asFields(
+			field("directory", dir),
+			field("files", strings.Join(written, "\n")),
+		))
 	}
-	env.progressf("%s loads it as treewright@skills-dir when it next starts, once you have trusted the folder — in a session already open, /reload-plugins", agent.Name)
+	// Three facts about when the wiring starts working, and they were one line
+	// of ninety-odd columns: it loads at the next start, you have to trust the
+	// folder first, and there is a way to skip the wait in a session that is
+	// already running. Whole clauses rather than the fragments the split first
+	// left behind — "once you have trusted the folder" on a line of its own is
+	// a sentence with its subject three lines up.
+	env.progressf("%s loads it as treewright@skills-dir the next time it starts\n"+
+		"you will need to trust the folder first\n"+
+		"in a session that is already open, run %s",
+		agent.Name, env.copyable("/reload-plugins"))
 
 	if cfg == nil {
-		env.progressf("every repository is covered now, treewright-managed or not: outside a treewright window, signal does nothing, quietly")
+		env.progressf("every repository is covered now, treewright-managed or not\n" +
+			"outside a treewright window, signal does nothing and says nothing")
 		return nil
 	}
 	if cfg.Agent != agent.Name {
-		env.progressf("set agent = %q in %s so every new worktree gets a copy — without it the plugin reaches the main checkout and no worktree at all", agent.Name, cfg.Path())
+		env.progressf("no worktree gets a copy until the config says which agent this is%s", asFields(
+			field("add to "+cfg.Path(), env.copyable(fmt.Sprintf("agent = %q", agent.Name))),
+		))
 	}
 	// Said unconditionally rather than after a `git check-ignore`: the answer
 	// costs a git call to learn and the sentence is worth reading either way.
 	// The agent's settings file is conventionally ignored already; this path is
 	// treewright's own invention, so nothing ignores it until someone says so,
 	// and a committed plugin is treewright imposed on everyone who clones.
-	env.progressf("git will not ignore it on its own — add %s/ to .gitignore unless you mean to hand it to everyone who clones", agent.ProjectPlugin)
-	env.progressf("use --global instead to cover every repository at once: outside a treewright window, signal does nothing, quietly")
+	//
+	// One message, not two: the caveat is the second half of the same thought,
+	// and as its own progressf it started a new block at the margin — which
+	// reads as a new subject rather than as the rest of this one.
+	env.progressf("git will not ignore the plugin on its own\n"+
+		"add %s to .gitignore\n"+
+		"unless you mean to commit it for everyone who clones",
+		env.copyable(agent.ProjectPlugin+"/"))
+	env.progressf("--global covers every repository instead, and writes into none")
 	return nil
 }
 
@@ -193,7 +219,10 @@ func dumpPlugin(env *Env, agent agentinit.Agent, global bool) error {
 		fmt.Fprintf(env.Stdout, "==> %s/%s <==\n", dir, f.Path)
 		fmt.Fprint(env.Stdout, f.Body)
 	}
-	env.progressf("nothing was written — \"%s agent-init %s\" installs this into the repository you are standing in", env.Argv0, agent.Name)
+	env.progressf("nothing was written%s", asFields(
+		field("to install it here", env.copyable(env.Argv0+" agent-init "+agent.Name)),
+		field("for every repository", env.copyable(env.Argv0+" agent-init "+agent.Name+" --global")),
+	))
 	return nil
 }
 

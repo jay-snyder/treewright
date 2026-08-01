@@ -72,16 +72,9 @@ func (e *Env) defaults() {
 	}
 }
 
-// progressf reports what treewright is doing. Unprefixed, on stderr.
-func (e *Env) progressf(format string, args ...any) {
-	fmt.Fprintf(e.Stderr, format+"\n", args...)
-}
-
-// warnf reports something the user should know but that does not stop the
-// command — a stale config entry, a branch that could not be deleted.
-func (e *Env) warnf(format string, args ...any) {
-	fmt.Fprintf(e.Stderr, "warning: "+format+"\n", args...)
-}
+// The writers a subcommand reports through — progressf, warnf, errorf — live in
+// message.go, with the rules about how a message that runs to several lines is
+// laid out.
 
 // ---- command table ---------------------------------------------------------
 
@@ -572,10 +565,11 @@ func editDistance(a, b string) int {
 // one when there is a plausible candidate.
 func unknownCommand(env *Env, name string) error {
 	if did := suggest(name); did != "" {
-		fmt.Fprintf(env.Stderr, "error: unknown command %q — did you mean %q?\n\n", name, did)
+		env.errorf("unknown command %q — did you mean %q?", name, did)
 	} else {
-		fmt.Fprintf(env.Stderr, "error: unknown command %q\n\n", name)
+		env.errorf("unknown command %q", name)
 	}
+	fmt.Fprintln(env.Stderr)
 	writeOverview(env.Stderr, env.Argv0)
 	return ErrUsage
 }
@@ -631,7 +625,8 @@ func Run(env Env) error {
 	var ue *usageError
 	if errors.As(err, &ue) {
 		// A wrong invocation is worth showing the right one for.
-		fmt.Fprintf(env.Stderr, "error: %s\n\n", ue.message)
+		env.errorf("%s", ue.message)
+		fmt.Fprintln(env.Stderr)
 		if target := lookup(ue.command); target != nil {
 			writeCommandHelp(env.Stderr, env.Argv0, target)
 		} else {
@@ -656,20 +651,23 @@ const tagline = "treewright - give every piece of work its own git worktree, tmu
 func writeOverview(w io.Writer, argv0 string) {
 	fmt.Fprintf(w, "%s\n\nusage: %s <command> [arguments]\n\ncommands:\n", tagline, argv0)
 
+	// Measured from the same string that is printed. Sizing the column from
+	// `name + " " + args` while printing the trimmed form let a command with no
+	// arguments contribute a trailing space to the width — a phantom column that
+	// indented every summary in the list by one, for a character none of them
+	// carried.
 	width := 0
 	for _, c := range commands {
 		if c.hidden {
 			continue
 		}
-		if n := len(c.name + " " + c.args); n > width {
-			width = n
-		}
+		width = max(width, len(usageSpec(c)))
 	}
 	for _, c := range commands {
 		if c.hidden {
 			continue
 		}
-		fmt.Fprintf(w, "  %-*s  %s\n", width, strings.TrimSpace(c.name+" "+c.args), c.summary)
+		fmt.Fprintf(w, "  %-*s  %s\n", width, usageSpec(c), c.summary)
 	}
 
 	fmt.Fprintf(w, "\nrun \"%s help <command>\" for detail on one command,\n", argv0)
@@ -677,8 +675,14 @@ func writeOverview(w io.Writer, argv0 string) {
 	fmt.Fprintf(w, "\nconfig: %s/<name>.toml\n", config.Dir())
 }
 
+// usageSpec is how a command is spelled in a usage line: its name and its
+// argument specification, with the space between them gone for a command that
+// takes no arguments. Named once because the command list measures a column of
+// these and then prints them, and those two have to be the same string.
+func usageSpec(c *command) string { return strings.TrimSpace(c.name + " " + c.args) }
+
 func writeCommandHelp(w io.Writer, argv0 string, c *command) {
-	fmt.Fprintf(w, "usage: %s %s\n", argv0, strings.TrimSpace(c.name+" "+c.args))
+	fmt.Fprintf(w, "usage: %s %s\n", argv0, usageSpec(c))
 	fmt.Fprintf(w, "\n%s\n", c.summary)
 	if c.long != "" {
 		fmt.Fprintf(w, "\n%s\n", c.long)

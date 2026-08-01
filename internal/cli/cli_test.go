@@ -79,6 +79,18 @@ func requireTmux(t *testing.T) {
 
 // waitForFile polls for a file a background process is expected to create, since
 // neither post_create nor a command running in a tmux window is waited on.
+// flat collapses a message's layout — its line breaks, its continuation indent
+// and the padding that lines a field's values up — so an assertion can be about
+// what a message says rather than about how wide its label column happened to
+// come out.
+//
+// Worth having because the alternative is assertions that break every time a
+// label is renamed one character longer, which teaches the next person to fix
+// them by pasting in whatever the message currently prints. The layout is
+// asserted where it is the subject: TestAMessageContinuesUnderItself, the field
+// and list tests, and the table tests.
+func flat(s string) string { return strings.Join(strings.Fields(s), " ") }
+
 func waitForFile(t *testing.T, path, what string) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
@@ -640,7 +652,7 @@ func TestAFailedPostCreateIsReportedLater(t *testing.T) {
 		// resume opens a window and so fails where tmux is missing; the warning
 		// comes first either way, which is the whole assertion here.
 		r := f.exec(args...)
-		if !strings.Contains(r.stderr, `post_create in broken stopped at "exit 1"`) {
+		if !strings.Contains(flat(r.stderr), "post_create failed in broken failed step exit 1") {
 			t.Errorf("%v stderr = %q, want the failed setup reported", args, r.stderr)
 		}
 		if strings.Contains(r.stdout, "post_create") {
@@ -868,7 +880,7 @@ func TestResume(t *testing.T) {
 
 	t.Run("prefixed slug is stripped", func(t *testing.T) {
 		out := f.mustRun("resume", "x/alpha")
-		if !strings.Contains(out, `using "alpha"`) {
+		if !strings.Contains(out, `leaving "alpha"`) {
 			t.Errorf("output = %q, want the stripped prefix reported", out)
 		}
 	})

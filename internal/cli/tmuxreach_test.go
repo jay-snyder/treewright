@@ -321,20 +321,22 @@ func TestDoctorReportsTheTmuxIntegration(t *testing.T) {
 	f := newFixture(t, "command = 'sleep 300'\n")
 	startSession(t, "proj", "MAIN", f.MainDir)
 
-	before := f.exec("doctor")
-	if !strings.Contains(before.stdout, "tmux integration not loaded") {
-		t.Errorf("doctor = %q, want it to report the integration missing", before.stdout)
+	// Read through findings rather than off stdout: the check name and its
+	// detail are separate columns now, so the two are only one string once the
+	// report has been parsed back into findings.
+	if got := has(t, findings(t, f), "tmux integration not loaded"); got != "warn" {
+		t.Errorf("finding = %q, want a warning that the integration is missing", got)
 	}
 
 	if r := f.exec("tmux-init", "--apply"); r.err != nil {
 		t.Fatalf("tmux-init --apply: %v\n%s", r.err, r.both())
 	}
 
-	after := f.exec("doctor")
-	if !strings.Contains(after.stdout, "tmux integration loaded") {
-		t.Errorf("doctor = %q, want it to report the integration loaded", after.stdout)
+	after := findings(t, f)
+	if got := has(t, after, "tmux integration loaded"); got != "ok" {
+		t.Errorf("finding = %q, want the integration reported as loaded\nall: %v", got, after)
 	}
-	if strings.Contains(after.stdout, "not loaded — add run-shell") {
-		t.Errorf("doctor still reports the tmux integration missing:\n%s", after.stdout)
+	if has(t, after, "tmux integration not loaded") != "" {
+		t.Errorf("doctor still reports the tmux integration missing:\n%v", after)
 	}
 }

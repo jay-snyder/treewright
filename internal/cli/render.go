@@ -422,7 +422,10 @@ func splitPrefix(env *Env, cfg *config.Config, typed string) (prefix, slug strin
 	switch {
 	case !matched:
 	case len(cfg.Prefixes()) == 1:
-		env.progressf("stripped the %q prefix from the slug — the branch gets it automatically (using %q)",
+		// What was done, then why it was done, rather than one sentence with the
+		// result of it in a parenthesis at the end: the slug that survived is the
+		// part the user has to recognize, and it was the last thing on the line.
+		env.progressf("stripped the %q prefix from the slug, leaving %q\nthe branch gets the prefix automatically",
 			prefix, slug)
 	default:
 		env.progressf("%q reads as branch prefix %q and slug %q", typed, prefix, slug)
@@ -444,13 +447,16 @@ func prefixList(cfg *config.Config) string {
 	return strings.Join(quoted, ", ")
 }
 
-// slugsOf lists worktree slugs, for naming the alternatives in an error.
-func slugsOf(worktrees []git.Worktree) string {
+// slugsOf lists worktree slugs, for naming the alternatives in an error. A
+// slice rather than a joined string, because what an error does with them is
+// set them out one per line: a repository with a dozen worktrees is exactly the
+// one where a reader has to find a name in the list.
+func slugsOf(worktrees []git.Worktree) []string {
 	slugs := make([]string, 0, len(worktrees))
 	for _, wt := range worktrees {
 		slugs = append(slugs, wt.Slug)
 	}
-	return strings.Join(slugs, ", ")
+	return slugs
 }
 
 // resolveSlug turns what the user typed into the worktree they meant.
@@ -479,10 +485,10 @@ func resolveSlug(env *Env, repo git.Repo, managed []git.Worktree, want string) (
 		env.progressf("%s matches worktree %s", want, prefixed[0].Slug)
 		return prefixed[0], nil
 	case 0:
-		return git.Worktree{}, fmt.Errorf("no worktree %q for %s (have: %s)",
-			want, repo.Name(), slugsOf(managed))
+		return git.Worktree{}, fmt.Errorf("no worktree %q for %s\nhave:%s",
+			want, repo.Name(), asLines(slugsOf(managed)))
 	default:
-		return git.Worktree{}, fmt.Errorf("%q matches %d worktrees (%s) — name one exactly",
-			want, len(prefixed), slugsOf(prefixed))
+		return git.Worktree{}, fmt.Errorf("%q matches %d worktrees — name one exactly:%s",
+			want, len(prefixed), asLines(slugsOf(prefixed)))
 	}
 }

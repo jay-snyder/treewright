@@ -77,8 +77,8 @@ func TestSetupReportsWhatItGuessed(t *testing.T) {
 	}
 	// Every guess must be visible, because each one is a decision the user may
 	// need to overrule and none of them is obvious from the command they ran.
-	for _, want := range []string{"base branch main", "branch prefix \"test/\"", ".env"} {
-		if !strings.Contains(r.stderr, want) {
+	for _, want := range []string{"base branch main", "branch prefix test/", ".env"} {
+		if !strings.Contains(flat(r.stderr), want) {
 			t.Errorf("stderr = %q, want it to report %q", r.stderr, want)
 		}
 	}
@@ -116,8 +116,9 @@ func TestSetupProposesThePrefixesOriginUses(t *testing.T) {
 	if got := strings.Join(cfg.Prefixes(), ","); got != "feature/,bug/" {
 		t.Errorf("Prefixes = %q, want feature/,bug/ in that order", got)
 	}
-	// The counts are what chose the order, so the report has to show them.
-	if !strings.Contains(r.stderr, "feature/ (3), bug/ (2)") {
+	// The counts are what chose the order, so the report has to show them — one
+	// prefix per line, in the order that decides which a bare slug gets.
+	if !strings.Contains(flat(r.stderr), "feature/ (3 branches on origin) bug/ (2 branches on origin)") {
 		t.Errorf("stderr = %q, want the prefixes and their branch counts", r.stderr)
 	}
 
@@ -152,7 +153,7 @@ func TestSetupPrefersOriginsSchemeOverTheEmail(t *testing.T) {
 	if cfg.BranchPrefix != "feature/" || cfg.Explicit("branch_prefixes") {
 		t.Errorf("prefixes = %+v, want branch_prefix = feature/", cfg.Prefixes())
 	}
-	if !strings.Contains(r.stderr, "from the 2 branches on origin") {
+	if !strings.Contains(flat(r.stderr), "(2 branches on origin use it)") {
 		t.Errorf("stderr = %q, want where the prefix came from", r.stderr)
 	}
 }
@@ -337,43 +338,86 @@ func TestConfigDistinguishesDefaultsFromChoices(t *testing.T) {
 		t.Errorf("stderr = %q, want nothing", r.stderr)
 	}
 
-	byKey := map[string]string{}
-	for line := range strings.SplitSeq(r.stdout, "\n") {
-		if fields := strings.Fields(line); len(fields) >= 2 {
-			byKey[fields[0]] = strings.TrimSpace(strings.TrimPrefix(line, fields[0]))
-		}
-	}
+	byKey := configRows(t, r.stdout)
 
 	// A value the file set must not be labelled a default, and one it left out
-	// must be — that distinction is the reason the command exists.
-	if got := byKey["command"]; got != "zsh" {
-		t.Errorf("command = %q, want zsh with no default marker", got)
+	// must be — that distinction is the reason the command exists, and it is now
+	// a column of its own rather than a suffix on the value.
+	if got := byKey["command"]; got.from != "" || got.value != "zsh" {
+		t.Errorf("command = %+v, want zsh from the file, unmarked", got)
 	}
-	if got := byKey["resume_command"]; !strings.Contains(got, "(default)") {
-		t.Errorf("resume_command = %q, want it marked as a default", got)
+	if got := byKey["resume_command"]; got.from != "default" {
+		t.Errorf("resume_command = %+v, want it marked as a default", got)
 	}
 	// base_branch is set explicitly by the fixture, to the same value as the
 	// default: reporting it as a default would be wrong even though the value is
 	// identical.
-	if got := byKey["base_branch"]; strings.Contains(got, "(default)") {
-		t.Errorf("base_branch = %q, want it reported as an explicit setting", got)
+	if got := byKey["base_branch"]; got.from != "" {
+		t.Errorf("base_branch = %+v, want it reported as an explicit setting", got)
 	}
-	if got := byKey["post_create"]; got != "(none)" {
-		t.Errorf("post_create = %q, want (none)", got)
+	if got := byKey["post_create"]; got.value != "(none)" {
+		t.Errorf("post_create = %+v, want (none)", got)
 	}
-	if got := byKey["file"]; !strings.HasSuffix(got, "proj.toml") {
-		t.Errorf("file = %q, want the config's path", got)
+	if got := byKey["file"]; !strings.HasSuffix(got.value, "proj.toml") {
+		t.Errorf("file = %+v, want the config's path", got)
 	}
 }
 
+// setting is one row of `config`: where the value came from, and the value.
+type setting struct{ from, value string }
+
+// configRows parses `config` by the header's own column offsets.
+//
+// By offset and not by Fields, because two of the three columns hold values
+// with spaces in them — a post_create command, a ticket_pattern — and because a
+// value spanning several lines continues under the VALUE column with the two to
+// its left blank. Splitting on whitespace cannot tell either of those from a
+// new row.
+//
+// A key set twice keeps the last row, which only carry_files is: its file's
+// entries and its agent's are separate rows precisely because the FROM column
+// answers differently for each.
+func configRows(t *testing.T, out string) map[string]setting {
+	t.Helper()
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	if len(lines) == 0 {
+		t.Fatal("config printed nothing")
+	}
+	fromAt := strings.Index(lines[0], "FROM")
+	valueAt := strings.Index(lines[0], "VALUE")
+	if fromAt < 0 || valueAt < 0 {
+		t.Fatalf("config header = %q, want SETTING, FROM and VALUE columns", lines[0])
+	}
+
+	rows := map[string]setting{}
+	key := ""
+	for _, line := range lines[1:] {
+		if len(line) < valueAt {
+			continue
+		}
+		value := strings.TrimSpace(line[valueAt:])
+		if name := strings.TrimSpace(line[:fromAt]); name != "" {
+			key = name
+			rows[key] = setting{from: strings.TrimSpace(line[fromAt:valueAt]), value: value}
+			continue
+		}
+		// A continuation of the row above: another entry of a value that spans.
+		if key != "" {
+			was := rows[key]
+			rows[key] = setting{from: was.from, value: was.value + "\n" + value}
+		}
+	}
+	return rows
+}
+
 // TestConfigReportsPostCreateAsASequence covers the list spelling, where what a
-// reader needs from the row is the order the commands run in — a comma-separated
-// list would read as a set, like carry_files above it.
+// reader needs from the row is the order the commands run in. One step per
+// line, which is a sequence to read down; on one line they were a set.
 func TestConfigReportsPostCreateAsASequence(t *testing.T) {
 	f := newFixture(t, "post_create = ['npm install', 'npm run build']\n")
 
 	out := f.mustRun("config")
-	if !strings.Contains(out, "npm install → npm run build") {
-		t.Errorf("config = %q, want both commands in order", out)
+	if got := configRows(t, out)["post_create"]; got.value != "npm install\nnpm run build" {
+		t.Errorf("post_create = %+v, want both commands in order, one per line\n%s", got, out)
 	}
 }

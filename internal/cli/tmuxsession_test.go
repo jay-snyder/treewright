@@ -82,7 +82,7 @@ func TestNewOpensItsWindowInTheRepoSession(t *testing.T) {
 	// tmux attach for the user to copy: it names the session exactly, and it
 	// reaches the right server when TREEWRIGHT_TMUX_LABEL has aimed treewright at one —
 	// which, in this test, it has.
-	if !strings.Contains(r.stderr, "attach with: treewright attach proj") {
+	if !strings.Contains(flat(r.stderr), "attach with treewright attach proj") {
 		t.Errorf("stderr = %q, want the attach command", r.stderr)
 	}
 
@@ -361,7 +361,7 @@ func TestResumeUsesTheWindowOpenInAnotherSession(t *testing.T) {
 		t.Fatalf("resume: %v\n%s", r.err, r.both())
 	}
 
-	if !strings.Contains(r.stderr, "window ENG-9 is in session elsewhere rather than proj") {
+	if !strings.Contains(flat(r.stderr), "window ENG-9 is in session elsewhere, not proj") {
 		t.Errorf("stderr = %q, want the foreign session named", r.stderr)
 	}
 	// And the way in has to reach that session rather than this repository's,

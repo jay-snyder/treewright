@@ -115,6 +115,7 @@ ldflags. Validate config changes with `goreleaser check`.
 | `internal/cli/doctor.go` | `doctor`: the four-way health check. |
 | `internal/cli/session.go` | One session per repo; `openWindow`/`focusWindow`. |
 | `internal/cli/render.go` | Tables, JSON, `parseArgs`, slug resolution. |
+| `internal/cli/message.go` | How a message is shaped on the way out: `progressf`/`warnf`/`errorf`, the continuation indent, `asLines`, `under`, `count`. |
 | `internal/cli/popup.go` | `popup`, popup sizing, the no-worktrees message. |
 | `internal/cli/signal.go` | `signal`: the agent-state protocol's one verb, run by agent hooks. |
 | `internal/cli/eval.go` | The eval-file protocol and shell quoting. |
@@ -355,7 +356,55 @@ commented on purpose, and a bare implementation will look out of place.
 **Message voice** (enforced by `TestMessagesShareOneVoice`): lowercase first
 word, no trailing period, em dashes rather than `->`, no `treewright:` or `note:`
 prefixes. Errors say what to do next and name it in the user's own vocabulary
-(`— open it with "tw resume eng-1"`).
+(`open it with "tw resume eng-1"`).
+
+**A message is one message, however many lines it takes**, and it is written in
+the terminal's register rather than the docs'. Front-load the subject, say one
+thing per line, and put the rest in labelled fields — not one sentence with each
+clause hung off another em dash. A trailing appositive reads well in a paragraph
+and is a thing to parse in a terminal, where nobody is reading: they are looking
+for one fact. The order that works is **what is wrong, what it costs, then what
+to type**, so the copyable part is last and nobody reads past it twice.
+
+Put a `\n` in the format string and the writers in `message.go` indent every
+line after the first: to the prefix's own width for `warnf`/`errorf`, so all the
+text sits in one column, and to a two-column hanging indent for `progressf`,
+which has no prefix to align under. **Never spell that indent at the call
+site** — a hand-typed run of spaces in `rm` was the whole of the old mechanism,
+and nothing else could match it. Never split one thought across two `progressf`
+calls either: the second starts a new block at the margin and reads as a new
+subject.
+
+The voice rules apply to every line, not just the first: a continuation starts
+lowercase and ends without a period. `TestEveryLineOfAMessageKeepsTheVoice`
+checks that of the writers, `TestMessagesShareOneVoice` of what commands
+actually print. Four helpers cover the shapes that recur — `asFields` for the
+labelled what/where/how, `asLines` for a list that would otherwise be
+comma-joined off the side of the terminal, `under` for a caveat a message
+carries only sometimes, and `count` for the number-plus-noun that used to read
+`1 file(s)`.
+
+**Color marks two spans and decorates nothing else**: the severity, through
+`warnf`/`errorf`, and the part meant to be typed, through `env.copyable`. It is
+off down a pipe, off under `NO_COLOR` and off on a dumb terminal — so a message
+must carry its whole meaning in the text, and what color buys is only the eye
+landing in the right place first.
+
+`ui.Table` renders a cell holding newlines as a row that spans lines, keeping
+each in its column. That is how a `doctor` finding says what to do about itself
+underneath itself, and how `config` lists `carry_files`. The picker must never
+be handed one: it numbers each row, so a second line would arrive unnumbered and
+flat against the margin. A marker column goes **before** the ragged one, not
+after — `config`'s `FROM` sits between `SETTING` and `VALUE` because a last
+column is the only one never padded, and markers after a column of absolute
+paths end up fifty columns from what they mark.
+
+**`doctor` is grouped**: `installation`, then a section per config, then a count.
+`report.in` opens a section and `addf` takes the check name as its own column, so
+nothing repeats `proj: ` down the left. Tests read it back through `findings`,
+which flattens a finding to `"<group>: <check> <detail>"` — assert on that, not
+on the layout, and use `flat()` in the other tests when a message's column widths
+are not the subject.
 
 **Test names read as sentences** about behavior: `TestNewStripsAnAlreadyPrefixedSlug`,
 `TestTheWorktreesWindowIsFoundHoweverWindowsAreArranged`. Tests carry doc

@@ -61,8 +61,10 @@ func cmdNew(env *Env, args []string) error {
 	// — and says "already exists" about a path rather than naming the command
 	// that opens what is already there.
 	if _, err := os.Stat(dir); err == nil {
-		return fmt.Errorf("worktree for %s already exists at %s — open it with %q",
-			slug, dir, env.Argv0+" resume "+slug)
+		return fmt.Errorf("worktree %s already exists%s", slug, asFields(
+			field("path", dir),
+			field("open it with", env.copyable(env.Argv0+" resume "+slug)),
+		))
 	}
 
 	switch {
@@ -81,7 +83,7 @@ func cmdNew(env *Env, args []string) error {
 			}
 		} else if repo.BranchExists(cfg.BaseBranch) {
 			// Offline: a local base branch is a stale but usable fork point.
-			env.warnf("origin unreachable — forking from local %s, which may be behind", cfg.BaseBranch)
+			env.warnf("origin unreachable — forking from the local %s instead\nit may be behind what is on origin", cfg.BaseBranch)
 			if err := repo.AddWorktreeNewBranch(dir, branch, cfg.BaseBranch); err != nil {
 				return err
 			}
@@ -126,7 +128,7 @@ func warnIfPromptUndelivered(env *Env, prompt string, created bool, err error) {
 	if prompt == "" || created || err != nil {
 		return
 	}
-	env.warnf("the window was already open, so the prompt was not delivered — paste it to the agent there")
+	env.warnf("prompt not delivered — the window was already open\npaste it to the agent there")
 }
 
 // validateSlug rejects slugs that would not round-trip through a directory name
@@ -148,7 +150,7 @@ func validateSlug(cfg *config.Config, slug string) error {
 	// stray directories, which is the right answer only when a prefix is not what
 	// was meant.
 	if leading, _, found := strings.Cut(slug, "/"); found && len(cfg.Prefixes()) > 1 {
-		return usageErrorf("new", "%q does not name a configured branch prefix — this repo uses %s",
+		return usageErrorf("new", "%q does not name a configured branch prefix\nthis repo uses: %s",
 			leading+"/", prefixList(cfg))
 	}
 	if err := refname.CheckSlug(slug); err != nil {
@@ -249,11 +251,9 @@ func startPostCreate(env *Env, cfg *config.Config, dir, slug string) error {
 		return err
 	}
 	// Deliberately not waited on: the process outlives treewright.
-	if len(cfg.PostCreate) > 1 {
-		env.progressf("running %d post_create commands in the background — log: %s", len(cfg.PostCreate), logPath)
-	} else {
-		env.progressf("running post_create in the background — log: %s", logPath)
-	}
+	env.progressf("running %s in the background%s",
+		count(len(cfg.PostCreate), "post_create command", "post_create commands"),
+		asFields(field("log", logPath)))
 	return nil
 }
 
@@ -287,10 +287,13 @@ func warnIfSetupFailed(env *Env, cfg *config.Config, slug string) {
 		return
 	}
 	if failing := strings.TrimSpace(string(body)); failing != "" {
-		env.warnf("post_create in %s stopped at %q — see %s", slug, failing, logPath)
+		env.warnf("post_create failed in %s%s", slug, asFields(
+			field("failed step", failing),
+			field("log", logPath),
+		))
 		return
 	}
-	env.warnf("post_create in %s did not finish — see %s", slug, logPath)
+	env.warnf("post_create did not finish in %s%s", slug, asFields(field("log", logPath)))
 }
 
 // postCreateScript renders the configured commands as one shell script that runs
@@ -372,18 +375,21 @@ func cmdRm(env *Env, args []string) error {
 
 		var reasons []string
 		if n := git.DirtyFiles(dir); n > 0 {
-			reasons = append(reasons, fmt.Sprintf("%d uncommitted file(s)", n))
+			reasons = append(reasons, count(n, "uncommitted file", "uncommitted files"))
 		}
 		// Unpushed commits are only lost work if they are not already merged: a
 		// squash merge leaves them unreachable from origin even though their
 		// content landed.
 		if n := repo.Unpushed(branch); n > 0 && !repo.IsMerged(branch, cfg.BaseBranch) {
-			reasons = append(reasons, fmt.Sprintf("%d commit(s) not on origin", n))
+			reasons = append(reasons, count(n, "commit not on origin", "commits not on origin"))
 		}
 		if len(reasons) > 0 {
-			fmt.Fprintf(env.Stderr, "error: refusing to remove %q — %s would be lost\n",
-				slug, strings.Join(reasons, " and "))
-			fmt.Fprintf(env.Stderr, "       re-run with --force to remove it anyway\n")
+			// The reasons are listed rather than joined with "and": there can be
+			// two of them, each carrying a count, and what the reader is weighing
+			// is how much each one is worth — which is a column to run an eye
+			// down, not a clause to parse.
+			env.errorf("won't remove %s — it has unsaved work%s\nuse %s to remove it anyway",
+				slug, asLines(reasons), env.copyable("--force"))
 			return ErrSilent
 		}
 	}
@@ -411,11 +417,13 @@ func cmdRm(env *Env, args []string) error {
 		}
 	}
 	_ = repo.FetchPrune("origin")
+	removed := []([2]string){field("worktree", dir)}
 	if branch == "" {
-		env.progressf("removed worktree %s, which was on no branch", dir)
+		removed = append(removed, field("branch", "none — it was on no branch"))
 	} else {
-		env.progressf("removed worktree %s and branch %s", dir, branch)
+		removed = append(removed, field("branch", branch))
 	}
+	env.progressf("removed %s%s", slug, asFields(removed...))
 	fmt.Fprintln(env.Stdout, dir)
 
 	// Two separate leftovers, and the caller usually has only one of them: a shell
@@ -432,7 +440,8 @@ func cmdRm(env *Env, args []string) error {
 func escapeDeletedDir(env *Env, mainDir, goneDir string) {
 	emitEval(env, "cd "+shellQuote(mainDir))
 	if env.EvalFile == "" {
-		env.progressf("your shell is still in the deleted %s — run: cd %s", goneDir, mainDir)
+		env.progressf("your shell is in %s, which no longer exists%s", goneDir,
+			asFields(field("run", env.copyable("cd "+mainDir))))
 	}
 }
 
@@ -455,14 +464,19 @@ func offerWindowClose(env *Env, window tmux.Window, assumeYes bool) {
 	// Closing a session's last window ends the session, which moves an attached
 	// client elsewhere or detaches it. Normally the base window keeps the session
 	// alive, so this only comes up once that has been closed by hand.
+	//
+	// It gets a line of its own rather than a clause inside the parenthetical
+	// naming the window. What it describes is a consequence of answering yes —
+	// the session goes, and an attached client goes with it — and a reader
+	// weighing that should not have to find it in the middle of the question.
 	last := ""
 	if tmux.LastInSession(window.ID) {
-		last = fmt.Sprintf(", the last in session %s, which ends with it", window.Session)
+		last = fmt.Sprintf("it is the last in session %s, which ends with it", window.Session)
 	}
 
 	if assumeYes {
 		_ = tmux.KillWindow(window.ID)
-		env.progressf("closed its tmux window (%s%s)", window.Name, last)
+		env.progressf("closed its tmux window %s%s", window.Name, under(last))
 		return
 	}
 
@@ -471,13 +485,20 @@ func offerWindowClose(env *Env, window tmux.Window, assumeYes bool) {
 		// Nobody to ask — treewright was run by a script or an agent. Say what to
 		// run rather than closing a window unasked, since something may still be
 		// running in it.
-		env.progressf("its tmux window (%s%s) now points at a deleted directory; close it with: tmux kill-window -t %s",
-			window.Name, last, window.ID)
+		env.progressf("tmux window %s now points at a deleted directory%s%s",
+			window.Name, under(last),
+			asFields(field("close it with", env.copyable("tmux kill-window -t "+window.ID))))
 		return
 	}
 	defer tty.Close()
 
-	fmt.Fprintf(tty, "close its tmux window (%s%s)? [y/N] ", window.Name, last)
+	// Above the question rather than through progressf, because the caveat and
+	// the question have to arrive together on the same terminal, and stderr may
+	// have been sent somewhere else entirely.
+	if last != "" {
+		fmt.Fprintf(tty, "%s\n", last)
+	}
+	fmt.Fprintf(tty, "close its tmux window (%s)? [y/N] ", window.Name)
 	answer, err := bufio.NewReader(tty).ReadString('\n')
 	if err != nil {
 		return
@@ -589,7 +610,8 @@ func cmdPrune(env *Env, args []string) error {
 	// shape whether the caller is previewing or committing; the narration on
 	// stderr is what says which of the two happened.
 	if !yes {
-		env.progressf("%d merged worktree(s) can be removed — re-run with --yes to delete them", len(targets))
+		env.progressf("%s can be removed\nre-run with %s to delete them",
+			count(len(targets), "merged worktree", "merged worktrees"), env.copyable("--yes"))
 		for _, wt := range targets {
 			fmt.Fprintln(env.Stdout, wt.Dir)
 		}
@@ -859,7 +881,8 @@ func cmdCd(env *Env, args []string) error {
 	}
 	emitEval(env, "cd "+shellQuote(target.Dir))
 	if env.EvalFile == "" {
-		env.progressf("no shell integration loaded — run: cd %s", target.Dir)
+		env.progressf("no shell integration loaded, so your shell did not move%s",
+			asFields(field("run", env.copyable("cd "+target.Dir))))
 	}
 	return nil
 }
@@ -961,7 +984,8 @@ func cmdAttach(env *Env, args []string) error {
 
 	session := sessionFor(cfg)
 	if !tmux.HasSession(session) {
-		return fmt.Errorf("no tmux session %s is running — open one with %q", session, env.Argv0+" base "+cfg.Name)
+		return fmt.Errorf("no tmux session %s is running%s", session,
+			asFields(field("open one with", env.Argv0+" base "+cfg.Name)))
 	}
 
 	// Inside tmux there is already a client holding this terminal, and attaching a

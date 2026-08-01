@@ -38,7 +38,7 @@ func fillPrompt(command, key, prompt string) (string, error) {
 		if prompt == "" {
 			return command, nil
 		}
-		return "", fmt.Errorf("%s has no %s placeholder to take the prompt — write one where the text belongs, e.g. %s = \"claude %s\"",
+		return "", fmt.Errorf("%s has no %s placeholder to take the prompt\nwrite one where the text belongs, e.g. %s = \"claude %s\"",
 			key, promptPlaceholder, key, promptPlaceholder)
 	}
 	if prompt == "" {
