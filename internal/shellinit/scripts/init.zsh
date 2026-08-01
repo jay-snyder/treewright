@@ -1,4 +1,11 @@
 # treewright shell integration for zsh. Load with: eval "$(treewright shell-init zsh)"
+
+# Which treewright emitted the wrapper below, for "treewright doctor" to compare
+# against itself. A shell keeps whatever it loaded at start, and a binary cannot
+# read its parent's function table, so this is the only way the two can be told
+# apart. Exported because doctor is a child process.
+export TREEWRIGHT_SHELL_INIT_VERSION="{{version}}"
+
 # Note: rc, not status — status is a special parameter in zsh and cannot be a local.
 treewright() {
   local evalfile rc
@@ -31,6 +38,8 @@ _treewright() {
     'shell-init:print the shell integration'
     'tmux-init:print the tmux integration'
     'agent-init:install the plugin that wires an agent to treewright'
+    'refresh:bring every checkout and the tmux server up to date with this treewright'
+    'version:print the version, and with --check say whether a newer one is out'
   )
   if (( CURRENT == 2 )); then
     _describe -t commands 'treewright command' cmds
@@ -46,7 +55,7 @@ _treewright() {
     new)                         compadd -S '' -- ${(f)"$(command treewright __complete prefixes 2>/dev/null)"} ;;
     rm)                          compadd -- ${(f)"$(command treewright __complete slugs 2>/dev/null)"} ;;
     resume|cd)                   compadd -- ${(f)"$(command treewright __complete targets 2>/dev/null)"} ;;
-    ls|prune|base|config|attach) compadd -- ${(f)"$(command treewright __complete repos 2>/dev/null)"} ;;
+    ls|prune|base|config|attach|refresh) compadd -- ${(f)"$(command treewright __complete repos 2>/dev/null)"} ;;
     shell-init)                  compadd -- ${(f)"$(command treewright __complete shells 2>/dev/null)"} ;;
     signal)                      compadd -- ${(f)"$(command treewright __complete states 2>/dev/null)"} ;;
     agent-init)                  compadd -- ${(f)"$(command treewright __complete agents 2>/dev/null)"} ;;

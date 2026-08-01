@@ -215,9 +215,14 @@ three worktrees and it knows exactly how.
 Nothing else is edited: no settings file, no dotfile, no `.gitignore`. Set
 `agent = "claude"` in the config and the plugin is carried into every new
 worktree, so the repos you use treewright in are wired and the ones you don't
-are untouched. Run it again after upgrading treewright and it updates the
-wiring in place — that's the reason it's a directory of treewright's own rather
-than a fragment you paste somewhere.
+are untouched. Run it again after upgrading treewright and it updates the wiring
+in your main checkout in place — that's the reason it's a directory of
+treewright's own rather than a fragment you paste somewhere.
+
+The copies in your worktrees are a different matter: each got its own when it
+was created, and `tw agent-init` doesn't reach them. `tw refresh` rewrites all
+of them, and `tw doctor` names any that have fallen behind. See
+[Upgrading](#upgrading).
 
 Since it won't write your `.gitignore` for you, that directory shows up as
 untracked until you decide what it is: ignore it and the wiring stays yours,
@@ -251,12 +256,14 @@ move around on you.
 | `tw ls [--json] [repo]` | The table above. Touches nothing |
 | `tw rm [-f] [-y] <slug>` | Delete the worktree, branch, stale remote ref, and window |
 | `tw prune [-y] [repo]` | Delete every merged, clean worktree. Lists them first unless you pass `--yes` |
-| `tw setup [-n] [name]` | Register the repo you're standing in |
+| `tw setup [-n] [--refresh] [name]` | Register the repo you're standing in, or regenerate its config in place |
 | `tw config [repo]` | Show the settings actually in force, defaults and all |
 | `tw doctor` | Check your install and every config you've registered |
 | `tw shell-init <shell>` | Print the shell integration for zsh, bash, or fish |
 | `tw tmux-init [--apply]` | Print the tmux integration, or load it straight into the server |
 | `tw agent-init [--global] [--print] <agent>` | Install the plugin that wires an agent to treewright — hooks in, skill out |
+| `tw refresh [repo]` | After an upgrade: rewrite the plugin in every checkout, reload the tmux bindings |
+| `tw version [--check]` | Print the version, and with `--check` say whether a newer one is out |
 
 `tw help <command>` has the details on any of them. There's also `tw popup`,
 which is what the key bindings run, and `tw signal`, which is what agent hooks
@@ -279,6 +286,7 @@ One TOML file per repo, written by `tw setup`, in
 commands that take a `[repo]`.
 
 ```toml
+version        = 1                    # which layout tw setup wrote; doctor checks it
 main_dir       = "~/code/storefront"  # required: your main checkout
 base_branch    = "staging"            # fork from and compare against this (default: main)
 branch_prefix  = "john/"              # branch is <prefix><slug> (default: none)
@@ -295,8 +303,9 @@ tmux_session   = "shop"               # session for this repo (default: this fil
 `main_dir` is the only one you need, and `tw setup` writes the rest as a
 commented file explaining each one, so this is the shape rather than the manual.
 Misspell a key and you get an error instead of a setting that silently does
-nothing. If you're unsure what's in effect, `tw config` prints the lot with
-defaults filled in, and `tw doctor` checks it.
+nothing — or, if it came from a newer treewright than the one you're running,
+the error says that too. If you're unsure what's in effect, `tw config` prints
+the lot with defaults filled in, and `tw doctor` checks it.
 
 Nothing that runs for you fails quietly. If `post_create` stops, the next `ls`,
 `cd` or `resume` for that worktree tells you which command it stopped at and where
@@ -321,6 +330,42 @@ standing, and that works from inside a worktree too.
 - Deleting a worktree strands its tmux window in a directory that no longer
   exists, so treewright offers to close it for you. If that window is the last
   one in the session, it says so first, because closing it would detach you.
+
+## Upgrading
+
+```sh
+brew upgrade --cask treewright   # or: go install github.com/jay-snyder/treewright@latest
+tw refresh                       # from a repo you use treewright in
+tw doctor                        # says whether anything is still behind
+```
+
+Most of it keeps up on its own. The line in your shell startup file and the line
+in `~/.tmux.conf` both ask the binary for their own text, so a new shell and a
+new tmux server get the new version without you doing anything. Three things
+don't, and all three are quiet about it:
+
+- **Your worktrees.** Each gets its copy of the agent plugin when it's created,
+  and nothing looks at it again — so a worktree made before the upgrade keeps
+  running the old hooks and the old skill for as long as it lives. `tw refresh`
+  rewrites every copy and tells you which files moved where.
+- **The tmux server you're attached to.** It keeps what it loaded at start,
+  which may have been weeks ago. `tw refresh` reloads the bindings, onto
+  whatever keys they're already on — if you moved them with `--resume-key`,
+  they stay moved.
+- **The shell you're sitting in.** Nothing can replace a function in a running
+  shell except that shell. Open a new terminal. `tw doctor` and `tw refresh`
+  both say when yours is out of date, since it's the one thing neither can fix.
+
+Your config file is yours and never gets rewritten behind you. When you want the
+newer commentary and any key added since, `tw setup --refresh` regenerates one
+in place: it keeps every setting you'd chosen and re-detects nothing, so a base
+branch or a prefix you corrected by hand stays corrected. `tw doctor` says when
+a config predates the generator.
+
+`tw version --check` asks GitHub whether there's a newer release and names the
+upgrade command for the route you installed by. It's the only thing here that
+touches the network, it only does it when asked, and `tw doctor` — which asks
+too — skips it in silence when you're offline.
 
 ## Uninstalling
 

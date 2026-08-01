@@ -1,4 +1,11 @@
 # treewright shell integration for bash. Load with: eval "$(treewright shell-init bash)"
+
+# Which treewright emitted the wrapper below, for "treewright doctor" to compare
+# against itself. A shell keeps whatever it loaded at start, and a binary cannot
+# read its parent's function table, so this is the only way the two can be told
+# apart. Exported because doctor is a child process.
+export TREEWRIGHT_SHELL_INIT_VERSION="{{version}}"
+
 treewright() {
   local evalfile rc
   evalfile="$(command mktemp "${TMPDIR:-/tmp}/treewright-eval.XXXXXX")" || return 1
@@ -14,7 +21,7 @@ treewright() {
 _treewright_completions() {
   local cur="${COMP_WORDS[COMP_CWORD]}"
   if [[ $COMP_CWORD -eq 1 ]]; then
-    COMPREPLY=($(compgen -W "new resume cd base attach popup signal ls rm prune setup config doctor shell-init tmux-init agent-init" -- "$cur"))
+    COMPREPLY=($(compgen -W "new resume cd base attach popup signal ls rm prune setup config doctor shell-init tmux-init agent-init refresh version" -- "$cur"))
     return
   fi
   if [[ "$cur" == -* ]]; then
@@ -32,7 +39,7 @@ _treewright_completions() {
       ;;
     rm)                          candidates="$(command treewright __complete slugs 2>/dev/null)" ;;
     resume|cd)                   candidates="$(command treewright __complete targets 2>/dev/null)" ;;
-    ls|prune|base|config|attach) candidates="$(command treewright __complete repos 2>/dev/null)" ;;
+    ls|prune|base|config|attach|refresh) candidates="$(command treewright __complete repos 2>/dev/null)" ;;
     shell-init)                  candidates="$(command treewright __complete shells 2>/dev/null)" ;;
     signal)                      candidates="$(command treewright __complete states 2>/dev/null)" ;;
     agent-init)                  candidates="$(command treewright __complete agents 2>/dev/null)" ;;

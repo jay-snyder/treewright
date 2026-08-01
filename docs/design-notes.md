@@ -301,7 +301,9 @@ stdout carries the answer and nothing else, so any command can be piped:
 | `ls` | the table, or a JSON array with `--json` |
 | `setup` | the config file's path, or the config itself with `--dry-run` |
 | `config`, `doctor` | the report you asked for |
-| `shell-init`, `tmux-init`, `help`, `version` | the script or text you asked for |
+| `shell-init`, `tmux-init`, `help`, `version` | the script or text you asked for — `version --check` puts what it found on stderr, so the version line stays one line |
+| `setup --refresh` | the config file's path, or the config itself with `--dry-run` |
+| `refresh` | nothing — what it did is a report, and the answer is the state it left behind |
 | `agent-init` | the plugin directory it installed into, or the plugin's files with `--print` — with what it wrote, and where else it could go, on stderr |
 | `signal` | nothing — the answer is the stamp on the window, and out of scope it is silent on stderr too |
 
@@ -480,6 +482,122 @@ does not inherit the failure of the one before it.
 because its commands are shell lines where a first word is as likely to be a
 builtin as a program, and a false warning about `cd` is worse than no check.
 
+## Upgrading treewright itself
+
+Three of treewright's integrations follow an upgrade on their own, and the way
+they do it is the same trick each time: what sits in the user's file is a
+*reference* rather than a copy. `eval "$(treewright shell-init zsh)"` re-runs at
+every shell start, `run-shell 'treewright tmux-init --apply'` re-reads at every
+tmux start, and the agent plugin is a directory treewright owns and rewrites.
+None of those can go stale in the sense a pasted snapshot could.
+
+What they can all be is *not yet reloaded*, and that turns out to be the whole
+problem. A tmux server runs for weeks. A terminal stays open for days. And a
+worktree's copy of the plugin is made once, by the carry, and then nothing ever
+looks at it again — which is a genuine snapshot, of exactly the kind
+[`agents.md`](agents.md) says the plugin exists to abolish, reintroduced one
+directory further down.
+
+None of that breaks anything loudly. The old bindings still open popups, the old
+wrapper still moves your shell, the old hooks still fire — right up until a
+signal verb is renamed, and then every pre-upgrade worktree errors on every
+agent transition while `doctor` reports `ok`. So each integration gained a way
+to say which treewright it came from, and one command puts them right.
+
+### Asking a running integration which treewright it came from
+
+Each of the three answers differently, and the differences are forced:
+
+- **The agent plugin** is a set of files treewright wrote, so the question is a
+  byte comparison against what `agent-init` would write today. That was already
+  how the main checkout was checked; what is new is that `doctor` now walks the
+  repository's worktrees and asks the same of each, and reports the answer as at
+  most two findings — one for the copies that are out of date, one for the
+  worktrees that never got one — each carrying its worktrees as a list. A
+  finding per worktree per file would turn one upgrade into thirty lines of a
+  report nobody then reads to the end of.
+
+- **The tmux bindings** cannot be compared that way, and the reason is worth
+  writing down because it looks like they could. tmux echoes a binding back in
+  its own normalized spelling — single quotes rewritten as double, backslashes
+  doubled, its own column padding — so byte-comparing `list-keys` against the
+  emitted snippet reports every server as stale, including one loaded a second
+  ago. What a server *does* hold verbatim is a value treewright puts there, so
+  the snippet ends with `set -g @treewright_tmux_init "<digest>"`, a fingerprint
+  of the snippet's own source. `tmux.HasBindings` — a substring test for
+  "treewright" in `list-keys` — stays what it was, and the stamp is what
+  separates "some version's bindings are loaded" from "this version's are".
+
+  The keys are deliberately *not* in the digest. Which key opens the picker is
+  the user's decision, made at the `tmux.conf` line; a fingerprint that moved
+  with it would report a server loaded by this very binary as out of date for as
+  long as the custom key survived, which is forever.
+
+- **The shell wrapper** cannot be asked at all: it lives in the user's shell,
+  and a child process cannot read its parent's function table. `doctor` used to
+  infer "loaded" from `TREEWRIGHT_EVAL_FILE` being set, which a terminal opened
+  two releases ago reports exactly as one opened a minute ago does. So the shim
+  exports `TREEWRIGHT_SHELL_INIT_VERSION`, its own fingerprint, and `doctor`
+  compares — accepting *any* of the three shims' fingerprints, since the
+  question is "is this one of mine" and working out which shell is running would
+  mean trusting `$SHELL`, which names the login shell rather than the running
+  one.
+
+Both fingerprints are digests of the checked-in text rather than the release
+number, for the same reason: a shim or a snippet built from an unstamped tree
+still has to be distinguishable from an older one, and a `dev` build compared
+against a `dev` build would be no comparison at all.
+
+### `refresh`, and what it deliberately will not do
+
+`refresh` is the one command to run after an upgrade. It rewrites the plugin in
+the main checkout and in every worktree, reloads the tmux bindings, and reports
+what moved in each place — naming the files, the way `agent-init` does, because
+the interesting run is the second one and "wrote `hooks/hooks.json` in eng-1"
+says which part of the wiring had gone stale where "updated 6 checkouts" says
+only that something did.
+
+**It refreshes what is installed and installs nothing new.** A checkout with no
+plugin is left alone unless the config carries one — a worktree with nothing in
+it and a carry configured is older than the carry and is owed a copy; without
+one, writing there would be treewright choosing a placement the config never
+asked for. The tmux bindings go back only into a server that already holds some,
+on the keys they are already on, since which keys a server binds is a decision
+made in a file the user owns. This is the command people will run without
+reading it, and `agent-init` and `tmux-init` are where that decision belongs.
+
+**The shell is said rather than done.** No process can define a function in its
+parent, so `refresh` reports a stale wrapper and names the fix — a new terminal
+— which is the whole of what is available to it.
+
+### Checking for a newer release
+
+Explicit only: `doctor` asks, `version --check` asks, and nothing else ever
+does. An upgrade check on `new` or `ls` is a network call in the middle of a
+command that had no reason to make one — slow on a bad connection, a privacy
+question on any connection, and a warning arriving while the user was doing
+something else. There is no cache file for the same reason there is no
+background check: both exist to make an *automatic* check cheap, and this one is
+not automatic.
+
+Two properties matter more than the answer. It must not hang, since `doctor` is
+what a person runs when something is already wrong — hence a short timeout on
+the whole request. And an unanswerable check must be silent in `doctor`: an
+offline laptop must not come back with a warning about the network it is not on.
+`version --check` is the one place that outcome is spoken, because somebody who
+typed it and got nothing would reasonably conclude they are up to date.
+
+A build with no release version says so rather than guessing. `dev` is not older
+than anything, and reporting it as behind would send somebody upgrading a binary
+they compiled an hour ago. That check happens *first*, before any request, which
+is also what keeps the test suite off the network.
+
+The upgrade command is named only for a route that can be told from the path the
+binary is running from — a Homebrew prefix, or the `go install` directory. Naming
+the wrong one is worse than naming none: `brew upgrade` told to somebody who used
+a tarball fails in a way that reads as treewright being broken, so the rest get a
+sentence instead.
+
 ## Safety
 
 `rm` refuses, absent `--force`, when the worktree has uncommitted changes or
@@ -569,7 +687,45 @@ TOML rather than a sourced shell script so that reading a config cannot execute
 code: configs are meant to be shared, linted, and generated, none of which should
 require trusting their author. Unknown keys are rejected outright, because a typo
 like `base-branch` would otherwise be silently ignored, leaving you to wonder why
-the base branch is still `main`.
+the base branch is still `main`. The error offers the other reading too — a
+config is a file two treewrights may see, on a laptop and a desktop or either
+side of a downgrade, and the newer one's settings arrive in the older one looking
+exactly like typos.
+
+### The version key, and refreshing a config in place
+
+Generated configs carry `version = <n>`, and it counts revisions of the
+*generator* rather than treewright releases: it moves when what `setup` writes
+moves, and stays put across releases that change nothing here. A file without
+one is an old config and not an error — every config in the wild predates the
+key, and refusing them would make an upgrade break every repository already
+registered. `doctor` warns; nothing fails.
+
+There is deliberately no rename or migration table. No key has ever been renamed,
+and that machinery would be built for a hypothetical. What the version supports
+is one warning naming one command.
+
+That command is `setup --refresh`, and it exists because `setup` refuses an
+existing config outright — rightly, since overwriting one discards edits — with
+the consequence that every later improvement to the generated file reached new
+repositories only. A repository registered two releases ago names none of the
+keys added since and explains none of what the commentary now explains, and the
+only way out was to delete the file and answer the detection again.
+
+**Nothing is re-detected**, which is the whole difference between this and
+running `setup` twice. The values are read back out of the file that is there: a
+base branch someone corrected by hand, a prefix chosen over the guess, a command
+that is not the agent's default. Those are decisions, and a refresh that
+re-derived them would quietly undo the ones that disagree with what treewright
+would guess today. What moves is the version, the commentary, and any key the
+generator has since learned to write.
+
+Two details in the rewrite are load-bearing. The prefixes come back under
+whichever of the two spellings the file used, since no config may set both. And
+`ticket_pattern` is written on whether the key was *there* rather than on whether
+it holds anything — `ticket_pattern = ""` is how a repository that tracks no
+tickets turns the search off, and a refresh that dropped it for looking empty
+would turn every window name in that repository back into a ticket hunt.
 
 Which config applies, in order: an explicit name; the config whose `main_dir` is
 the repository you are standing in; the only config, when the registry holds
@@ -665,6 +821,14 @@ at all has been said. The install section carries the `PATH` check instead, befo
 either integration is added. A dotfiles repo shared across machines, some without
 treewright on them, is the case where the guard earns its keep — but that is a
 choice about absent installs, not the instruction to hand someone installing it.
+
+**The shim says which treewright emitted it.** Each one exports
+`TREEWRIGHT_SHELL_INIT_VERSION`, a fingerprint of its own checked-in text, and
+that is the only way the question can be asked at all: a shell keeps whatever it
+loaded at start, and a binary cannot read its parent's function table. Exported
+rather than merely set, because the only thing that reads it is a child process —
+`doctor`, which compares it against the shims this binary emits and says when the
+wrapper in the shell is somebody else's. See "Upgrading treewright itself".
 
 **`tw` and `TREEWRIGHT_ARGV0`.** `tw` calls the `treewright` *function*, resolved
 at call time, so the eval-file protocol works identically under either name. That

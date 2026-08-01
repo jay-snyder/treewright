@@ -1,6 +1,49 @@
 package cli
 
-import "runtime/debug"
+import (
+	"fmt"
+	"runtime/debug"
+)
+
+// cmdVersion prints what this build calls itself, and with --check says whether
+// a newer one has been released.
+//
+// The version line stays on stdout and stays exactly one line, because it has
+// been that since the beginning and something somewhere greps it. What --check
+// finds goes to stderr with everything else that is narration — which also makes
+// the flag safe to leave in a shell profile or a motd, where the answer is worth
+// seeing and a changed stdout would not be.
+func cmdVersion(env *Env, args []string) error {
+	var check bool
+	if _, err := parseArgs("version", args, map[string]*bool{"--check": &check}, nil, 0); err != nil {
+		return err
+	}
+	fmt.Fprintf(env.Stdout, "treewright %s\n", env.Version)
+	if check {
+		reportRelease(env)
+	}
+	return nil
+}
+
+// reportRelease says what the check found.
+//
+// Every outcome is said here, including the two doctor keeps quiet about, and
+// the difference is that this was asked for: a person who typed --check and got
+// nothing back would reasonably conclude they are up to date. Neither of the
+// quiet outcomes is a warning even so — being offline is not a fault, and
+// neither is running a build from source.
+func reportRelease(env *Env) {
+	switch state, latest := checkForNewerRelease(env.Version); state {
+	case releaseBehind:
+		env.warnf("treewright %s is out, and this is %s\n%s", latest, env.Version, copyableUpgradeAdvice(env))
+	case releaseCurrent:
+		env.progressf("%s is the latest release", latest)
+	case releaseUnreachable:
+		env.progressf("could not reach the release API, so nothing was compared")
+	case releaseIncomparable:
+		env.progressf("%s is not a released version, so there is nothing to compare it with", env.Version)
+	}
+}
 
 // devVersion is what main.version holds when nothing stamped it: the default in
 // the source. Spelled here as well because this is the only code that has to

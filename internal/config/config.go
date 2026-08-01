@@ -56,11 +56,32 @@ const (
 	DefaultTicketPattern = `(?i)^([a-z]+-[0-9]+)(?:-|$)`
 )
 
+// FormatVersion is the revision of this file format, written into every config
+// `setup` generates and read back by `doctor`.
+//
+// It counts revisions of what a generated file *says* rather than treewright
+// releases, so it moves when the generator does and stays put across releases
+// that change nothing here. That is the number worth having: `setup` improves
+// its defaults and its commentary, `setup --refresh` is how those reach a
+// registered repository, and without a version in the file nothing could tell a
+// config that had them from one written two years ago.
+//
+// It is deliberately not a migration hook. No key has ever been renamed, and a
+// rename table would be machinery built for a hypothetical — what this supports
+// is one warning naming one command.
+const FormatVersion = 1
+
 // Config is one repository's settings.
 type Config struct {
 	// Name is the config's file name without the .toml suffix. It is what a
 	// user passes to `treewright ls <name>`. Not read from the file itself.
 	Name string `toml:"-"`
+
+	// Version is the FormatVersion the file was generated for. A file without
+	// one is an old config rather than a broken one: every config in the wild
+	// predates the key, and refusing them would make an upgrade of treewright
+	// break every repository already registered.
+	Version int `toml:"version"`
 
 	// explicit holds the keys the file actually set, so that reporting a
 	// configuration can distinguish a value that was chosen from one that was
@@ -225,12 +246,21 @@ func Load(path string) (*Config, error) {
 	}
 	// Reject unknown keys: a typo like "base-branch" would otherwise be silently
 	// ignored, leaving the user to wonder why their base branch is still "main".
+	//
+	// The second line is the reading this message could not give before. A
+	// config is a file two treewrights may see — one on a laptop, a newer one on
+	// a desktop, or the same machine either side of a downgrade — and the newer
+	// one's settings arrive here as typos. Naming version skew costs a line and
+	// saves the reader hunting for a misspelling that is not there. No command
+	// is named because this package has no argv0 to name it with; `doctor` and
+	// `version --check` are where the question gets answered.
 	if undecoded := md.Undecoded(); len(undecoded) > 0 {
 		keys := make([]string, 0, len(undecoded))
 		for _, k := range undecoded {
 			keys = append(keys, k.String())
 		}
-		return nil, fmt.Errorf("%s: unknown setting(s): %s", filepath.Base(path), strings.Join(keys, ", "))
+		return nil, fmt.Errorf("%s: unknown setting(s): %s\nremove them, or upgrade treewright — a newer one may have added them",
+			filepath.Base(path), strings.Join(keys, ", "))
 	}
 
 	c.explicit = make(map[string]bool, len(md.Keys()))

@@ -145,7 +145,9 @@ ldflags. Validate config changes with `goreleaser check`.
 | `main.go` | The only place errors become exit codes. Nothing else calls `os.Exit`. |
 | `internal/cli/cli.go` | `Env`, the command table, dispatch, help rendering. |
 | `internal/cli/commands.go` | `new`, `rm`, `ls`, `prune`, `resume`, `cd`, `base`, `attach`. |
-| `internal/cli/setup.go` | `setup` (config generation) and `config`. |
+| `internal/cli/setup.go` | `setup` (config generation, `--refresh`) and `config`. |
+| `internal/cli/refresh.go` | `refresh`: the one post-upgrade action. |
+| `internal/cli/release.go` | Whether a newer treewright exists, and how this one was installed. |
 | `internal/cli/doctor.go` | `doctor`: the four-way health check. |
 | `internal/cli/session.go` | One session per repo; `openWindow`/`focusWindow`. |
 | `internal/cli/render.go` | Tables, JSON, `parseArgs`, slug resolution. |
@@ -154,7 +156,7 @@ ldflags. Validate config changes with `goreleaser check`.
 | `internal/cli/signal.go` | `signal`: the agent-state protocol's one verb, run by agent hooks. |
 | `internal/cli/eval.go` | The eval-file protocol and shell quoting. |
 | `internal/cli/init.go` | `shell-init`, `tmux-init`, `agent-init`, `__complete`. |
-| `internal/cli/version.go` | What `version` reports: the ldflags stamp, else the build info. |
+| `internal/cli/version.go` | What `version` reports: the ldflags stamp, else the build info — and `--check`. |
 | `internal/config` | TOML loading, defaults, and which config applies. |
 | `internal/refname` | git's branch-name rules, restated for slugs and prefixes. |
 | `internal/git` | Every git call, including merged/unpushed/dirty logic. |
@@ -347,6 +349,45 @@ only: `tmux.Windows` strips it at parse, so `Window.Name` is always the clean
 name. The held-open wrapper is the one place a window outlives its agent, and it
 clears both itself. See "Agent state" in `docs/agents.md`.
 
+**An integration that propagates an upgrade must be able to say which
+treewright it came from.** The shim, the tmux snippet and the plugin all follow
+an upgrade by being re-read — but a shell, a tmux server and a worktree's copy
+all keep what they last loaded, for days or weeks, and that is invisible. So the
+shim exports `TREEWRIGHT_SHELL_INIT_VERSION`, the snippet ends with `set -g
+@treewright_tmux_init`, and the plugin is byte-compared in every checkout rather
+than only in the main one. A fourth integration added later needs the same, or it
+goes stale with nothing to say so. **Fingerprints are digests of the checked-in
+text, never the release version** — a `dev` build compared against a `dev` build
+is no comparison — **and never include the user's keys**, which are theirs to
+move. `tmuxinit.Version` and `shellinit.Version` each hold the four lines that
+do it; they are duplicated on purpose, a package existing to share four lines
+being the worse trade.
+
+**`refresh` refreshes what is installed and installs nothing new.** It rewrites
+plugin copies that exist, gives one to a worktree only where the config carries
+the plugin, reloads tmux bindings only into a server already holding some, and
+puts them back on the keys they are already on. `agent-init` and `tmux-init` are
+where a user decides what treewright touches; `refresh` is the command people run
+without reading it, and it must never be how that decision gets made for them.
+The shell wrapper is the one thing it reports rather than fixes — no process can
+define a function in its parent.
+
+**The release check is explicit-only.** `doctor` and `version --check`, and
+nothing else — no cache file, no background check, no HTTP on `new` or `ls`. An
+unreachable API is a silent skip in `doctor` (an offline laptop is not a fault)
+and a spoken one in `version --check` (it was asked for). A build reporting no
+release version says so instead of guessing, and that test runs *before* any
+request, which is also what keeps the suite off the network — see
+`stubReleaseAPI` in `upgrade_test.go` for the tests that do exercise it.
+
+**The config's `version` key counts generator revisions, not releases**
+(`config.FormatVersion`). A file without one is an old config and never an error:
+every config in the wild predates the key. `setup --refresh` is the only thing
+that rewrites one, and it **re-detects nothing** — every value comes back out of
+the file, read through `Explicit` so a default never gets written back as a
+setting. Adding a key the generator writes means adding it to `configSettings`
+*and* to `settingsFrom`, or `--refresh` silently drops it.
+
 **Read-only-looking commands still write to `.git`.** Squash-merge detection
 synthesizes a dangling commit object (`IsMerged`), with fixed author/committer
 env so the hash is deterministic and repeat runs reuse the object.
@@ -475,6 +516,7 @@ parse would break the startup of whatever loads it.
 |---|---|
 | `TREEWRIGHT_CONFIG_DIR` | Registry directory; overrides `$XDG_CONFIG_HOME/treewright/repos`. |
 | `TREEWRIGHT_EVAL_FILE` | Set by the shell wrapper; commands append shell lines for it to source. |
+| `TREEWRIGHT_SHELL_INIT_VERSION` | Exported by the shell wrapper: the fingerprint of the shim that defined it, which is how `doctor` tells a wrapper this binary emitted from one an older build did. |
 | `TREEWRIGHT_ARGV0` | The name the user typed (`tw`), since the wrapper erases it from argv[0]. |
 | `TREEWRIGHT_TMUX_LABEL` | Drive a non-default tmux server (`tmux -L <label>`). |
 | `TREEWRIGHT_POPUP` | Set inside a popup, so exit paths can say "press Esc to close". |

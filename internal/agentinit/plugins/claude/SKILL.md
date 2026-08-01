@@ -135,8 +135,10 @@ names it — since closing that one ends this session mid-answer.
 
 - `treewright signal` is run by the agent's own hooks already; do
   not call it by hand.
-- `treewright setup`, `shell-init`, `tmux-init`, and `agent-init`
-  change a person's configuration; run them only when asked to.
+- `treewright setup`, `shell-init`, `tmux-init`, `agent-init`, and
+  `refresh` change a person's configuration; run them only when asked
+  to. `refresh` rewrites files in every checkout and reloads their tmux
+  key bindings, so it is theirs to run after an upgrade, not yours.
 
 ## Trying it out is not free
 

@@ -801,6 +801,13 @@ func baseChoice(cfg *config.Config) choice {
 	return choice{Worktree: git.Worktree{Dir: cfg.MainDir, Branch: branch}, Base: true}
 }
 
+// baseName is what the main checkout answers to wherever it stands beside the
+// worktrees: the row in the resume menu, the word typed back at it, and the
+// label `refresh` reports its checkout under. Named once because those have to
+// agree — a user who reads "base" off one and types it at another is entitled to
+// reach the same place.
+const baseName = "base"
+
 // baseNames are what selects the base checkout when a name is typed rather than
 // picked. Both spellings, because both are what comes to mind: "base" is the
 // command that opens it and stays right whatever the checkout is parked on,
@@ -813,7 +820,7 @@ func baseChoice(cfg *config.Config) choice {
 // short spelling to the checkout and keeps its own full one, which is as it
 // should be: the checkout is the thing you cannot otherwise name.
 func baseNames(cfg *config.Config, base choice) []string {
-	names := []string{"base", cfg.BaseBranch}
+	names := []string{baseName, cfg.BaseBranch}
 	if base.Branch != "" {
 		names = append(names, base.Branch)
 	}
