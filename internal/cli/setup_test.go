@@ -84,6 +84,48 @@ func TestSetupReportsWhatItGuessed(t *testing.T) {
 	}
 }
 
+// TestSetupWritesTheEmailPrefixAsAGuess: every other value in the file was read
+// off the repository, and this one was inferred from an address that need not
+// name a person at all — a per-forge identity yields a namespace nobody would
+// choose. Written with the confidence of the rest, it reads as something
+// treewright found out rather than something it made up.
+func TestSetupWritesTheEmailPrefixAsAGuess(t *testing.T) {
+	f := unregistered(t)
+
+	r := f.exec("setup", "--dry-run")
+	if r.err != nil {
+		t.Fatalf("setup --dry-run: %v\n%s", r.err, r.both())
+	}
+	// The header, which is what tells a reader the file holds two kinds of value.
+	if !strings.Contains(r.stdout, "anything called a guess") {
+		t.Errorf("generated config = %q, want the header to distinguish the two", r.stdout)
+	}
+	// And the prefix itself, since a reader checking one line does not read the
+	// header first.
+	if !strings.Contains(r.stdout, "A guess, from\n# your git email") {
+		t.Errorf("generated config = %q, want the prefix to carry its provenance", r.stdout)
+	}
+}
+
+// TestSetupWritesADetectedPrefixAsEvidence is the other half: a prefix read off
+// origin's own branches is what the repository already does, and hedging it
+// would teach the reader to skip the word "guess" where it matters.
+func TestSetupWritesADetectedPrefixAsEvidence(t *testing.T) {
+	f := unregistered(t)
+	pushBranches(f, "feature/a", "feature/b")
+
+	r := f.exec("setup", "--dry-run")
+	if r.err != nil {
+		t.Fatalf("setup --dry-run: %v\n%s", r.err, r.both())
+	}
+	if !strings.Contains(r.stdout, "origin's own branches already use") {
+		t.Errorf("generated config = %q, want the detected prefix stated as evidence", r.stdout)
+	}
+	if strings.Contains(r.stdout, "A guess, from") {
+		t.Errorf("generated config = %q, want no hedging on a prefix read off origin", r.stdout)
+	}
+}
+
 // pushBranches puts branches on origin under the given names, that being where
 // setup reads a team's naming convention from.
 func pushBranches(f *fixture, names ...string) {

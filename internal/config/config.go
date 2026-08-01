@@ -90,7 +90,7 @@ type Config struct {
 
 	// Agent names a built-in agent module (see internal/agentinit), which
 	// supplies the defaults for Command and ResumeCommand and has the agent's
-	// own gitignored state files carried into every new worktree. A defaults
+	// own per-project state files carried into every new worktree. A defaults
 	// bundle, not a second spelling: setting Command alongside it overrides
 	// that one field, and the file still says which command runs.
 	//
@@ -100,9 +100,11 @@ type Config struct {
 	// is what asks for the bundle.
 	Agent string `toml:"agent"`
 
-	// CarryFiles are paths, relative to MainDir, copied into each new worktree.
-	// Git ignores these files, so a new worktree starts without them, and the
-	// app needs them: .env files, local credentials, editor settings.
+	// CarryFiles are paths, relative to MainDir, copied into each new worktree:
+	// .env files, local credentials, editor settings. What puts a file here is
+	// that a fresh checkout does not have it and the app needs it, which is
+	// usually because git ignores it — but only usually, and AgentCarries below
+	// adds files git ignores not at all.
 	CarryFiles []string `toml:"carry_files"`
 
 	// Command is what to launch in the new tmux window. Defaults to "claude".

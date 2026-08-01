@@ -153,8 +153,11 @@ tw doctor     # tells you if anything's missing
 to fork from (it reads `origin/HEAD`), your branch prefixes — read off the
 branches already on origin, or your git email if they say nothing — and
 which gitignored `.env` files to carry into new worktrees. It prints every guess
-and writes them to a commented TOML file, so fixing a bad one is a two-second
-edit. Use `--dry-run` if you'd rather look before it writes anything.
+and writes them to a commented TOML file that says which values it detected and
+which it guessed, so fixing a bad one is a two-second edit. The email-derived
+branch prefix is the one worth a look: a git address that names a forge rather
+than a person gives you a namespace called `codeberg/`. Use `--dry-run` if
+you'd rather look before it writes anything.
 
 After that it's four commands:
 
@@ -216,6 +219,11 @@ are untouched. Run it again after upgrading treewright and it updates the
 wiring in place — that's the reason it's a directory of treewright's own rather
 than a fragment you paste somewhere.
 
+Since it won't write your `.gitignore` for you, that directory shows up as
+untracked until you decide what it is: ignore it and the wiring stays yours,
+commit it and everyone who clones gets it. `tw doctor` keeps mentioning it until
+you've picked one.
+
 Hit `prefix + T` and that same table becomes a menu, in a popup sized to fit it:
 
 ```
@@ -260,7 +268,9 @@ prefix matches two worktrees you get an error listing both, because guessing on
 `tw rm` is how people lose work.
 
 Output is pipe-friendly. stdout is the answer and nothing else, so
-`cd "$(tw new eng-2318)"` and `tw ls --json | jq` both do what you'd hope.
+`cd "$(tw new eng-2318)"` and `tw ls --json | jq` both do what you'd hope. The
+JSON always leads with your main checkout's row, even in a repo with no
+worktrees yet, so anything reading it has somewhere to start.
 
 ## Configuring it
 
@@ -273,8 +283,8 @@ main_dir       = "~/code/storefront"  # required: your main checkout
 base_branch    = "staging"            # fork from and compare against this (default: main)
 branch_prefix  = "john/"              # branch is <prefix><slug> (default: none)
 # branch_prefixes = ["feature/", "bug/"]   # or several — pick one: `tw new bug/eng-1`
-carry_files    = ["apps/api/.env"]    # gitignored files copied into each new worktree
-agent          = "claude"             # fills in the two commands, carries the agent's own settings
+carry_files    = ["apps/api/.env"]    # files a fresh worktree needs and doesn't have
+agent          = "claude"             # fills in the two commands, carries its settings and wiring
 command        = "claude {prompt}"    # what the window launches; {prompt} takes --prompt's text
 resume_command = "claude --continue {prompt}"
 post_create    = "npm install"        # background setup after `new`; a list runs in order
@@ -305,6 +315,9 @@ standing, and that works from inside a worktree too.
   are never on the list.
 - Nothing destructive runs on a guess. An ambiguous slug is an error, not a
   coin flip.
+- `tw new` forks from `origin/<base_branch>`, so it tells you when your main
+  checkout is holding commits you haven't pushed: they aren't in the new
+  worktree, and neither are the files they added.
 - Deleting a worktree strands its tmux window in a directory that no longer
   exists, so treewright offers to close it for you. If that window is the last
   one in the session, it says so first, because closing it would detach you.

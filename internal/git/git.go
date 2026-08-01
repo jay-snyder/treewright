@@ -261,6 +261,28 @@ func (r Repo) IgnoredFiles() []string {
 	return strings.Split(out, "\n")
 }
 
+// Ignored reports whether the repository's ignore rules cover a path, given
+// relative to the main checkout. A directory answers for itself, so
+// ".claude/skills/treewright" is a question this can be asked.
+//
+// --no-index asks the rules alone. Without it git answers "no" for anything in
+// the index however the rules read, which is the right answer to check-ignore's
+// usual question — why is this file not being ignored — and the wrong one here,
+// where a committed path and an unmentioned one need telling apart. Tracked
+// asks that half separately.
+func (r Repo) Ignored(rel string) bool {
+	return r.runOK("check-ignore", "--quiet", "--no-index", "--", rel)
+}
+
+// Tracked reports whether git has anything under a path in the index. A
+// directory is a legitimate argument for the same reason it is to Ignored: the
+// question is about a tree of files, and one tracked file in it means the tree
+// is in the repository's history.
+func (r Repo) Tracked(rel string) bool {
+	out, err := r.run("ls-files", "--", rel)
+	return err == nil && out != ""
+}
+
 // ---- state queries ---------------------------------------------------------
 
 // DirtyFiles counts uncommitted changes in a worktree, staged or not, including

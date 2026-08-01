@@ -54,11 +54,23 @@ slightly different — for the checkout parked on the base branch, it is how far
 behind origin you are, and so whether what you are reading there is stale.
 
 **In a repository with no worktrees yet**, the menu is that one row with "start
-one with `prefix + N`" printed above it, while `ls` prints nothing at all. The
-listing and the menu part company in that one state because they are for
-different things: a menu is a way through, and must offer the base checkout
-exactly when there is nothing else to offer, while a listing is an answer, and
-"no worktrees" is the answer.
+one with `prefix + N`" printed above it; `ls` prints nothing, and `ls --json`
+still carries the base row. Three answers to one state, because the three are
+for different readers.
+
+A menu is a way through, and must offer the base checkout exactly when there is
+nothing else to offer. A table is an answer read by a person, and "no worktrees"
+is the answer — printed on stderr, where it cannot be mistaken for a row. The
+JSON is a schema, and a row that appears only sometimes is not one: a consumer
+deciding where a piece of work should go reads row 0, and making it check first
+whether row 0 exists pushes the special case into every reader.
+
+An empty array cost exactly that, and worse: it was read as "this repository is
+not registered", which sent its reader through `--help` and the config files
+looking for a registration that was already in place. That state was never
+ambiguous — an unregistered repository exits 1 with `no registered config
+matches repo <path> (have: …)` — so the fault was not an unanswerable question
+but one schema with two shapes.
 
 ## Naming a worktree
 
@@ -243,6 +255,19 @@ single prefix — a repo where every branch is a `feature/` means new work is a
 `feature/` too. The email guess exists to make branches attributable on a shared
 remote, and a repo that already namespaces has answered that question its own way.
 
+**And the generated file says which of the two it got.** A prefix read off
+origin's branches is a convention observed; one derived from a git email is a
+guess about a person made from an address that need not be about a person —
+`codeberg@example.org` yields `codeberg/`, a namespace nobody would choose,
+which is how the guess is usually met. Written with the same confidence as
+`main_dir`, under a header claiming everything below was detected, it reads as
+something treewright found out. So the header distinguishes the two kinds of
+value and invites a read, and the email-derived prefix carries its provenance on
+the line above it, where a reader checking one setting will actually see it. The
+guess itself stays: attributable branches on a shared remote are why it exists,
+and the fix for a wrong one is a one-line edit in a file that is meant to be
+edited.
+
 ## Creating a branch
 
 `new` reuses a branch that already exists rather than recreating it, which is
@@ -251,6 +276,17 @@ Branches always fork from `origin/<base_branch>` — there is deliberately no fl
 to base one on anything else, the point being that every worktree starts from the
 same known-current place. When origin is unreachable, `new` says so and forks
 from the local base branch.
+
+**A base checkout ahead of origin is warned about**, because that same rule is
+what makes it invisible: commits made in the main checkout and not yet pushed are
+not in the new worktree, and neither are the files they added. Nothing is wrong —
+the fork point is the one treewright promises, and pushing is the user's call —
+but the discovery otherwise arrives as an empty file three steps into the work,
+looking like anything except a fork point. So `new` counts the local base branch
+against `origin/<base_branch>` on the path that forks from origin, says what it
+means for the worktree just made, and names the two ways out: push and recreate,
+or cherry-pick the commits over. It is the branch that is compared, not whatever
+the checkout has out — that is `base`'s question, and it asks it separately.
 
 ## Output contract
 
@@ -369,7 +405,10 @@ wrong. `doctor` exits `1` when a check fails, so it can gate a setup script.
 Color is on only when writing to a terminal, and off under `NO_COLOR` or
 `TERM=dumb`.
 
-`--json` reports `ahead` and `behind` as `null` rather than `0` when the branch
+`--json` always carries the base checkout as its first row, in every repository
+it can answer about, so a consumer reads row 0 rather than testing whether there
+is one — see "The base checkout" for what the table does instead, and why the two
+differ. It reports `ahead` and `behind` as `null` rather than `0` when the branch
 cannot be compared to its base — an unknown is not a zero. An open window is
 described with three fields, because they are consumed differently: `window` is
 the name a human reads, `window_id` is what `tmux kill-window -t` takes, and
@@ -545,8 +584,9 @@ sitting right there with a typo in it.
 resolved paths for every worktree, so a `main_dir` that reaches the repo through
 a symlink would never match what git says and its worktrees would be invisible.
 
-`setup` writes the file with every guess commented, on the principle that the
-file remains the record: it is a way to start one, not a layer above it. `config`
+`setup` writes the file with every value commented, and marks which of them were
+detected and which were guessed, on the principle that the file remains the
+record: it is a way to start one, not a layer above it. `config`
 prints what is in force with defaults marked as such, because the gap between a
 config file and the behavior it produces — invisible defaults, unexpanded paths,
 and which of several configs applies — is where the confusion lives.

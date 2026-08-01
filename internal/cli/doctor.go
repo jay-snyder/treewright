@@ -495,6 +495,12 @@ func checkAgentWiring(r *report, cfg *config.Config) {
 		r.addf(levelOK, "agent", "%s reports state through its plugin", module.Name)
 	}
 
+	// Asked only of a plugin that is actually in the checkout: --global puts it
+	// under the user's home directory, where no repository has an opinion.
+	if project != pluginAbsent {
+		checkPluginIsIgnored(r, cfg, module)
+	}
+
 	// Said as well as, not instead of, whatever the plugin's own state was: the
 	// two sets of hooks both fire, and the pasted ones are the copy frozen at
 	// whichever treewright printed them — a verb renamed since is an error
@@ -503,6 +509,42 @@ func checkAgentWiring(r *report, cfg *config.Config) {
 	if pasted != "" && (project != pluginAbsent || user != pluginAbsent) {
 		r.addf(levelWarn, "agent", "the hooks pasted in %s run alongside the plugin's\ndelete them — the plugin is the copy treewright keeps current", pasted)
 	}
+}
+
+// checkPluginIsIgnored warns when the plugin in a checkout is neither ignored
+// nor committed, which is the state that leaves a directory nobody created
+// sitting in `git status` as untracked — in the main checkout, and, since the
+// agent key carries it, in every worktree treewright makes afterwards.
+//
+// agent-init already says this at install time, and that is not the same thing.
+// A sentence at install time is read once, by someone in the middle of
+// installing; the state it warns about outlives the sentence, and doctor is
+// where a half-configured repository gets asked about again. It is also where
+// the question can be answered rather than assumed: agent-init says it
+// unconditionally because the answer costs a git call to learn and the sentence
+// is worth reading either way, while doctor is already running git and only
+// reports what is actually true here.
+//
+// Both ways out are named because both are decisions treewright does not get to
+// make. Ignoring it keeps the wiring local to whoever wants it; committing it
+// hands treewright to everyone who clones, which is a real choice a team can
+// make. Either way this stops warning — and treewright still writes to no
+// .gitignore of anyone's, which is why the fix is a sentence rather than an
+// edit.
+func checkPluginIsIgnored(r *report, cfg *config.Config, module agentinit.Agent) {
+	repo := git.Repo{Dir: cfg.MainDir}
+	dir := module.ProjectPlugin
+	if repo.Ignored(dir) || repo.Tracked(dir) {
+		return
+	}
+	// Four lines where the findings above take three, because there are two ways
+	// out rather than one: what is wrong, what it costs, the way that is a
+	// decision, and the way that is a line to paste — which goes last, like
+	// every other command this report names.
+	r.addf(levelWarn, "agent plugin", "git neither ignores nor tracks %s\n"+
+		"it reads as untracked here and in every worktree treewright makes\n"+
+		"commit it to hand the wiring to everyone who clones\n"+
+		"or add to .gitignore:  %s/", dir, dir)
 }
 
 // inspectPlugin reads what is installed at dir and compares it with what
