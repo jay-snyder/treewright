@@ -370,3 +370,48 @@ once and cannot retype from memory would be the quiet failure everything else
 here refuses to be. `base` takes no `--prompt` at all, since reusing its one
 window is its normal case — the flag would warn more often than it worked.
 
+## When there is nothing to resume
+
+`resume` runs `resume_command`, and `resume_command` is "carry on where I left
+off" — `claude --continue` and its like. A worktree whose first agent never
+started has nothing to carry on from, so that command exits on saying so and the
+held-open window parks on the error.
+
+Such a worktree used to be unreachable. `new` refuses the slug, the worktree
+being right there, and names `resume` as the way in: the one command that could
+not work. `ls` shows a healthy row with an empty WINDOW column and nothing to
+say why. Removing the worktree and starting over was the only way out — a long
+way to go for a window that failed to open.
+
+treewright cannot ask an agent whether it has a conversation in a directory, so
+it keeps a note of its own: `.git/treewright/no-agent-yet-<slug>`, written when
+`new` makes the worktree and taken off the moment a window actually runs the
+command. `resume` reads it and runs `command` instead, and says so rather than
+doing it quietly — a fresh agent appearing where you expected your session back
+is a thing to explain. That is also what makes `new`'s "open it with
+`tw resume <slug>`" true again, rather than a signpost to the one command that
+cannot help.
+
+**The marker is the negative, and that is the whole decision.** A marker saying
+*an agent has run here* would be missing from every worktree made by a treewright
+that never wrote one — worktrees in use for weeks, holding exactly the
+conversation `--continue` wants — and the fallback would greet each of them with
+a fresh agent and no history. A first-run heuristic that silently discards
+somebody's session is a worse bug than the one being fixed. So absence has to
+mean *as before*: the state that already existed stays silent, and the marker is
+the news.
+
+It records that an **agent was started**, not that a **window was opened**. Those
+are the same thing nearly always, and they come apart in exactly the case this
+exists for.
+
+**The base checkout is left out of it.** It is not a worktree treewright made, so
+there is no moment at which treewright could honestly write that nothing had ever
+run in it — and `tw base` opens that window with `command` already, so the way in
+that needs no conversation is a command of its own rather than a fallback.
+
+A `--fresh` flag on `resume`, with `new`'s error naming it, was the alternative
+and it loses on both counts: it is one more thing to know at exactly the moment
+you are confused, and the question it puts to the user — *has an agent ever run
+here?* — is one treewright is in a better position to answer.
+

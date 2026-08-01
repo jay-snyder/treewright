@@ -674,6 +674,7 @@ What it writes, in full:
 |---|---|
 | `<config dir>/<name>.toml` | The registry *is* the configuration; there is no treewright without it. One directory, `rm -r` and it is gone. |
 | `<main_dir>/.git/treewright/post-create-*` | A background step's log and failure marker, inside the repository's own `.git`, which goes when the repository does. |
+| `<main_dir>/.git/treewright/no-agent-yet-*` | The note that a worktree has never had an agent in it, beside that log and gone the same way. It says what it is for in its own first line, since a marker nobody can read is a marker nobody can delete. |
 | `<main_dir>/.claude/skills/treewright/` | The agent plugin, written by `agent-init` — inside the repository, in a directory treewright named and nothing else writes to. `rm -r` and it is gone, and `claude plugin disable treewright@skills-dir` stops it loading without deleting anything. |
 | `~/.claude/skills/treewright/` | The same plugin, when `agent-init --global` is asked for it. The only thing on this list outside a repository besides the registry, and the flag *is* the consent: it is not written unless it is named. |
 | The worktrees themselves | What the tool is for, and `rm` takes each one back. |

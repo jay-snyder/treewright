@@ -310,8 +310,11 @@ the lot with defaults filled in, and `tw doctor` checks it.
 Nothing that runs for you fails quietly. If `post_create` stops, the next `ls`,
 `cd` or `resume` for that worktree tells you which command it stopped at and where
 the log is. If `command` fails, its window stays open with the error still on
-screen rather than closing before you can read it. And a `--prompt` too long for
-tmux to carry is refused before the worktree is made, rather than after.
+screen rather than closing before you can read it. If the window never opened at
+all, `tw resume` starts the agent from scratch instead of trying to continue a
+conversation that was never had, and says that's what it's doing. And a
+`--prompt` too long for tmux to carry is refused before the worktree is made,
+rather than after.
 
 You don't have to say which repo you mean. treewright matches on where you're
 standing, and that works from inside a worktree too.

@@ -949,6 +949,86 @@ func TestResumeUsesConfiguredCommand(t *testing.T) {
 	waitForFile(t, marker, "resume_command")
 }
 
+// TestResumeStartsTheAgentThatNeverRan is the way back into a worktree whose
+// first window never opened, which used to be a worktree nothing could open.
+//
+// resume_command is "carry on where I left off" — `claude --continue` and its
+// like — and a worktree that has never had an agent in it has nothing to carry
+// on from, so it exited on saying so and the held-open wrapper parked the window
+// on the error. `new` refused the slug and named `resume` as the way in: the one
+// command that could not work. Removing the worktree was the only way out.
+//
+// The window here fails to open the one way a test can arrange: tmux is
+// installed, and its socket directory is a file, so every call to it fails.
+func TestResumeStartsTheAgentThatNeverRan(t *testing.T) {
+	requireTmux(t)
+	dir := t.TempDir()
+	fresh, resumed := filepath.Join(dir, "fresh"), filepath.Join(dir, "resumed")
+	f := newFixture(t, "command = 'touch "+fresh+"'\nresume_command = 'touch "+resumed+"'\n")
+
+	working := os.Getenv("TMUX_TMPDIR")
+	unusable := filepath.Join(dir, "not-a-directory")
+	if err := os.WriteFile(unusable, nil, 0o644); err != nil {
+		t.Fatalf("write the unusable socket directory: %v", err)
+	}
+	t.Setenv("TMUX_TMPDIR", unusable)
+
+	r := f.exec("new", "solo")
+	if r.err != nil {
+		t.Fatalf("new: %v\n%s", r.err, r.both())
+	}
+	// The branch and the worktree are made whatever tmux did, and the path is
+	// still the answer — which is exactly why this state can exist.
+	if strings.TrimSpace(r.stdout) != f.DirFor("solo") {
+		t.Fatalf("stdout = %q, want the worktree path", r.stdout)
+	}
+	if _, err := os.Stat(fresh); err == nil {
+		t.Fatal("a window opened after all; the test is not exercising what it says")
+	}
+
+	t.Setenv("TMUX_TMPDIR", working)
+
+	out := f.mustRun("resume", "solo")
+	if !strings.Contains(out, "no agent has run in solo yet") {
+		t.Errorf("output = %q, want the fallback reported rather than applied silently", out)
+	}
+	waitForFile(t, fresh, "command")
+	if _, err := os.Stat(resumed); err == nil {
+		t.Error("resume_command ran in a worktree with no conversation to continue")
+	}
+
+	// And once an agent has started there, resume is resuming again: the marker
+	// is news about a state that has ended, not a mode the worktree stays in.
+	waitForNoPanes(t, f.DirFor("solo"))
+	out = f.mustRun("resume", "solo")
+	if strings.Contains(out, "no agent has run") {
+		t.Errorf("output = %q, want no fallback once an agent has started", out)
+	}
+	waitForFile(t, resumed, "resume_command")
+}
+
+// TestAWorktreeThatStartedAnAgentResumesNormally is the direction the marker has
+// to fail in. A worktree made before treewright wrote one has no marker and may
+// well have a conversation, so absence must mean "as before" — a fallback that
+// greeted every one of those with a fresh agent would discard the session it was
+// meant to protect.
+func TestAWorktreeThatStartedAnAgentResumesNormally(t *testing.T) {
+	f := newFixture(t, "")
+	f.mustRun("new", "solo")
+
+	cfg := &config.Config{MainDir: f.MainDir}
+	if noAgentYet(cfg, "solo") {
+		t.Error("a worktree whose window opened is still marked as having had no agent")
+	}
+	// The state of a worktree from a treewright that wrote no marker at all.
+	if err := os.Remove(firstAgentPath(cfg, "solo")); err != nil && !os.IsNotExist(err) {
+		t.Fatalf("remove the marker: %v", err)
+	}
+	if noAgentYet(cfg, "solo") {
+		t.Error("a worktree with no marker reads as one whose agent never ran")
+	}
+}
+
 // TestResumeWithNoWorktrees covers the empty repository. The menu still appears,
 // holding the one row there is, with the sentence that says how to start work
 // above it — so resume can no longer fail here, only be dismissed.
