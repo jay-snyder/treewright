@@ -253,6 +253,11 @@ $ tw cd eng-2318
 eng-2318 matches worktree eng-2318-cart-total-rounding
 ```
 
+Prefix matching is not really about ticket keys, though, which is why it is worth
+having where there are none: `tw cd dark-mode` finds `dark-mode-toggle` for the
+same reason. What people type is the start of the name, whatever the name is made
+of.
+
 The expansion is always reported rather than applied silently — `rm` is on that
 list. An exact slug wins over any prefix, so a slug that is a prefix of another
 stays reachable by its own name, and an ambiguous prefix is an error listing the
@@ -264,6 +269,70 @@ formats arriving three steps deeper — by which point treewright has already
 announced what it was about to do. A slug may not contain `/`, because a nested
 one leaves a stray parent directory behind when the worktree is removed; the rest
 of the rules are `git check-ref-format`'s.
+
+## Naming a window, with or without a ticket
+
+A window name goes in the tmux status line beside every other window's, so it has
+to be short. A ticket key already is; a description is not, and `ticket_pattern`
+exists to prefer the key when the slug carries one.
+
+Everything else here works the same either way — the worktree is named after the
+slug, the branch after the prefix and the slug, and `resume`, `cd` and `rm` all
+take the slug — so the window name is the *only* place a repository that tracks
+no tickets was treated as a degraded version of one that does. It was treated
+that way twice.
+
+**The pattern matched things that were not keys.** `(?i)^([a-z]+-[0-9]+)` let the
+digits end anywhere, so `fix-2fa-login` — work on two-factor login — opened a
+window called `FIX-2`. The fix is to require the key to be a whole word, `(?:-|$)`
+at the end, which costs a real key nothing: a key is followed by the description
+or by the end of the slug in either case. What survives is genuine ambiguity —
+`refactor-2-pass-parser` is a ticket key to any pattern that does not know the
+scheme — and no regexp settles that, because the answer is a fact about the
+repository rather than about the string.
+
+So the answer is a setting, and the setting is the pattern itself:
+`ticket_pattern = ""` means there are no tickets here, stop looking. It needs no
+second key, and it reads as what it is. The catch is that `Load` fills every
+other empty string in the file with a default, which would make the opt-out
+unwritable; it therefore tests `Explicit("ticket_pattern")` rather than the
+value, so an omitted key defaults and a key set to `""` stays empty. A
+never-matching regexp was the alternative — undiscoverable, and RE2 has no
+negative lookahead to write one with.
+
+**The fallback spent characters saying characters were missing.** `rewrite-css` is
+eleven characters and arrived as `REWRITE-CS...` — thirteen, to save one. So
+`shorten` now keeps a shortened name only when it is genuinely narrower than what
+it replaced, which is what hands that slug back whole.
+
+The cap stays at ten. It is a ticket key's width, and holding a description to the
+same one is the point rather than an oversight: the status line is as wide for a
+repository that names work by description as for one that names it by key, and a
+name that fits is worth more there than a name that is whole. Cutting mid-word is
+the cost, and it is the cheaper one.
+
+Cutting at a word boundary instead was tried, and it loses at this width. It has to
+give back a whole word to find the boundary, so `flaky-payment-test` arrives as
+`FLAKY…` rather than `FLAKY-PAYM…`, and — because cutting further escapes the
+guard above — `rewrite-css` arrives as `REWRITE…` where the blunt cut hands it back
+whole. It pays only at a cap wide enough that the nearest boundary is usually near
+it, which is an argument for a wider cap and not for the rule. The one thing kept
+from it is a trailing hyphen trim, since a cut landing after one leaves it against
+the mark: `dark-mode-toggle` as `DARK-MODE…` rather than `DARK-MODE-…`.
+
+The mark is `…` rather than `...`: one column instead of three, in the one place
+where columns are the whole problem, and three of a ten-column budget is a lot to
+spend. That makes the calculation a matter of runes rather than bytes — `refname`
+forbids control characters and git's own metacharacters, not the rest of Unicode,
+so a slug may legitimately hold multi-byte characters, and a byte-wise cut would
+misjudge the width and split one down the middle. `ui.Table` already measures in
+runes, so the table stays aligned. `popupSize` still measures in bytes and so
+allows two columns more than the mark needs, which is the direction it errs on
+purpose.
+
+None of it is load-bearing for anyone who disagrees: `tw new <slug> <window-name>`
+has always named a window outright, and remains the answer for the one worktree
+whose name does not fit whatever rule is in force.
 
 ## Branch prefixes
 
@@ -291,8 +360,8 @@ The prefix reaches the branch and stops there. The worktree stays
 `<repo>-eng-2318`, the window stays `ENG-2318`, and `resume`, `cd` and `rm` still
 take the slug alone. Folding the kind of work into the directory name was the
 alternative, and it loses on all three of its own terms: `ticket_pattern` stops
-matching (`feature-eng-142-white-screen` has no `[a-z]+-[0-9]+` at its head, so
-every window would be called `FEATURE-EN...`), every row of the table grows a word
+matching (`feature-eng-142-white-screen` has no ticket key at its head, so every
+window would be called `FEATURE-EN…`), every row of the table grows a word
 that repeats down the column, and you would have to remember which kind of work
 something was to reopen it — a question git already answers. Two worktrees whose
 slugs are both `auth` therefore collide whatever their prefixes, and `new` says so

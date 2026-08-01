@@ -149,11 +149,13 @@ When a branch of that name already exists — your own earlier work, or a collea
 pull request you have fetched — it is checked out rather than recreated, so this is
 also how you get a worktree onto an existing branch.
 
-The window is named after a ticket key found in the slug, or the truncated slug,
-unless [window-name] overrides it.
+The window is named after a ticket key found in the slug, or after the slug
+itself, cut to ten characters when it is longer, unless [window-name] overrides
+it. A repository that tracks no tickets sets ticket_pattern = "" and always gets
+the second.
 
 --prompt hands the agent its first instruction, so the window opens already
-working rather than waiting to be told what the ticket is. The text lands where
+working rather than waiting to be told what the work is. The text lands where
 the command template says with {prompt} — the default is "claude {prompt}" —
 shell-quoted as one argument. Without the flag the placeholder simply
 disappears; with the flag and no placeholder to take it, the error says where
@@ -638,7 +640,7 @@ func Run(env Env) error {
 
 // ---- help ------------------------------------------------------------------
 
-const tagline = "treewright - give every ticket its own git worktree, tmux window, and agent session"
+const tagline = "treewright - give every piece of work its own git worktree, tmux window, and agent session"
 
 // The usage lines print argv0 — the name the user actually typed, "treewright"
 // or its installed shorthand "tw" — so that help never scolds a user with a

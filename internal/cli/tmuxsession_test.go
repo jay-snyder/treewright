@@ -125,6 +125,52 @@ func TestNewRecordsTheWorktreeOnItsWindow(t *testing.T) {
 	}
 }
 
+// TestNewWorksFromADescriptionWithNoTicket is the repository that tracks no
+// tickets, end to end. Everything but the window name is already indifferent to
+// where a slug came from — this pins that the window name is too, and that two
+// pieces of work named only by description still get worktrees and branches of
+// their own.
+//
+// ticket_pattern = "" is the opt-out, so "api-2-fix" — a slug the default
+// pattern would read as key API-2 — keeps its whole name here.
+func TestNewWorksFromADescriptionWithNoTicket(t *testing.T) {
+	requireTmux(t)
+	f := newFixture(t, "command = 'sleep 300'\nticket_pattern = ''\n")
+
+	for _, tc := range []struct{ slug, window string }{
+		{"dark-mode-toggle", "DARK-MODE…"},
+		{"payment-retries", "PAYMENT-RE…"},
+		{"api-2-fix", "API-2-FIX"},
+	} {
+		f.mustRun("new", tc.slug)
+
+		if got := windowStamp(t, tc.window, "@treewright_slug"); got != tc.slug {
+			t.Errorf("window %s has @treewright_slug = %q, want %q", tc.window, got, tc.slug)
+		}
+		if got := windowStamp(t, tc.window, "@treewright_worktree"); got != f.DirFor(tc.slug) {
+			t.Errorf("window %s sits on %q, want %q", tc.window, got, f.DirFor(tc.slug))
+		}
+		if got := windowStamp(t, tc.window, "@treewright_branch"); got != f.BranchFor(tc.slug) {
+			t.Errorf("window %s is on branch %q, want %q", tc.window, got, f.BranchFor(tc.slug))
+		}
+	}
+}
+
+// TestNewShortensALongSlugUnderTheDefaultPattern is the same fallback without the
+// opt-out, which a slug carrying no ticket key reaches too — turning the pattern
+// off is for slugs that would otherwise be *mistaken* for keys, not a requirement
+// for working without one.
+func TestNewShortensALongSlugUnderTheDefaultPattern(t *testing.T) {
+	requireTmux(t)
+	f := newFixture(t, "command = 'sleep 300'\n")
+
+	f.mustRun("new", "flaky-payment-test")
+
+	if got := windowStamp(t, "FLAKY-PAYM…", "@treewright_slug"); got != "flaky-payment-test" {
+		t.Errorf("window FLAKY-PAYM… has @treewright_slug = %q, want %q", got, "flaky-payment-test")
+	}
+}
+
 // TestTheBaseWindowRecordsNoWorktree is the other half: the base window sits on a
 // checkout rather than on a worktree, so it has no slug, and the branch it is
 // parked on is the one thing here a user can change from inside the window —

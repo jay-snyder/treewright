@@ -174,6 +174,16 @@ pattern — it is one key taking either a string or a list, via
 `config.Commands.UnmarshalTOML`, so there is no second key to set as well. Don't
 "make it consistent" by adding one.
 
+**An empty `ticket_pattern` is a setting, not a missing one.** `Load` defaults it
+on `!Explicit("ticket_pattern")` rather than on `== ""`, because `""` is how a
+repository that tracks no tickets turns the search off — collapsing that back to
+the usual `if x == "" { x = default }` removes the only way to opt out, and no
+test of the value alone can tell the two apart. `WindowName` then falls to
+`shorten`, which is the name for every worktree in such a repository: the same
+ten-column cap a ticket key gets, counted in runes, never leaving a hyphen
+against the `…`, and never returning something as wide as what it replaced. See
+"Naming a window, with or without a ticket" in `docs/design-notes.md`.
+
 **`{prompt}` is resolved by `fillPrompt`, everywhere.** Every consumer of
 `command` and `resume_command` fills the template before using it — `base`
 too, with an empty prompt — or the literal placeholder leaks into a shell

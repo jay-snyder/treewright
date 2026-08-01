@@ -40,7 +40,7 @@ var claude = Agent{
 // about the tool, not about any repository.
 const claudeSkill = `---
 name: treewright
-description: Manage parallel work in repositories that use treewright (tw) — a git worktree, tmux window, and agent session per ticket. Use when starting work on a ticket in parallel, spawning another agent on a task, checking which worktrees and agents are in flight or need attention, resuming earlier work, or cleaning up merged branches. Use instead of raw git worktree in a treewright-managed repository.
+description: Manage parallel work in repositories that use treewright (tw) — a git worktree, tmux window, and agent session per piece of work. Use when starting a task in parallel, spawning another agent on one, checking which worktrees and agents are in flight or need attention, resuming earlier work, or cleaning up merged branches. Use instead of raw git worktree in a treewright-managed repository.
 ---
 
 ` + drivingGuide

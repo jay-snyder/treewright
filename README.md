@@ -1,7 +1,7 @@
 # treewright
 
-Give every ticket its own git worktree, tmux window, and agent session. One
-command to start it, one to tear it down.
+Give every piece of work its own git worktree, tmux window, and agent session.
+One command to start it, one to tear it down.
 
 You're halfway through a bug fix when a review lands. So you stash, switch
 branches, wait for `npm install`, lose your agent's context, do the review,
@@ -27,8 +27,13 @@ That gets you:
 - a tmux window called `ENG-2318` with your agent in it
 
 Add `--prompt "the cart total rounds down at checkout"` and the agent in that
-window starts on the ticket before you've even switched to it — `tw new` stops
-being "prepare a desk" and becomes "assign the work".
+window starts on it before you've even switched to it — `tw new` stops being
+"prepare a desk" and becomes "assign the work".
+
+That example carries a ticket key, because the repo it comes from uses one.
+Nothing here needs one: `tw new dark-mode-toggle` is the same command, and gets
+you the same worktree, branch and window. See [Do I need a ticket
+system?](#do-i-need-a-ticket-system).
 
 Do that three times and `prefix + T` switches between all three from anywhere,
 including from inside a running agent. When the PR merges, `tw rm eng-2318`
@@ -214,7 +219,7 @@ The same command teaches the agent the other direction. `tw agent-init claude
 --skill` prints a skill that shows Claude how to drive treewright itself —
 list what's in flight, spawn a sibling worktree with a prompt, respect the
 teardown guards — so you can ask the agent in your MAIN window to farm three
-tickets out to three worktrees and it knows exactly how.
+jobs out to three worktrees and it knows exactly how.
 
 Hit `prefix + T` and that same table becomes a menu, in a popup sized to fit it:
 
@@ -301,7 +306,8 @@ post_create    = "npm install"         # runs in the background after `new`
 # is its own step, starting in the worktree root. `new` prints where the log is.
 # post_create = ["npm install", "npm run codegen", "npm run build"]
 
-ticket_pattern = '(?i)^(eng-[0-9]+)'   # first capture group names the window
+ticket_pattern = '(?i)^(eng-[0-9]+)'   # first capture group names the window;
+                                       # "" if you don't track work by ticket
 tmux_session   = "shop"                # session for this repo (default: this file's name)
 ```
 
@@ -335,9 +341,36 @@ standing, and that works from inside a worktree too.
 ### Why not just use `git worktree`?
 
 You should, and treewright does. Git makes the directory. It doesn't copy your
-`.env` files, run your install step, name a tmux window after the ticket,
+`.env` files, run your install step, name a tmux window after the work,
 remember which window belongs to which checkout, or stop you deleting a branch
 you never pushed.
+
+### Do I need a ticket system?
+
+No. Nothing in treewright reads a tracker or requires a key. A slug is just a
+name: `tw new dark-mode-toggle` gets you `~/code/app-dark-mode-toggle` on branch
+`john/dark-mode-toggle`, and `tw resume dark-mode` finds it by prefix like any
+other.
+
+The one place a ticket shows up is the tmux window's name, which is short
+because it sits in the status line. By default treewright looks for a leading
+key like `eng-142` and uses it; when there isn't one, the slug names the window,
+cut to ten characters with a `…` if it's longer:
+
+```
+tw new dark-mode-toggle        →  window DARK-MODE…
+tw new rewrite-css             →  window REWRITE-CSS
+```
+
+If your slugs sometimes *look* like keys and you'd rather they never be read as
+one, turn the search off:
+
+```toml
+ticket_pattern = ""    # no tickets here — the slug always names the window
+```
+
+You can also just say what you want the window called, per worktree:
+`tw new dark-mode-toggle DARKMODE`.
 
 ### Do I need to be using an AI agent?
 

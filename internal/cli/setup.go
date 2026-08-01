@@ -374,8 +374,11 @@ func renderConfig(name, mainDir, baseBranch string, prefixes []string, carry []s
 
 	fmt.Fprintf(&b, "# Regexp whose first submatch names the tmux window, so a slug like\n")
 	fmt.Fprintf(&b, "# eng-142-white-screen opens a window called ENG-142. Pin it to your own\n")
-	fmt.Fprintf(&b, "# ticket scheme to stop it matching any letters-dash-digits prefix.\n")
-	fmt.Fprintf(&b, "# ticket_pattern = %s\n\n", tomlString(config.DefaultTicketPattern))
+	fmt.Fprintf(&b, "# ticket scheme to stop it matching any letters-dash-digits word, or set\n")
+	fmt.Fprintf(&b, "# it to \"\" if this repository's work has no ticket behind it — then the\n")
+	fmt.Fprintf(&b, "# slug always names the window, cut to ten characters if it is longer.\n")
+	fmt.Fprintf(&b, "# ticket_pattern = %s\n", tomlString(config.DefaultTicketPattern))
+	fmt.Fprintf(&b, "# ticket_pattern = \"\"\n\n")
 
 	fmt.Fprintf(&b, "# The tmux session holding this repository's windows, so that they stay\n")
 	fmt.Fprintf(&b, "# separate from every other repository's. Defaults to %q.\n", name)
