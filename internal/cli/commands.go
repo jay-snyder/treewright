@@ -97,6 +97,10 @@ func cmdNew(env *Env, args []string) error {
 	if err := startPostCreate(env, cfg, dir, slug); err != nil {
 		env.warnf("post_create did not start: %v", err)
 	}
+	// True from the moment the worktree exists until a window has run the
+	// command in it, which is the window opened below — and stays true when that
+	// window never opens, which is the state `resume` needs to recognize.
+	markNoAgentYet(env, cfg, slug)
 
 	// The worktree path is this command's answer, so it goes to stdout and
 	// nowhere else: `cd "$(treewright new foo)"` is meant to work.
@@ -117,6 +121,9 @@ func cmdNew(env *Env, args []string) error {
 		env.warnf("%v", err)
 	}
 	warnIfPromptUndelivered(env, prompt, created, err)
+	if created {
+		clearNoAgentYet(cfg, slug)
+	}
 	return nil
 }
 
@@ -363,6 +370,93 @@ func postCreateScript(commands []string, failedPath string) string {
 			c, shellQuote(c), shellQuote(c), shellQuote(failedPath))
 	}
 	return b.String()
+}
+
+// ---- the worktree whose first agent never started ---------------------------
+
+// A worktree that got made and never had an agent in it used to be a worktree
+// nothing could open. `resume` runs resume_command, which is "carry on where I
+// left off" — `claude --continue` and its like — and there is nothing to carry
+// on from, so it exits on an error and the held-open wrapper parks the window on
+// that. `new` refuses the slug, the worktree being right there, and points at
+// `resume`: the one command that could not work. `ls` shows a healthy row with an
+// empty WINDOW column. The only way out was to remove the worktree and start
+// again, which is a long way to go for a window that failed to open.
+//
+// treewright cannot ask an agent whether it has a conversation in a directory, so
+// it keeps a note of its own: a marker saying no agent has started here yet,
+// written when the worktree is made and taken off the moment a window actually
+// runs the command. `resume` reads it and runs command instead, which is the
+// honest reading of "reopen a window on this worktree" when nothing was ever
+// open.
+//
+// The marker is the negative on purpose. One saying an agent *has* run here
+// would be missing from every worktree made by a treewright that never wrote one
+// — worktrees in use for weeks, holding exactly the conversation --continue
+// wants — and the fallback would greet each of them with a fresh agent and no
+// history. A first-run heuristic that silently discards someone's session is a
+// worse bug than the one being fixed, so absence has to keep meaning "as
+// before": the state that already existed stays silent, and the marker is the
+// news.
+//
+// It records that an *agent* was started, not that a *window* was opened, which
+// is where the two part company — the case this exists for is the window that
+// was never opened at all.
+
+// firstAgentNote is what the marker holds. Nothing reads it back — its presence
+// is the whole record — but a file in .git/treewright that cannot say what wrote
+// it is a file nobody can safely delete.
+const firstAgentNote = "no agent has started in this worktree yet\n" +
+	"treewright resume opens it with command rather than resume_command until one has\n" +
+	"delete this file to make resume use resume_command instead\n"
+
+// firstAgentPath names the marker: beside post_create's log, inside the .git
+// directory treewright already writes to, so this adds no new place to look for
+// what treewright left behind.
+func firstAgentPath(cfg *config.Config, slug string) string {
+	return filepath.Join(cfg.MainDir, ".git", "treewright", "no-agent-yet-"+strings.ReplaceAll(slug, "/", "-"))
+}
+
+// markNoAgentYet records that a worktree exists and nothing has started an agent
+// in it.
+//
+// Written as the worktree is made rather than once a window has failed to open,
+// for the reason startPostCreate clears its failure marker there: a slug can be
+// recreated after its worktree was removed, and the answer left by the last one
+// would otherwise be inherited by a worktree it is not about.
+//
+// A failure to write is worth saying, because what it costs is the recovery this
+// file exists for — and the state it leaves is the one a user cannot work out
+// from anything treewright shows them.
+func markNoAgentYet(env *Env, cfg *config.Config, slug string) {
+	path := firstAgentPath(cfg, slug)
+	err := os.MkdirAll(filepath.Dir(path), 0o755)
+	if err == nil {
+		err = os.WriteFile(path, []byte(firstAgentNote), 0o644)
+	}
+	if err != nil {
+		env.warnf("could not record that no agent has run in %s yet: %v", slug, err)
+	}
+}
+
+// clearNoAgentYet takes the marker off, a window having run the command.
+//
+// Nothing is reported when the removal fails. What it costs is one resume
+// opening a fresh agent where --continue would have worked, which is the
+// direction this whole mechanism already errs in, and a warning about a file the
+// user has never heard of would be louder than the thing it describes.
+//
+// A config with a blank command runs nothing either way, so there the
+// distinction has nothing to bite on.
+func clearNoAgentYet(cfg *config.Config, slug string) {
+	_ = os.Remove(firstAgentPath(cfg, slug))
+}
+
+// noAgentYet reports that nothing has started an agent in a worktree, so
+// `resume` should run command rather than resume_command.
+func noAgentYet(cfg *config.Config, slug string) bool {
+	_, err := os.Stat(firstAgentPath(cfg, slug))
+	return err == nil
 }
 
 // ---- rm --------------------------------------------------------------------
@@ -760,6 +854,11 @@ func cmdResume(env *Env, args []string) error {
 	// the base window runs an agent too, and "resume the base and hand it this"
 	// is the same sentence as for any worktree.
 	if target.Base {
+		// The first-agent fallback below deliberately stops here. The base
+		// checkout is not a worktree treewright made, so there is no moment at
+		// which it could honestly write that nothing had run in it — and `tw
+		// base` opens that window with command already, so the way in that needs
+		// no conversation is a command of its own rather than a fallback.
 		created, err := openBaseWindow(env, cfg, command)
 		warnIfPromptUndelivered(env, prompt, created, err)
 		return err
@@ -767,6 +866,25 @@ func cmdResume(env *Env, args []string) error {
 
 	// Said before the window opens, since afterwards the agent has the screen.
 	warnIfSetupFailed(env, cfg, target.Slug)
+
+	// Nothing has ever started an agent here, so there is no conversation for
+	// resume_command to continue and it would exit on saying so. command is what
+	// this worktree is still owed.
+	//
+	// Filled here rather than beside resume_command at the top, because a
+	// template with no {prompt} in it is only a problem for the invocation that
+	// needs it: refusing every `resume --prompt` in a repository whose command
+	// cannot take one, for a fallback most of them will not use, is the wrong
+	// half of that trade. Nothing has been created either way, so the refusal is
+	// as cheap here as it is there.
+	if noAgentYet(cfg, target.Slug) {
+		fresh, err := fillPrompt(cfg.Command, "command", prompt)
+		if err != nil {
+			return err
+		}
+		command = fresh
+		env.progressf("no agent has run in %s yet — opening it with command rather than resume_command", target.Slug)
+	}
 
 	// openWindow does the rest: a window already open on that worktree is the
 	// session being asked for, so it is switched to rather than duplicated.
@@ -778,6 +896,9 @@ func cmdResume(env *Env, args []string) error {
 		Branch:  target.Branch,
 	})
 	warnIfPromptUndelivered(env, prompt, created, err)
+	if created {
+		clearNoAgentYet(cfg, target.Slug)
+	}
 	return err
 }
 

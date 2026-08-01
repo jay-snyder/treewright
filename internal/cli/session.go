@@ -2,6 +2,7 @@ package cli
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/jay-snyder/treewright/internal/config"
@@ -152,6 +153,10 @@ func isTheCallersOwnShell(w tmux.Window, dir string) bool {
 // shell function, an activate — would otherwise end the whole script at that line
 // and close the window with its output erased, which is the case this exists for.
 //
+// The line that reports what exited names the command rather than repeating it,
+// which is the difference between a wrapper of a fixed size and one that grows
+// twice as fast as what it wraps. See abbreviated for what that cost.
+//
 // The held-open path also takes the agent state off the window. That state
 // normally dies with the window — the agent is the window's command — and holding
 // the window open past the command is the one place that stops being true: left
@@ -175,10 +180,84 @@ func heldOpenOnFailure(command string) string {
 		`  case "$tw_name" in ` + shellQuote(tmux.WaitingMarker) + `*) tmux rename-window -t "$TMUX_PANE" "${tw_name#?}" 2>/dev/null || true ;; esac` + "\n" +
 		"fi\n" +
 		"printf '\\n\"%s\" exited %s — this window is kept so the output above stays readable\\n'" +
-		" " + shellQuote(command) + ` "$tw_status"` + "\n" +
+		" " + shellQuote(abbreviated(command)) + ` "$tw_status"` + "\n" +
 		"printf 'press Enter to close it\\n'\n" +
 		"read -r tw_done\n" +
 		`exit "$tw_status"` + "\n"
+}
+
+// maxNamedCommand caps the copy of the command a held-open window prints above
+// its "press Enter", in runes.
+//
+// Eighty is a terminal's width, and the line already spends seventy of it saying
+// what happened, so what this really buys is enough of the command to recognize
+// it by. The output that explains the failure is directly above.
+const maxNamedCommand = 80
+
+// abbreviated is the command as the held-open window names it: its first line,
+// cut to something a reader takes in at a glance.
+//
+// The wrapper used to print it whole, and that made the script grow with the
+// command instead of by a fixed amount — worse than twice as fast, because this
+// copy is shell-quoted a second time. fillPrompt has already quoted the prompt
+// into the command, so one apostrophe of ordinary English possessive is a
+// four-character escape by the time it arrives here, and quoting that again
+// makes it sixteen. A few thousand words of prompt then hit tmux's own
+// command-length ceiling on the strength of the copy nobody runs, and the window
+// that would have reported it was the window that could not be opened.
+//
+// Nothing is lost by cutting it. The copy is there so a reader can tell which
+// command produced the output above it, not so it can be re-run; the copy that
+// does run is kept byte-exact, that one being the pane's foreground process.
+func abbreviated(command string) string {
+	first, rest, _ := strings.Cut(command, "\n")
+	kept := []rune(first)
+	dropped := strings.TrimSpace(rest) != ""
+	if len(kept) > maxNamedCommand {
+		kept, dropped = kept[:maxNamedCommand], true
+	}
+	if !dropped {
+		return first
+	}
+	// One column rather than three periods, as a window name shortened for the
+	// status line is marked.
+	return string(kept) + "…"
+}
+
+// checkCommandFits refuses a window command tmux would not run, naming the
+// setting it came from.
+//
+// tmux's own refusal arrives too late to be worth anything. By the time a window
+// is asked for, `new` has made the branch and the worktree, and it deliberately
+// does not fail on a window it could not open — the path is already on stdout, so
+// that `cd "$(treewright new eng-1)"` cannot be broken by tmux. So the whole of
+// what the user got was tmux's raw "command too long" as a warning, with the
+// doubled script in it, over a worktree with no window and no agent, and `new`
+// refusing the slug from then on.
+//
+// Checked here instead, an over-long prompt is what it actually is: this
+// invocation being wrong, refused in the same breath as a prompt the template
+// cannot take, and before anything exists to clean up.
+//
+// What is measured is the wrapped command, because that is what tmux is handed.
+func checkCommandFits(command, key, prompt string) error {
+	size := len(heldOpenOnFailure(command))
+	if size <= tmux.MaxCommandLength {
+		return nil
+	}
+	// The prompt is what fills this budget in practice, and a reader who has just
+	// typed one needs to be told that rather than left to wonder what is wrong
+	// with a config line they have not touched.
+	subject, fix := key+" is", "shorten it"
+	if prompt != "" {
+		subject = "--prompt makes " + key
+		fix = "shorten the prompt, or paste the text to the agent once the window is open"
+	}
+	return fmt.Errorf("%s too long for tmux to run in a window%s\nnothing was created — %s",
+		subject, asFields(
+			field("size", count(size, "byte", "bytes")),
+			field("limit", count(tmux.MaxCommandLength, "byte", "bytes")),
+		), fix)
 }
 
 // focusWindow brings a window to the foreground, or says how to reach it when

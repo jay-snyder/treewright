@@ -263,12 +263,12 @@ on a window that was already open and its command never ran.
 
 **treewright writes its own registry, its own plugin directory, and nothing
 else.** The whole list is `<config dir>/<name>.toml`,
-`.git/treewright/post-create-*` inside the repo, the worktrees, and
-`.claude/skills/treewright/` — `~/.claude/skills/treewright/` only when
-`agent-init --global` names it. Everything else — the shell line, the tmux line,
-any `.gitignore` entry — is *printed for a person to place*. `tmux-init
---apply` is not an exception: it sets bindings on a running server and writes
-no file.
+`.git/treewright/post-create-*` and `.git/treewright/no-agent-yet-*` inside the
+repo, the worktrees, and `.claude/skills/treewright/` —
+`~/.claude/skills/treewright/` only when `agent-init --global` names it.
+Everything else — the shell line, the tmux line, any `.gitignore` entry — is
+*printed for a person to place*. `tmux-init --apply` is not an exception: it
+sets bindings on a running server and writes no file.
 
 The test is not "does it write" but **whose file is it**. A new feature that
 wants to edit a dotfile, a settings file or a `.gitignore` must print instead;
@@ -333,6 +333,26 @@ hands tmux `heldOpenOnFailure(command)`, which holds a failing window open so it
 output can be read, and keeps the plain string the caller passed for the prose that
 names it. Both it and `postCreateScript` run the user's command in a subshell so an
 `exit` of its own does not end the wrapper — the case that erases the output.
+
+**The wrapper's size does not grow with the command's.** The line reporting what
+exited names the command through `abbreviated` — first line, eighty columns —
+rather than carrying a second copy, which was shell-quoted on top of the quoting
+`fillPrompt` had already applied and so cost sixteen bytes per apostrophe. That
+copy spent tmux's own command-length budget twice; `tmux.MaxCommandLength` is
+what is left of it, and `checkCommandFits` runs inside `fillPrompt` so an
+over-long `--prompt` is refused **before the worktree exists** rather than
+arriving as tmux's raw `command too long` over a worktree with no window.
+
+**`resume` runs `command`, not `resume_command`, where no agent has ever run.**
+`new` writes `.git/treewright/no-agent-yet-<slug>` as it makes a worktree and
+`clearNoAgentYet` removes it once a window has actually run the command, so a
+worktree whose window never opened stays reachable instead of meeting
+`claude --continue` with no conversation to continue. **The marker is the
+negative on purpose**: absence has to keep meaning "as before", or every worktree
+made by an older treewright would be met by a fresh agent in place of the session
+it had. It records that an *agent started*, not that a *window opened* — the two
+differ exactly in the case it exists for — and `base` is deliberately outside it.
+See "When there is nothing to resume" in `docs/agents.md`.
 
 **A background failure needs somewhere to be reported.** Nothing waits for
 post_create, so a failing step leaves a marker beside its log and
