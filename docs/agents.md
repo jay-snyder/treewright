@@ -197,6 +197,31 @@ guide's commands spell `treewright`, never `tw`, and here the Argv0 rule bites
 hardest: the reader is an agent running commands in a non-interactive shell,
 where the `tw` function from a startup file may simply not exist.
 
+**A rule an agent can read and still walk past is not written yet.** Two of the
+guide's paragraphs exist because that is what happened, in this repository, to
+an agent that had read the section covering the case. Teardown's rule — the
+printed `tmux kill-window` line is a question to put to the person, not homework
+to hand back — carried an exception for the window the agent was running in, on
+the reasoning that closing it ends the session mid-answer. But an agent asked to
+tear down the worktree it is standing in meets that window *every* time, so the
+exception fired in the only case the rule was written for, and the line went
+back as homework. The maintainer's answer is that closing your own window is the
+last step of a cleanup rather than an alternative to finishing it: the question
+covers it like any other, and what the session ending buys is an ordering —
+honour the yes after the final message, not instead of it.
+
+The handoff rule fails differently, and shows what a stated principle is worth
+on its own. "The work belongs to the agent in that window" was read and then
+ignored twice in one conversation, because a value gives an agent nothing to
+notice itself doing. The guide now names the symptom — editing files under a
+worktree path you just created — and the recovery, which is the part that could
+not be guessed: `resume --prompt` looks like the repair and is not, since a
+window already open is switched to with the prompt warned as undelivered, so the
+worktree has to be removed and remade. That recovery is cheap exactly while the
+worktree is clean and unpushed, and the `rm` guards refuse it precisely when it
+would stop being cheap — the guide can recommend it without a caveat about
+losing work, because the CLI already holds that line.
+
 **The manifest's version is not treewright's.** A skills-directory plugin is
 discovered in place rather than copied into a cache, so nothing compares
 versions to decide whether to reload — the files on disk *are* the plugin.
