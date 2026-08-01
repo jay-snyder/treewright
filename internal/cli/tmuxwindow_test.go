@@ -198,7 +198,7 @@ func TestRmClosesTheWindowOnTheRemovedWorktree(t *testing.T) {
 		t.Errorf("%d panes still sitting in the deleted %s, want none", got, wt.Dir)
 	}
 	// And it says so, since a window closing is not something to do silently.
-	if !strings.Contains(r.stderr, "closed its tmux window (WINSOME)") {
+	if !strings.Contains(r.stderr, "closed its tmux window WINSOME") {
 		t.Errorf("stderr = %q, want the closed window named", r.stderr)
 	}
 }
@@ -250,7 +250,7 @@ func TestRmClosesTheWorktreesWindowNotAVisitor(t *testing.T) {
 		t.Fatalf("rm: %v\n%s", r.err, r.both())
 	}
 
-	if !strings.Contains(r.stderr, "closed its tmux window (ENG-1)") {
+	if !strings.Contains(r.stderr, "closed its tmux window ENG-1") {
 		t.Errorf("stderr = %q, want the worktree's own window closed", r.stderr)
 	}
 	got := windowsIn(t, "proj")

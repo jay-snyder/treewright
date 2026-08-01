@@ -98,6 +98,69 @@ func runeOffsetOf(line, sub string) int {
 	return utf8.RuneCountInString(before)
 }
 
+// TestACellCanSpanSeveralLines covers what lets a doctor finding say what to do
+// about itself underneath itself, and a carry_files list stand as a list: the
+// row grows downwards, and every line of it keeps the column it started in.
+func TestACellCanSpanSeveralLines(t *testing.T) {
+	tbl := Table{Headers: []string{"LEVEL", "DETAIL"}}
+	tbl.Add(Text("warn"), Text("integration not loaded\nadd it to your config\nwithout it nothing works"))
+	tbl.Add(Text("ok"), Text("everything else"))
+
+	_, rows := tbl.Lines(false)
+	if len(rows) != 2 {
+		t.Fatalf("got %d rows, want one per Add however many lines each spans", len(rows))
+	}
+
+	lines := strings.Split(rows[0], "\n")
+	if len(lines) != 3 {
+		t.Fatalf("row spans %d lines, want 3: %q", len(lines), rows[0])
+	}
+	// The first line carries the status word; the rest start where its detail
+	// did, which is the whole point — a continuation flat against the margin
+	// reads as a finding of its own.
+	want := strings.Index(lines[0], "integration")
+	for i, text := range []string{"add it", "without it"} {
+		if got := strings.Index(lines[i+1], text); got != want {
+			t.Errorf("line %d starts at column %d, want %d\n%q", i+1, got, want, lines[i+1])
+		}
+	}
+	if got := strings.Fields(lines[1]); len(got) > 0 && got[0] == "warn" {
+		t.Errorf("the status word repeats on a continuation line: %q", lines[1])
+	}
+}
+
+// TestASpanningCellDoesNotWidenItsColumn is the regression for measuring a
+// cell's whole text: the newlines and every line after the first would count
+// into one column's width, which is the width of nothing ever printed.
+func TestASpanningCellDoesNotWidenItsColumn(t *testing.T) {
+	spanning := Table{Headers: []string{"A", "B"}}
+	spanning.Add(Text("x\ny\nz"), Text("second"))
+
+	flat := Table{Headers: []string{"A", "B"}}
+	flat.Add(Text("x"), Text("second"))
+
+	_, spanningRows := spanning.Lines(false)
+	_, flatRows := flat.Lines(false)
+	if got, want := strings.Split(spanningRows[0], "\n")[0], flatRows[0]; got != want {
+		t.Errorf("first line = %q, want %q — the column was sized from the whole cell", got, want)
+	}
+}
+
+// TestASpanningCellLeavesNoTrailingWhitespace covers the case the old "never pad
+// the final column" rule could not: a cell that spans lines with a shorter one
+// beside it leaves the padding that lines up the next column dangling.
+func TestASpanningCellLeavesNoTrailingWhitespace(t *testing.T) {
+	tbl := Table{Headers: []string{"A", "B"}}
+	tbl.Add(Text("first-line\nsecond-line-is-longer"), Text("only-one-line"))
+
+	_, rows := tbl.Lines(false)
+	for line := range strings.SplitSeq(rows[0], "\n") {
+		if line != strings.TrimRight(line, " ") {
+			t.Errorf("line has trailing spaces: %q", line)
+		}
+	}
+}
+
 func TestRenderWritesHeaderThenRows(t *testing.T) {
 	tbl := Table{Headers: []string{"A"}}
 	tbl.Add(Text("one"))

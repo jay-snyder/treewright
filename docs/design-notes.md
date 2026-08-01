@@ -273,6 +273,96 @@ Progress, warnings, prompts, and errors go to stderr, prefixed `warning:` or
 `error:` following git's convention, and unprefixed when it is just narration. So
 `tw ls --json | jq` and `tw prune --yes > removed.txt` both stay clean.
 
+### Messages are written for scanning, not for reading
+
+The messages with the most to say used to say it as one line: a finding, an em
+dash, what to do about it, a second em dash, why it mattered. At the length
+those reached — `doctor`'s tmux finding was a hundred and eighty columns — the
+terminal wrapped them wherever it happened to run out of room, mid-path and
+mid-command, so the part meant to be copied was the part hardest to pick out.
+
+Breaking the line was the first fix and it was not enough on its own. It left
+the same prose sitting on three lines instead of one, and the prose was the
+other half of the problem: these were written in the register the rest of this
+repository is written in, and a trailing appositive that reads well in a
+paragraph is a thing to parse in a terminal, where nobody is reading. They are
+looking for one fact.
+
+So a message now front-loads its subject, says one thing per line, and names its
+parts. **What is wrong, what it costs, then what to type** — the copyable part
+last, where a reader who has decided to act finds it without reading past it
+twice. Nothing was shortened to fit: splitting costs a line of screen, cutting a
+clause costs the reader what it said.
+
+    warning: post_create failed in eng-9
+             failed step  npm ci
+             log          .git/treewright/post-create-eng-9.log
+
+Three mechanisms hold that up, all in `internal/cli/message.go`.
+
+**The indent** is what makes two lines one message. A continuation starts where
+the first line's text started, and the writers apply it rather than the
+messages — thirty call sites spelling their own indent is thirty chances to
+spell it differently, which is the state it replaced: one hand-typed run of
+seven spaces in `rm`, and no way for anything else to match it. Progress is the
+one exception, and only because it has no prefix to align under; its text starts
+at the margin, so it takes a two-column hanging indent instead. For the same
+reason a single thought never spans two `progressf` calls: the second starts at
+the margin and reads as a new subject.
+
+**Labelled fields** (`asFields`) are what replaced the em dashes. A message with
+a what, a where and a how ran them together and a reader after the log path had
+to read the whole sentence to find it. A list (`asLines`) gets a line per entry,
+one step further in — the files `agent-init` wrote, the worktrees a slug prefix
+matched, the prefixes `setup` read off origin. Comma-joined, those were the
+messages that grew without limit: a repository with a dozen worktrees is exactly
+the one where the list is worth reading, and exactly the one where a joined list
+is unreadable. `ui.Table` renders a cell holding newlines as a row spanning that
+many lines, which lets a `doctor` finding and a `config` value do the same
+inside a table rather than laying out their own text beside one.
+
+**Color** marks the two spans worth finding without reading: the severity, and
+the part meant to be typed. It is decoration and nothing more — off down a pipe,
+off under `NO_COLOR`, off on a dumb terminal — so every message carries its
+whole meaning in the text. What color buys is the eye landing in the right place
+first, never a fact only the colored copy has.
+
+Counts read as sentences — `1 uncommitted file`, `2 commits not on origin` —
+rather than covering both cases at once with `file(s)`, which reads as neither.
+
+### doctor is a report, so it is laid out as one
+
+Its findings are grouped: the installation checks first, because a broken one of
+those breaks every repository, then a section per config, then a count of what
+was found. Three things came out of that. The repository name stopped being a
+`proj: ` prefix repeated down the left margin and became the heading it always
+was. The thing being checked got a column of its own, so a reader told the shell
+integration is missing can find the word "shell" rather than reading for it
+inside the seventh sentence. And the count at the end answers the question a
+report is read for — ten green lines with two yellow ones in the middle is
+exactly the shape an eye slides off.
+
+    installation
+      ok    tmux               /usr/sbin/tmux
+      warn  shell integration  not loaded
+                               cd and rm cannot move your shell
+                               add to your startup file:  eval "$(treewright shell-init zsh)"
+
+    proj
+      ok    main_dir           ~/proj
+      ok    origin             forks from origin/main
+
+    1 warning, nothing failed
+
+The status words stayed words. Symbols were the alternative, and they buy less
+than they look: the column is already colored, and `ok`/`warn`/`fail` need no
+font to render.
+
+`config` gained a `FROM` column for the same reason — where a value came from is
+a third fact about it, not a suffix of it — and it sits *before* `VALUE` rather
+than after. A last column is the only one a table never pads, so markers after a
+column of absolute paths end up fifty columns from what they mark.
+
 Exit codes: `0` success, `1` the command ran and failed, `2` it was invoked
 wrong. `doctor` exits `1` when a check fails, so it can gate a setup script.
 

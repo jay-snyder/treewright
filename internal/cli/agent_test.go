@@ -85,7 +85,7 @@ func TestAgentInitUpdatesRatherThanRepeats(t *testing.T) {
 	if r.err != nil {
 		t.Fatalf("agent-init claude: %v\n%s", r.err, r.both())
 	}
-	if !strings.Contains(r.stderr, "nothing to update") {
+	if !strings.Contains(r.stderr, "already up to date") {
 		t.Errorf("stderr = %q, want the second run reported as a no-op", r.stderr)
 	}
 
@@ -293,25 +293,28 @@ func TestConfigReportsWhatTheAgentKeySupplies(t *testing.T) {
 	f := newFixture(t, "agent = 'claude'\n")
 
 	out := f.mustRun("config")
-	for _, want := range []string{
-		"agent",
-		"claude",
-		// Every per-project artifact the module carries, marked as the module's
-		// rather than the file's: the settings file and all three files of the
-		// plugin, since a directory is not what the carry copies.
-		".claude/settings.local.json, .claude/skills/treewright/SKILL.md",
-		".claude/skills/treewright/.claude-plugin/plugin.json, .claude/skills/treewright/hooks/hooks.json  (from agent)",
-		"claude {prompt}  (from agent)",
-	} {
-		if !strings.Contains(out, want) {
-			t.Errorf("config = %q, want it to contain %q", out, want)
-		}
+
+	// Every per-project artifact the module carries, one per line: the settings
+	// file and all three files of the plugin, since a directory is not what the
+	// carry copies. They are one row, marked in the FROM column as the module's
+	// rather than the file's — a row of its own, so nothing has to say where the
+	// marked run began.
+	carried := configRows(t, out)["carry_files"]
+	want := ".claude/settings.local.json\n" +
+		".claude/skills/treewright/SKILL.md\n" +
+		".claude/skills/treewright/.claude-plugin/plugin.json\n" +
+		".claude/skills/treewright/hooks/hooks.json"
+	if carried.from != "agent" || carried.value != want {
+		t.Errorf("carry_files = %+v, want %q from the agent\n%s", carried, want, out)
+	}
+	if got := configRows(t, out)["command"]; got.from != "agent" || got.value != "claude {prompt}" {
+		t.Errorf("command = %+v, want the agent's default marked as the agent's", got)
 	}
 
 	// An explicit command is the file's own, and says so by carrying no marker.
 	f2 := newFixture(t, "agent = 'claude'\ncommand = 'nvim'\n")
-	if out := f2.mustRun("config"); strings.Contains(out, "nvim  (from agent)") {
-		t.Errorf("config = %q, want the explicit command unmarked", out)
+	if got := configRows(t, f2.mustRun("config"))["command"]; got.from != "" || got.value != "nvim" {
+		t.Errorf("command = %+v, want the explicit command unmarked", got)
 	}
 }
 
@@ -329,7 +332,7 @@ func TestSetupDetectsAnInstalledAgent(t *testing.T) {
 	if !strings.Contains(r.stdout, "agent = \"claude\"") {
 		t.Errorf("generated config = %q, want the detected agent written", r.stdout)
 	}
-	if !strings.Contains(r.stderr, "agent claude") {
+	if !strings.Contains(flat(r.stderr), "agent claude (found on PATH") {
 		t.Errorf("stderr = %q, want the detection reported like every other guess", r.stderr)
 	}
 }
@@ -340,7 +343,7 @@ func TestDoctorWarnsWhenTheAgentReportsNoState(t *testing.T) {
 	f := agentFixture(t, "agent = 'claude'\n")
 
 	out, _ := f.run("doctor")
-	if !strings.Contains(out, "does not report state") || !strings.Contains(out, "agent-init claude") {
+	if !strings.Contains(out, "not wired to report state") || !strings.Contains(out, "agent-init claude") {
 		t.Errorf("doctor = %q, want the missing wiring named with its fix", out)
 	}
 }
@@ -412,7 +415,7 @@ func TestDoctorNamesHooksLeftInASettingsFile(t *testing.T) {
 	}
 
 	out, _ := f.run("doctor")
-	if !strings.Contains(out, "pasted copy treewright cannot update") {
+	if !strings.Contains(out, "are a pasted copy") || !strings.Contains(out, "cannot keep them up to date") {
 		t.Errorf("doctor = %q, want the paste named as the thing the plugin replaces", out)
 	}
 

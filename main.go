@@ -10,7 +10,6 @@ package main
 
 import (
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 
@@ -39,8 +38,10 @@ func main() {
 		return
 	}
 	if !errors.Is(err, cli.ErrUsage) && !errors.Is(err, cli.ErrSilent) {
-		// The two sentinels have reported themselves already.
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		// The two sentinels have reported themselves already. Printed through
+		// cli rather than here, so that an error saying what to do next on a
+		// second line is laid out the way every other message is.
+		cli.WriteError(os.Stderr, err)
 	}
 	// Last, because it belongs under whatever was just printed: a popup holds its
 	// contents on screen when the command in it exits non-zero, which is every

@@ -56,12 +56,13 @@ func cmdSetup(env *Env, args []string) error {
 
 	path := filepath.Join(config.Dir(), name+".toml")
 	if _, err := os.Stat(path); err == nil && !dryRun {
-		return fmt.Errorf("%s already exists — edit it, or pass a different name", path)
+		return fmt.Errorf("%s already exists\nedit it, or pass a different name", path)
 	}
 	// A second config for the same repository would make which one applies depend
 	// on registry order, so say so rather than creating the ambiguity.
 	if existing, err := config.Resolve("", mainDir); err == nil && existing.Name != name {
-		return fmt.Errorf("%s is already registered as %q in %s", mainDir, existing.Name, existing.Path())
+		return fmt.Errorf("%s is already registered as %q%s", mainDir, existing.Name,
+			asFields(field("its config", existing.Path())))
 	}
 
 	baseBranch := repo.DefaultBranch()
@@ -78,34 +79,32 @@ func cmdSetup(env *Env, args []string) error {
 		prefixes = []string{branchPrefixFor(repo.UserEmail())}
 	}
 
-	env.progressf("main checkout %s", mainDir)
-	env.progressf("base branch %s, from origin/HEAD", baseBranch)
-	switch {
-	case len(detected) > 1:
-		env.progressf("branch prefixes from origin: %s — a bare slug gets %s",
-			describePrefixes(detected), detected[0].name)
-	case len(detected) == 1:
-		env.progressf("branch prefix %q, from the %d branches on origin using it",
-			detected[0].name, detected[0].count)
-	case prefixes[0] == "":
-		env.progressf("no branch prefix — git has no user.email configured here")
-	default:
-		env.progressf("branch prefix %q, from your git email — branches will be %seng-1", prefixes[0], prefixes[0])
+	// One labelled block rather than five sentences in a row. Every line here
+	// answers the same question — what did setup work out, and from what — so
+	// what a reader wants is to run an eye down the values and stop at the one
+	// that looks wrong. As sentences, each began with a different word and the
+	// value was wherever the sentence happened to reach.
+	//
+	// Each value says where it came from, in the same parenthesis, because every
+	// one of these is a guess the user is being invited to correct.
+	fields := []([2]string){
+		field("main checkout", mainDir),
+		field("base branch", baseBranch+"  (from origin/HEAD)"),
 	}
-	switch len(carry) {
-	case 0:
-		env.progressf("no gitignored env files found to carry into new worktrees")
-	default:
-		env.progressf("carrying %d gitignored file(s): %s", len(carry), strings.Join(carry, ", "))
-	}
-	if agent != "" {
-		env.progressf("agent %s, found on PATH — its own settings ride into each worktree too", agent)
-	}
+	fields = append(fields, prefixFields(detected, prefixes)...)
+	fields = append(fields,
+		field("carry files", describeCarry(carry)),
+		field("agent", describeAgent(agent)),
+	)
+	env.progressf("detected:%s", asFields(fields...))
 
 	body := renderConfig(name, mainDir, baseBranch, prefixes, carry, agent)
 	if dryRun {
 		fmt.Fprint(env.Stdout, body)
-		env.progressf("nothing written — remove --dry-run to save this to %s", path)
+		env.progressf("nothing was written%s", asFields(
+			field("would write", path),
+			field("to do it", env.copyable(env.Argv0+" setup")),
+		))
 		return nil
 	}
 
@@ -116,8 +115,15 @@ func cmdSetup(env *Env, args []string) error {
 		return err
 	}
 	fmt.Fprintln(env.Stdout, path)
-	env.progressf("registered %s as %q — check it with \"%s doctor\", then start work with \"%s new <slug>\"",
-		filepath.Base(mainDir), name, env.Argv0, env.Argv0)
+	// Two commands to type, so two labelled lines: run together after the em
+	// dash they were one clause holding both, and the second — the one that is
+	// the whole point of having registered anything — came last on the longest
+	// line setup prints.
+	env.progressf("registered %s as %q%s", filepath.Base(mainDir), name, asFields(
+		field("config", path),
+		field("check it with", env.copyable(env.Argv0+" doctor")),
+		field("start work with", env.copyable(env.Argv0+" new <slug>")),
+	))
 	return nil
 }
 
@@ -412,15 +418,60 @@ func tomlList(values []string) string {
 	return strings.Join(quoted, ", ")
 }
 
-// describePrefixes names the detected prefixes with the branch counts that got
-// them chosen, so the ordering the config depends on is visible rather than
-// asserted.
-func describePrefixes(prefixes []branchPrefix) string {
-	parts := make([]string, 0, len(prefixes))
-	for _, p := range prefixes {
-		parts = append(parts, fmt.Sprintf("%s (%d)", p.name, p.count))
+// prefixFields are setup's rows about the branch prefix: what a branch will be
+// called, and what that was read off.
+//
+// Several detected prefixes go one per line with the branch counts that ordered
+// them, since the order is itself a setting — the first is what a bare slug
+// gets — and a comma-joined run of six is the one shape that makes an order
+// hard to check. Which one is the default then needs a row of its own: as a
+// last line of the same value it sat at the same indent as the prefixes above
+// it and read as a fourth prefix.
+//
+// The names are padded so the counts line up, because the counts are what the
+// order is being justified by and a ragged column of them is not a column.
+func prefixFields(detected []branchPrefix, prefixes []string) [][2]string {
+	switch {
+	case len(detected) > 1:
+		width := 0
+		for _, p := range detected {
+			width = max(width, len(p.name))
+		}
+		lines := make([]string, 0, len(detected))
+		for _, p := range detected {
+			lines = append(lines, fmt.Sprintf("%-*s  (%s on origin)", width, p.name,
+				count(p.count, "branch", "branches")))
+		}
+		return [][2]string{
+			field("branch prefixes", strings.Join(lines, "\n")),
+			field("bare slug gets", detected[0].name),
+		}
+	case len(detected) == 1:
+		return [][2]string{field("branch prefix", fmt.Sprintf("%s  (%s on origin use it)",
+			detected[0].name, count(detected[0].count, "branch", "branches")))}
+	case prefixes[0] == "":
+		return [][2]string{field("branch prefix", "none  (git has no user.email configured here)")}
+	default:
+		return [][2]string{field("branch prefix", fmt.Sprintf("%s  (from your git email — branches will be %seng-1)",
+			prefixes[0], prefixes[0]))}
 	}
-	return strings.Join(parts, ", ")
+}
+
+// describeCarry is the value of setup's carry files field, one file per line.
+func describeCarry(carry []string) string {
+	if len(carry) == 0 {
+		return "none  (no gitignored env files found)"
+	}
+	return strings.Join(carry, "\n")
+}
+
+// describeAgent is the value of setup's agent field. An absent one is still a
+// row, because the field being empty is what says the key exists to be set.
+func describeAgent(agent string) string {
+	if agent == "" {
+		return "none  (none found on PATH)"
+	}
+	return agent + "  (found on PATH — its settings ride into each worktree)"
 }
 
 // abbreviateHome writes a path under the home directory back as "~/...", which
@@ -459,71 +510,107 @@ func cmdConfig(env *Env, args []string) error {
 		return err
 	}
 
-	table := ui.Table{Headers: []string{"SETTING", "VALUE"}}
-	add := func(key, value string, explicit bool) {
+	// Three columns, because where a value came from is a third fact about it
+	// and not a suffix of it. Appended to the value, the markers ended wherever
+	// each value happened to stop — a column of them that never lined up, in the
+	// one command whose whole subject is which settings are the file's and which
+	// treewright supplied.
+	//
+	// FROM sits before VALUE and not after it. After, it is the last column, so
+	// every value gets padded to the width of the longest — which here is an
+	// absolute path — and the markers end up fifty columns from the values they
+	// mark. Before, it is bounded by the word "default", and the values stay
+	// flush in the column that is allowed to be ragged because nothing follows
+	// it.
+	table := ui.Table{Headers: []string{"SETTING", "FROM", "VALUE"}}
+	add := func(key, value, source string) {
 		if value == "" {
-			table.Add(ui.Text(key), ui.Colored("(none)", ui.Dim))
+			table.Add(ui.Text(key), ui.Colored(source, ui.Dim), ui.Colored("(none)", ui.Dim))
 			return
 		}
+		table.Add(ui.Text(key), ui.Colored(source, ui.Dim), ui.Text(value))
+	}
+
+	// The empty source is the file's own value, which needs no marking: it is
+	// the unremarkable case, and the surprise this command exists for is a
+	// setting that was never set at all.
+	const (
+		fromFile    = ""
+		fromDefault = "default"
+		fromAgentIs = "agent"
+	)
+	addSetting := func(key, value string, explicit bool) {
 		if explicit {
-			table.Add(ui.Text(key), ui.Text(value))
+			add(key, value, fromFile)
 			return
 		}
-		// Marked rather than hidden: a default is still the value in force, and
-		// the surprise is usually that a setting was never set at all.
-		table.Add(ui.Text(key), ui.Text(value+"  (default)"))
+		add(key, value, fromDefault)
 	}
 
 	// Values the agent module supplied are marked as coming from it rather
-	// than as "(default)": the point of this command is closing the gap
+	// than as a default: the point of this command is closing the gap
 	// between the file and the behavior it produces, and "agent" is the line
 	// in the file these values actually trace to.
 	fromAgent := func(key, value, explicitKey string) {
 		switch {
 		case cfg.Explicit(explicitKey):
-			add(key, value, true)
+			add(key, value, fromFile)
 		case cfg.Agent != "":
-			add(key, value+"  (from agent)", true)
+			add(key, value, fromAgentIs)
 		default:
-			add(key, value, false)
+			add(key, value, fromDefault)
 		}
 	}
 
-	table.Add(ui.Text("name"), ui.Text(cfg.Name))
-	table.Add(ui.Text("file"), ui.Text(cfg.Path()))
-	add("main_dir", cfg.MainDir, true)
-	add("base_branch", cfg.BaseBranch, cfg.Explicit("base_branch"))
-	addPrefixes(add, cfg)
-	add("agent", cfg.Agent, cfg.Explicit("agent"))
-	add("carry_files", carryReport(cfg), cfg.Explicit("carry_files") || len(cfg.AgentCarries()) > 0)
+	add("name", cfg.Name, fromFile)
+	add("file", cfg.Path(), fromFile)
+	addSetting("main_dir", cfg.MainDir, true)
+	addSetting("base_branch", cfg.BaseBranch, cfg.Explicit("base_branch"))
+	addPrefixes(addSetting, cfg)
+	addSetting("agent", cfg.Agent, cfg.Explicit("agent"))
+	carryReport(add, cfg)
 	fromAgent("command", cfg.Command, "command")
 	fromAgent("resume_command", cfg.ResumeCommand, "resume_command")
-	// Joined with the arrow rather than with ", " as carry_files is, because these
-	// run in sequence and a comma would read as a set: what a reader wants to see
-	// is the order, and that a later step waits on an earlier one.
-	add("post_create", strings.Join(cfg.PostCreate, " → "), cfg.Explicit("post_create"))
-	add("ticket_pattern", cfg.TicketPattern, cfg.Explicit("ticket_pattern"))
+	// One per line rather than joined with an arrow: these run in sequence, and a
+	// stack reads as a sequence where a single line reads as a set. The arrows
+	// went with the joining — a column of steps is already in order.
+	addSetting("post_create", strings.Join(cfg.PostCreate, "\n"), cfg.Explicit("post_create"))
+	addSetting("ticket_pattern", cfg.TicketPattern, cfg.Explicit("ticket_pattern"))
 	// The session name in force, not the raw setting: what a reader wants to know
 	// is which session their windows land in, which is the config's name until
 	// tmux_session says otherwise.
-	add("tmux_session", sessionFor(cfg), cfg.Explicit("tmux_session"))
+	addSetting("tmux_session", sessionFor(cfg), cfg.Explicit("tmux_session"))
 
 	table.Render(env.Stdout, ui.ColorEnabled(env.Stdout))
 	return nil
 }
 
-// carryReport spells out every file a new worktree receives: the carry_files
-// entries as written, and the agent module's local-state files marked as the
-// agent key's doing — the carry with no other line in the file to trace to.
-func carryReport(cfg *config.Config) string {
-	parts := make([]string, 0, len(cfg.CarryFiles)+1)
+// carryReport adds the rows for every file a new worktree receives: the
+// carry_files entries as written, and the agent module's local-state files
+// marked as the agent key's doing — the carry with no other line in the file to
+// trace to.
+//
+// One file per line, which the VALUE column renders as a cell spanning as many
+// lines. Comma-joined they were a single 180-column row, since an agent module
+// contributes four paths of its own and each is a path: the widest value in the
+// table by a factor of five, in the one row whose whole content is a list.
+//
+// Two rows rather than one, when both kinds are present, because the FROM
+// column is per row and the two halves of this list have different answers.
+// That is also what stops a marker after the last file claiming a span the
+// reader has to count backwards to find the start of.
+func carryReport(add func(key, value, source string), cfg *config.Config) {
+	agentCarries := cfg.AgentCarries()
+	if len(cfg.CarryFiles) == 0 && len(agentCarries) == 0 {
+		add("carry_files", "", "")
+		return
+	}
 	if len(cfg.CarryFiles) > 0 {
-		parts = append(parts, strings.Join(cfg.CarryFiles, ", "))
+		add("carry_files", strings.Join(cfg.CarryFiles, "\n"), "")
 	}
-	if agentCarries := cfg.AgentCarries(); len(agentCarries) > 0 {
-		parts = append(parts, strings.Join(agentCarries, ", ")+"  (from agent)")
+	if len(agentCarries) > 0 {
+		add("carry_files", strings.Join(agentCarries, "\n"), "agent")
 	}
-	return strings.Join(parts, ", ")
 }
 
 // addPrefixes reports the branch prefixes as one row, named after whichever of

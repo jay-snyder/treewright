@@ -50,7 +50,14 @@ func sessionFor(cfg *config.Config) string {
 // prompt — needs to know when it never ran.
 func openWindow(env *Env, cfg *config.Config, spec tmux.Spec) (created bool, err error) {
 	if !tmux.Available() {
-		env.progressf("tmux is not installed — cd %s and run %s yourself", spec.Dir, spec.Command)
+		// The two things to type get a labelled line each, because that is what
+		// they are: a directory to move to and a command to run there, both long
+		// enough that "cd <path> and run <command> yourself" read as one run-on
+		// line with no obvious seam.
+		env.progressf("tmux is not installed, so no window was opened%s", asFields(
+			field("cd", env.copyable(spec.Dir)),
+			field("run", env.copyable(spec.Command)),
+		))
 		return false, nil
 	}
 	spec.Session = sessionFor(cfg)
@@ -71,7 +78,7 @@ func openWindow(env *Env, cfg *config.Config, spec tmux.Spec) (created bool, err
 			// Someone's own window, or one opened before this repo had a session
 			// of its own. Switching to it is still better than opening a second
 			// window on the same directory, but it is worth saying where it went.
-			env.warnf("window %s is in session %s rather than %s — switching to it there",
+			env.warnf("window %s is in session %s, not %s\nswitching to it there",
 				w.Name, w.Session, spec.Session)
 		}
 		focusWindow(env, cfg, w, command)
@@ -84,7 +91,7 @@ func openWindow(env *Env, cfg *config.Config, spec tmux.Spec) (created bool, err
 	} else {
 		w, err = tmux.NewSession(spec)
 		if err == nil {
-			env.progressf("created tmux session %s, which holds %s's windows", spec.Session, cfg.Name)
+			env.progressf("created tmux session %s for %s's windows", spec.Session, cfg.Name)
 		}
 	}
 	if err != nil {
@@ -187,16 +194,17 @@ func heldOpenOnFailure(command string) string {
 func focusWindow(env *Env, cfg *config.Config, w tmux.Window, command string) {
 	switch err := tmux.Focus(w); {
 	case errors.Is(err, tmux.ErrNotFollowed):
-		env.warnf("could not switch to session %s — attach with: %s", w.Session, attachHint(env, cfg, w.Session))
+		env.warnf("could not switch to session %s%s", w.Session,
+			asFields(field("attach with", env.copyable(attachHint(env, cfg, w.Session)))))
 	case err != nil:
 		// The window was there a moment ago, so what changed is that it closed:
 		// tmux closes a window as soon as its command exits, and a command that
 		// exits at once — a typo, a wrapper script that fails — looks exactly like
 		// this. Naming the command is what makes that guessable.
-		env.warnf("window %s closed as soon as it opened — did %q exit straight away?", w.Name, command)
+		env.warnf("window %s closed as soon as it opened\ndid %q exit straight away?", w.Name, command)
 	case !tmux.Inside():
-		env.progressf("window %s is open in tmux session %s — attach with: %s",
-			w.Name, w.Session, attachHint(env, cfg, w.Session))
+		env.progressf("window %s is open in tmux session %s%s", w.Name, w.Session,
+			asFields(field("attach with", env.copyable(attachHint(env, cfg, w.Session)))))
 	}
 }
 

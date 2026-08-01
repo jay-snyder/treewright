@@ -13,24 +13,57 @@ import (
 // CI deliberately has no tmux. The findings about configs are what these tests
 // pin, since those are the ones treewright computes.
 
-// finding is one line of doctor's report.
-type finding struct{ level, detail string }
+// reportLine is one finding of doctor's report, flattened back to the sentence
+// it would have been: "<group>: <check> <detail>", with the column padding
+// collapsed to single spaces.
+//
+// Flattened because that is the unit an assertion is about. What the report
+// does with a finding — a group heading above it, the check in its own column,
+// the detail running to three lines under that — is layout, and a test that
+// pinned the layout would fail every time the layout improved. What must not
+// change silently is which facts a finding carries.
+type reportLine struct{ level, detail string }
 
-// findings splits doctor's report into one entry per line, in the order printed.
+// findings parses doctor's report into one entry per finding, in the order
+// printed.
+//
+// A finding is neither a line nor a row. Its detail can run to several lines,
+// indented past the check column, and those belong to the finding above rather
+// than being findings of their own — read as findings they would each claim
+// their first word as a level, so a report with one warning came back holding
+// three. Group headings sit flush left, findings are indented under them.
 //
 // A slice rather than a map, and the reason is a test that passed on Linux and
 // failed on macOS: with map iteration, a substring matching two findings returned
 // whichever the runtime reached first. Order here is doctor's own.
-func findings(t *testing.T, f *fixture) []finding {
+func findings(t *testing.T, f *fixture) []reportLine {
 	t.Helper()
 	r := f.exec("doctor")
-	var found []finding
+
+	var found []reportLine
+	group, indent := "", ""
 	for line := range strings.SplitSeq(strings.TrimRight(r.stdout, "\n"), "\n") {
-		level, detail, ok := strings.Cut(strings.TrimSpace(line), " ")
+		switch {
+		case strings.TrimSpace(line) == "":
+			continue
+		case !strings.HasPrefix(line, " "):
+			// A heading, or the summary line that closes the report — which is
+			// the last thing printed, so nothing is ever filed under it.
+			group = strings.TrimSpace(line)
+			continue
+		case len(line)-len(strings.TrimLeft(line, " ")) > len(indent) && len(found) > 0:
+			found[len(found)-1].detail += " " + strings.TrimSpace(line)
+			continue
+		}
+		indent = line[:len(line)-len(strings.TrimLeft(line, " "))]
+		level, rest, ok := strings.Cut(strings.TrimSpace(line), " ")
 		if !ok {
 			continue
 		}
-		found = append(found, finding{level: level, detail: strings.TrimSpace(detail)})
+		found = append(found, reportLine{
+			level:  level,
+			detail: group + ": " + strings.Join(strings.Fields(rest), " "),
+		})
 	}
 	if len(found) == 0 {
 		t.Fatalf("doctor printed nothing to stdout\nstderr: %s", r.stderr)
@@ -45,9 +78,9 @@ func findings(t *testing.T, f *fixture) []finding {
 // and in the command check, so on a machine without tmux an assertion meant for
 // one silently read the other. A substring that no longer identifies a single
 // finding is a broken assertion, not a passing one.
-func has(t *testing.T, found []finding, substr string) string {
+func has(t *testing.T, found []reportLine, substr string) string {
 	t.Helper()
-	var matched []finding
+	var matched []reportLine
 	for _, fi := range found {
 		if strings.Contains(fi.detail, substr) {
 			matched = append(matched, fi)
@@ -69,10 +102,10 @@ func TestDoctorApprovesAHealthySetup(t *testing.T) {
 	found := findings(t, f)
 
 	for _, tc := range []struct{ substr, want string }{
-		{"1 config(s)", "ok"},
+		{"1 config in", "ok"},
 		{"proj: main_dir " + f.MainDir, "ok"},
-		{"proj: forks from origin/main", "ok"},
-		{`here, commands use "proj"`, "ok"},
+		{"forks from origin/main", "ok"},
+		{`commands use "proj"`, "ok"},
 	} {
 		if got := has(t, found, tc.substr); got != tc.want {
 			t.Errorf("finding for %q = %q, want %q\nall: %v", tc.substr, got, tc.want, found)
