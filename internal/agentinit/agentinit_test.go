@@ -91,3 +91,32 @@ func TestClaudeModuleFacts(t *testing.T) {
 		t.Error("Lookup(copilot) found a module that does not exist yet")
 	}
 }
+
+// TestClaudeSkillIsWellFormed checks the packaging from the consumer's side:
+// Claude Code reads a SKILL.md as YAML frontmatter between --- fences, then
+// markdown, and loads it by the description. The guide's own accuracy — do the
+// commands it teaches exist? — is checked in internal/cli, which has the
+// command table to check against.
+func TestClaudeSkillIsWellFormed(t *testing.T) {
+	skill := claude.Skill
+	if !strings.HasPrefix(skill, "---\n") {
+		t.Fatalf("skill does not open with a frontmatter fence:\n%.80s", skill)
+	}
+	rest := skill[len("---\n"):]
+	frontmatter, body, found := strings.Cut(rest, "\n---\n")
+	if !found {
+		t.Fatal("skill frontmatter never closes")
+	}
+	if !strings.Contains(frontmatter, "name: treewright") {
+		t.Errorf("frontmatter = %q, want the skill named treewright", frontmatter)
+	}
+	if !strings.Contains(frontmatter, "description: ") {
+		t.Errorf("frontmatter = %q, want a description for the model to load it by", frontmatter)
+	}
+	if !strings.Contains(body, drivingGuide) {
+		t.Error("the claude skill does not carry the shared driving guide")
+	}
+	if claude.SkillPath == "" {
+		t.Error("no SkillPath — agent-init has nowhere to tell the user to put it")
+	}
+}

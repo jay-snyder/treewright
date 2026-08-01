@@ -367,7 +367,7 @@ stdout carries the answer and nothing else, so any command can be piped:
 | `setup` | the config file's path, or the config itself with `--dry-run` |
 | `config`, `doctor` | the report you asked for |
 | `shell-init`, `tmux-init`, `help`, `version` | the script or text you asked for |
-| `agent-init` | the hooks fragment alone, pipeable — where to put it goes to stderr |
+| `agent-init` | the hooks fragment alone, or the skill with `--skill` — pipeable either way, with where to put it on stderr |
 | `signal` | nothing — the answer is the stamp on the window, and out of scope it is silent on stderr too |
 
 Progress, warnings, prompts, and errors go to stderr, prefixed `warning:` or
@@ -534,11 +534,19 @@ rest on a guess in a way behavior never can. `setup` writes the key when it
 finds the agent's binary on PATH, which is as close to consent as detection
 gets — and one commented line to remove when it guessed wrong.
 
-**Still in the module's future:** a second artifact teaching the agent to
-*drive* treewright — see the estate with `ls --json`, spawn parallel work with
-`new`, never touch `git worktree` directly, `rm` is guarded. The reverse
-direction needs no new core surface at all, which is the sign the protocol
-boundary is drawn right.
+**The skill is the module's second artifact, and its knowledge is core's.**
+`agent-init --skill` prints a document teaching the agent to *drive*
+treewright — read the estate with `ls --json`, spawn parallel work with `new`
+and a `--prompt`, respect the teardown guards, leave `signal` to the hooks.
+The text lives in `internal/agentinit` as a shared, agent-neutral guide, with
+each module contributing only its packaging (for claude, SKILL.md frontmatter
+and `~/.claude/skills/treewright/SKILL.md`): the CLI is the same whoever runs
+it, so a second agent wraps the same words. It needed no new core surface at
+all, which is the sign the protocol boundary was drawn right — and it is held
+to the code by tests, so a command it names cannot be renamed out from under
+it. Its commands spell `treewright`, never `tw`, and here the Argv0 rule bites
+hardest: the reader is an agent running commands in a non-interactive shell,
+where the `tw` function from a startup file may simply not exist.
 
 ## The kickoff prompt
 

@@ -5,8 +5,12 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
+	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/jay-snyder/treewright/internal/agentinit"
 )
 
 // The agent side of the integration: agent-init printing the wiring, the agent
@@ -38,6 +42,79 @@ func TestAgentInitPrintsTheHooksAndNothingElse(t *testing.T) {
 	}
 	if !strings.Contains(r.stderr, `agent = "claude"`) {
 		t.Errorf("stderr = %q, want the per-repo alternative named", r.stderr)
+	}
+}
+
+func TestAgentInitSkillPrintsTheGuideAndItsHome(t *testing.T) {
+	f := newFixture(t, "")
+
+	r := f.exec("agent-init", "claude", "--skill")
+	if r.err != nil {
+		t.Fatalf("agent-init claude --skill: %v\n%s", r.err, r.both())
+	}
+	if !strings.HasPrefix(r.stdout, "---\n") || !strings.Contains(r.stdout, "# Driving treewright") {
+		t.Errorf("stdout = %.120q..., want the skill alone", r.stdout)
+	}
+	// The install line has to be runnable as printed, which means it names the
+	// real path and repeats this very invocation.
+	if !strings.Contains(r.stderr, "~/.claude/skills/treewright/SKILL.md") {
+		t.Errorf("stderr = %q, want the skill's home named", r.stderr)
+	}
+	if !strings.Contains(r.stderr, "treewright agent-init claude --skill >") {
+		t.Errorf("stderr = %q, want the redirect one-liner", r.stderr)
+	}
+}
+
+// TestTheSkillTeachesTheCLIThatExists holds the driving guide to the command
+// table: every `treewright <command>` it shows, in a code block or inline
+// code, must be a command lookup resolves, and every JSON field it teaches
+// must be a tag of the ls schema. A rename that forgets the guide fails here
+// rather than teaching agents a CLI that is gone.
+func TestTheSkillTeachesTheCLIThatExists(t *testing.T) {
+	agent, ok := agentinit.Lookup("claude")
+	if !ok {
+		t.Fatal("no claude module")
+	}
+	skill := agent.Skill
+
+	named := map[string]bool{}
+	for _, re := range []*regexp.Regexp{
+		regexp.MustCompile("`treewright ([a-z-]+)"),         // inline code
+		regexp.MustCompile(`(?m)^    treewright ([a-z-]+)`), // command examples
+	} {
+		for _, m := range re.FindAllStringSubmatch(skill, -1) {
+			named[m[1]] = true
+		}
+	}
+	if len(named) < 5 {
+		t.Fatalf("only %d commands found in the skill — the extraction is likely broken: %v", len(named), named)
+	}
+	for name := range named {
+		if lookup(name) == nil {
+			t.Errorf("the skill teaches %q, which is not a command", name)
+		}
+	}
+
+	// The JSON fields the guide explains, checked against the schema's actual
+	// tags so `ls --json` and its documentation cannot part company.
+	tags := map[string]bool{}
+	for _, field := range reflect.VisibleFields(reflect.TypeFor[worktreeJSON]()) {
+		tags[field.Tag.Get("json")] = true
+	}
+	for _, field := range []string{"base", "status", "agent_state", "ahead", "behind"} {
+		if !strings.Contains(skill, "`"+field+"`") && !strings.Contains(skill, `"`+field+`"`) {
+			t.Errorf("the skill no longer explains the %s field", field)
+		}
+		if !tags[field] {
+			t.Errorf("the skill explains %q, which ls --json does not report", field)
+		}
+	}
+
+	// Never `tw` as an invocation: the reader runs commands in a shell where
+	// the function may not exist. Mentioning `tw` by name is fine — the guide
+	// explains exactly that — but no command may start with it.
+	if strings.Contains(skill, "`tw ") || regexp.MustCompile(`(?m)^    tw `).MatchString(skill) {
+		t.Error("the skill shows a command invoked as tw, which non-interactive shells may not have")
 	}
 }
 

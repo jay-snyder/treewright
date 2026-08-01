@@ -28,7 +28,22 @@ var claude = Agent{
 	LocalState:    []string{".claude/settings.local.json"},
 	UserSettings:  "~/.claude/settings.json",
 	Hooks:         claudeHooks,
+	Skill:         claudeSkill,
+	SkillPath:     "~/.claude/skills/treewright/SKILL.md",
 }
+
+// claudeSkill packages the shared driving guide as a Claude Code skill. The
+// frontmatter's description is what decides when Claude loads it, so it names
+// the moments the guide is for — starting parallel work, checking what is in
+// flight, tearing down — and claims the ground `git worktree` would otherwise
+// take. User-level rather than per-project, like the hooks: the knowledge is
+// about the tool, not about any repository.
+const claudeSkill = `---
+name: treewright
+description: Manage parallel work in repositories that use treewright (tw) — a git worktree, tmux window, and agent session per ticket. Use when starting work on a ticket in parallel, spawning another agent on a task, checking which worktrees and agents are in flight or need attention, resuming earlier work, or cleaning up merged branches. Use instead of raw git worktree in a treewright-managed repository.
+---
+
+` + drivingGuide
 
 // claudeHooks is the fragment for a Claude Code settings file. Kept to the
 // "hooks" key alone so it can sit in a file that already configures other
