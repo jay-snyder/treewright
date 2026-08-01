@@ -467,6 +467,30 @@ subshell so that an `exit` of its own — from a wrapper script, a shell functio
 `activate` — ends the command rather than the wrapper, which would close the window
 with the output erased and is the whole case this exists for.
 
+**The line that names the command does not repeat it.** It used to, and that made
+the wrapper grow with what it wrapped instead of by a fixed amount — worse than
+twice as fast, since `fillPrompt` has already shell-quoted the prompt into the
+command, and quoting that copy again turns one apostrophe of ordinary English
+possessive into sixteen bytes. What it bought was tmux's own ceiling. A tmux
+client carries a command to the server in a single imsg, which holds 16384 bytes
+less its header and the argument count, so a command list past 16364 is refused
+outright with `command too long` — and since `new` deliberately does not fail on
+a window it could not open, an over-long `--prompt` left a branch, a worktree, no
+window and no agent, under tmux's raw refusal with the doubled script quoted into
+it. So the report names the command's first line, cut to eighty columns, and the
+copy that actually runs stays byte-exact.
+
+**And the length is checked before anything is created**, in `fillPrompt`, beside
+the refusal of a prompt the template cannot take: both are this invocation being
+wrong, and both are cheap to say while there is still nothing to clean up. The
+error names the size and the limit, since the only useful thing to know about a
+prompt that will not fit is how far over it is. The limit treewright holds to is
+tmux's less a kilobyte for the rest of `new-window`'s argument list — the
+session, the worktree's path, the window name — because measuring those exactly
+would make the limit a property of a call site that does not exist yet at the
+point the check runs, and what fills the budget is prose, where nobody is writing
+to the last hundred bytes.
+
 **post_create** cannot be reported as it happens at all: nothing waits for it, so
 treewright has already exited by the time it fails. The failing step writes the
 command that stopped it beside the log, and the next `ls`, `cd` or `resume` that

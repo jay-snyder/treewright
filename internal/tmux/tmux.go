@@ -50,6 +50,27 @@ type Spec struct {
 	Branch string // the branch that worktree is on
 }
 
+// MaxCommandLength is the longest command treewright will give a window, in
+// bytes.
+//
+// tmux carries a command from the client to the server in a single imsg, and one
+// imsg holds MAX_IMSGSIZE — 16384 bytes — of which 16 are the header and 4 the
+// argument count, leaving 16364 for the arguments themselves, each packed with
+// its terminating NUL. Past that the command is refused with "command too long"
+// and the window is never created. Measured by bisection against tmux 3.7b, the
+// boundary sits exactly there, and it is the whole argument list rather than the
+// command alone: a longer session name buys a shorter command.
+//
+// The number here is that ceiling less a kilobyte for the rest of new-window's
+// arguments — the session, the worktree's path, the window name, the format
+// flags. Measuring those exactly would make the limit a property of the call
+// site, and the check that matters happens before there is one: before the
+// worktree exists, where a prompt too long to run is still nothing worse than a
+// bad invocation. A kilobyte is far more room than those arguments take, and
+// what fills this budget is a --prompt — where the difference between 15340
+// bytes of prose and 16364 is not one anybody is writing to.
+const MaxCommandLength = 16364 - 1024
+
 // ErrNotFollowed reports that treewright could not move the calling client — to a
 // window it opened, or to a session it was asked to attach to. Its usual cause is
 // a $TMUX inherited from a client that has since detached: the variable outlives

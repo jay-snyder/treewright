@@ -351,6 +351,15 @@ Three rules, each load-bearing:
   about an arbitrary agent's CLI; the error names the setting and shows where
   the text belongs. It is checked before anything is created, so the refusal
   never leaves a half-made worktree behind an error about a flag.
+- **A prompt too long for tmux to run is refused at that same point.** tmux
+  carries a command to its server in one message and refuses anything past
+  16364 bytes, which `new` cannot usefully report after the fact: the branch and
+  the worktree exist by the time a window is asked for, and `new` deliberately
+  does not fail on a window it could not open. So the assembled command is
+  measured where the placeholder is checked, and the error names the size, the
+  limit, and the two ways on — shorten the prompt, or hand the text to the agent
+  once the window is open. See "Reporting what failed" in
+  [`design-notes.md`](design-notes.md) for the ceiling itself.
 
 **A prompt that reached no agent is warned about.** The command carrying it
 runs only in a window that was actually created, and `resume` mostly finds

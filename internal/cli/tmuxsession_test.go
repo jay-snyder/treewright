@@ -575,6 +575,38 @@ func wantStatus(command string) int {
 	return 0
 }
 
+// TestAHeldWindowNamesItsCommandWithoutRepeatingIt is the size of the wrapper,
+// which used to be the size of the command twice over and then some.
+//
+// The report line above "press Enter" carried a second copy of the command, and
+// that copy was shell-quoted again on top of the quoting fillPrompt had already
+// applied to the prompt inside it — so a prompt full of ordinary English
+// possessives spent sixteen bytes of tmux's command-length budget per
+// apostrophe, on text nobody runs. What that bought was tmux refusing the window
+// of the worktree `new` had just made.
+func TestAHeldWindowNamesItsCommandWithoutRepeatingIt(t *testing.T) {
+	// Built the way `new` builds it: the prompt is quoted into the command
+	// before the wrapper ever sees it, which is the first of the two quotings.
+	command := "claude " + shellQuote(strings.Repeat("it's a long brief. ", 500))
+
+	wrapped := heldOpenOnFailure(command)
+	// The copy that runs stays byte-exact — it is the pane's foreground process.
+	if !strings.Contains(wrapped, command) {
+		t.Error("the command tmux runs is no longer the command it was given")
+	}
+	if over := len(wrapped) - len(command); over > 1000 {
+		t.Errorf("the wrapper adds %d bytes to a %d-byte command, want an overhead that does not grow with it",
+			over, len(command))
+	}
+
+	// A command short enough to read is still named whole, since the point of
+	// the line is telling the reader which command produced the output above it.
+	const short = "echo no such model >&2; exit 12"
+	if got := heldOpenOnFailure(short); !strings.Contains(got, shellQuote(short)) {
+		t.Errorf("wrapper = %q, want the short command named in full", got)
+	}
+}
+
 // TestABlankCommandIsLeftAlone keeps the wrapper out of the one case tmux handles
 // by opening a plain shell: a script around nothing would run the shell, exit 0,
 // and close the window that was meant to stay.

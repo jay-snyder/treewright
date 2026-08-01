@@ -3,9 +3,12 @@ package cli
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/jay-snyder/treewright/internal/tmux"
 )
 
 // The kickoff prompt: --prompt's text lands at the command template's {prompt},
@@ -66,6 +69,75 @@ func TestPromptRefusedWithoutAPlaceholder(t *testing.T) {
 	if r.err == nil || !strings.Contains(r.err.Error(), "resume_command") {
 		t.Errorf("err = %v, want resume_command named", r.err)
 	}
+}
+
+// TestALongPromptIsRefusedBeforeTheWorktreeExists is the fourth rule, and it
+// exists because the alternative was silent in the only way that matters.
+//
+// tmux refuses a command past a length of its own, and `new` deliberately does
+// not fail on a window it could not open — the worktree path is already on
+// stdout for `cd "$(treewright new eng-1)"`. So an over-long prompt used to
+// leave a branch, a worktree, no window and no agent, under tmux's own raw
+// "command too long" with the whole script quoted into it, and `new` refusing
+// the slug from then on.
+func TestALongPromptIsRefusedBeforeTheWorktreeExists(t *testing.T) {
+	f := newFixture(t, "command = 'claude {prompt}'\n")
+
+	r := f.exec("new", "alpha", "--prompt", strings.Repeat("it's a long brief. ", 1200))
+	if r.err == nil {
+		t.Fatal("want an error for a prompt tmux will not run")
+	}
+	// treewright's own voice, with both numbers in it, rather than tmux's.
+	msg := flat(r.err.Error())
+	for _, want := range []string{
+		"--prompt makes command too long",
+		"limit " + strconv.Itoa(tmux.MaxCommandLength) + " bytes",
+		"shorten the prompt",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("error = %q, want it to say %q", msg, want)
+		}
+	}
+	// An error rather than a warning about something already done, which is the
+	// difference the check being here rather than at the window buys.
+	if strings.Contains(r.stderr, "warning:") {
+		t.Errorf("stderr = %q, want nothing reported after the fact", r.stderr)
+	}
+
+	// And nothing was made, which is the whole reason the check is here and not
+	// at the window.
+	if r.stdout != "" {
+		t.Errorf("stdout = %q, want no path for a worktree that must not exist", r.stdout)
+	}
+	if f.Exists("alpha") {
+		t.Error("the worktree was created despite the refusal")
+	}
+	if f.Git(f.MainDir, "branch", "--list", f.BranchFor("alpha")) != "" {
+		t.Error("the branch was created despite the refusal")
+	}
+}
+
+// TestALongPromptThatFitsStillOpensAWindow is the other side of that limit: it
+// is treewright's, set below tmux's with room for the rest of the argument list,
+// and a limit set too high fails here rather than in somebody's terminal.
+func TestALongPromptThatFitsStillOpensAWindow(t *testing.T) {
+	requireTmux(t)
+	marker := filepath.Join(t.TempDir(), "prompt")
+	template := "printf %s {prompt} > " + marker
+	f := newFixture(t, "command = \""+template+"\"\n")
+
+	// Shrunk until treewright accepts it rather than sized to a round number, so
+	// what reaches tmux is the longest command treewright says it will hand over.
+	prompt := strings.Repeat("a", tmux.MaxCommandLength)
+	for {
+		if _, err := fillPrompt(template, "command", prompt); err == nil {
+			break
+		}
+		prompt = prompt[:len(prompt)-1]
+	}
+
+	f.mustRun("new", "alpha", "--prompt", prompt)
+	waitForContent(t, marker, prompt, "the window's command")
 }
 
 // TestResumePromptDelivery covers both halves of delivery: a resume that

@@ -334,6 +334,15 @@ output can be read, and keeps the plain string the caller passed for the prose t
 names it. Both it and `postCreateScript` run the user's command in a subshell so an
 `exit` of its own does not end the wrapper — the case that erases the output.
 
+**The wrapper's size does not grow with the command's.** The line reporting what
+exited names the command through `abbreviated` — first line, eighty columns —
+rather than carrying a second copy, which was shell-quoted on top of the quoting
+`fillPrompt` had already applied and so cost sixteen bytes per apostrophe. That
+copy spent tmux's own command-length budget twice; `tmux.MaxCommandLength` is
+what is left of it, and `checkCommandFits` runs inside `fillPrompt` so an
+over-long `--prompt` is refused **before the worktree exists** rather than
+arriving as tmux's raw `command too long` over a worktree with no window.
+
 **A background failure needs somewhere to be reported.** Nothing waits for
 post_create, so a failing step leaves a marker beside its log and
 `warnIfSetupFailed` reports it from `ls`, `cd` and `resume`. A new mechanism that

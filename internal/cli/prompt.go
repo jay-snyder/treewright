@@ -14,11 +14,31 @@ import (
 // promptPlaceholder is where a command template takes the prompt's text.
 const promptPlaceholder = "{prompt}"
 
-// fillPrompt resolves a command template against the prompt the user gave,
-// with key naming the config setting the template came from — command or
-// resume_command — since that is the line an error should send the reader to.
+// fillPrompt resolves a command template against the prompt the user gave, and
+// refuses one the result is too long for tmux to run.
 //
-// Three cases, each deliberate:
+// key names the config setting the template came from — command or
+// resume_command — since that is the line either error should send the reader
+// to.
+//
+// Both refusals belong here, at the one point every caller passes through
+// before it has created anything. A prompt the template cannot take and a
+// prompt too long to run are the same kind of mistake — this invocation being
+// wrong — and finding either out afterwards leaves a half-made worktree behind
+// an error about a flag.
+func fillPrompt(command, key, prompt string) (string, error) {
+	filled, err := fillTemplate(command, key, prompt)
+	if err != nil {
+		return "", err
+	}
+	if err := checkCommandFits(filled, key, prompt); err != nil {
+		return "", err
+	}
+	return filled, nil
+}
+
+// fillTemplate substitutes the prompt into the template. Three cases, each
+// deliberate:
 //
 // With a prompt, the placeholder becomes the shell-quoted text: one literal
 // argument however many spaces and quotes the prompt holds, through the same
@@ -33,7 +53,7 @@ const promptPlaceholder = "{prompt}"
 // appended. Appending happens to be right for claude and is still a guess
 // about an arbitrary agent's CLI; the error names the setting and shows where
 // the text should go, which turns the guess into the user's own line.
-func fillPrompt(command, key, prompt string) (string, error) {
+func fillTemplate(command, key, prompt string) (string, error) {
 	if !strings.Contains(command, promptPlaceholder) {
 		if prompt == "" {
 			return command, nil
