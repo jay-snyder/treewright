@@ -209,17 +209,19 @@ and treewright prints the wiring for the ones it knows:
 tw agent-init claude
 ```
 
-That's the hooks for `~/.claude/settings.json`, with instructions alongside.
-They're safe to keep global — outside a treewright window, `signal` does
-nothing, quietly — or scope them to one repo by putting them in the main
-checkout's `.claude/settings.local.json` and setting `agent = "claude"` in the
-config, which carries that file into every new worktree.
+That's the hooks, with instructions alongside. They go in the main checkout's
+`.claude/settings.local.json`, and `agent = "claude"` in the config carries that
+file into every new worktree — so the repos you use treewright in are wired and
+the ones you don't are untouched. If you'd rather cover everything at once,
+`~/.claude/settings.json` works too: outside a treewright window, `signal` does
+nothing, quietly.
 
 The same command teaches the agent the other direction. `tw agent-init claude
 --skill` prints a skill that shows Claude how to drive treewright itself —
 list what's in flight, spawn a sibling worktree with a prompt, respect the
 teardown guards — so you can ask the agent in your MAIN window to farm three
-jobs out to three worktrees and it knows exactly how.
+jobs out to three worktrees and it knows exactly how. It lives in the checkout's
+`.claude/skills/` and rides the same carry, so every worktree's agent knows it.
 
 Hit `prefix + T` and that same table becomes a menu, in a popup sized to fit it:
 

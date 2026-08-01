@@ -203,6 +203,15 @@ is the one way `AgentCarries()` differs from `carry_files`. The module is never
 inferred from `command`'s first word for behavior; only doctor's warn-level
 wiring check may sniff it. See "Agent modules" in `docs/design-notes.md`.
 
+**A module's per-project artifacts are carried, and the list is derived.**
+`Agent.LocalState()` is computed from `ProjectSettings` and `ProjectSkillPath`
+rather than written out beside them, so a module cannot name a per-project file
+it forgets to carry — that omission puts the file in the main checkout and in no
+worktree, which is the trap `agent = "claude"` exists to close. Per-repo is the
+placement `agent-init` leads with, because treewright is a tool you use in some
+repositories and not others; the `User*` paths are the second option it names,
+never the first. treewright writes to no `.gitignore` and generates none.
+
 **Branch-name rules live in `internal/refname`, not in the code that uses them.**
 `CheckSlug` runs in `new`, `CheckPrefix` runs in `config.Load`, and both are
 restatements of `git check-ref-format` so a bad name is one sentence naming it

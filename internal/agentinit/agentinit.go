@@ -32,17 +32,18 @@ type Agent struct {
 	Command       string
 	ResumeCommand string
 
-	// LocalState are the gitignored files holding the agent's per-project
-	// state, relative to a checkout's root. A config naming this module has
-	// them carried into every new worktree — silently skipped when the main
-	// checkout has none, since unlike a carry_files entry nobody asserted they
-	// exist.
-	LocalState []string
+	// ProjectSettings is where the agent reads a checkout's own configuration,
+	// relative to its root, and is where treewright's wiring belongs by
+	// default: a repository you use treewright in gets it, and one you do not
+	// stays untouched. Its counterpart UserSettings is the same wiring made
+	// global, for someone who wants every repository covered at once.
+	ProjectSettings string
+	UserSettings    string
 
-	// UserSettings is the file, in its user-facing ~ spelling, where the
-	// agent reads user-global configuration — where the hooks belong when they
-	// should cover every repository at once.
-	UserSettings string
+	// ProjectSkillPath and UserSkillPath are the same split for the skill: the
+	// checkout's own skills directory, and the agent's user-level one.
+	ProjectSkillPath string
+	UserSkillPath    string
 
 	// Hooks is the configuration fragment agent-init prints: the agent's own
 	// hooks wired to `treewright signal`. It spells the canonical binary name
@@ -51,11 +52,31 @@ type Agent struct {
 
 	// Skill is the document teaching the agent to drive treewright — the
 	// reverse of Hooks, which teaches treewright about the agent. Each module
-	// wraps the shared drivingGuide below in its own agent's packaging, and
-	// SkillPath says where the packaged file belongs, in its user-facing ~
-	// spelling.
-	Skill     string
-	SkillPath string
+	// wraps the shared drivingGuide below in its own agent's packaging.
+	Skill string
+}
+
+// LocalState are the per-project files a config naming this module has carried
+// into every new worktree — silently skipped when the main checkout has none,
+// since unlike a carry_files entry nobody asserted they exist.
+//
+// Derived from the project paths rather than listed beside them, because the
+// two must not disagree: a module that gained a per-project artifact and did
+// not also carry it would put that artifact in the main checkout and in no
+// worktree, which is the trap the carry exists to close. Deriving it means a
+// module cannot describe a per-project file it forgets to carry.
+//
+// Whether these end up in git is the repository's business, not treewright's.
+// The agent's settings file is conventionally ignored already; the skill is a
+// file like any other, and a developer manages their own .gitignore.
+func (a Agent) LocalState() []string {
+	var out []string
+	for _, p := range []string{a.ProjectSettings, a.ProjectSkillPath} {
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // drivingGuide teaches an agent to drive treewright, and it is deliberately a

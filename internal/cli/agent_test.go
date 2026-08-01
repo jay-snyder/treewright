@@ -146,10 +146,26 @@ func TestAgentKeyCarriesTheAgentsSettings(t *testing.T) {
 		t.Fatalf("write settings: %v", err)
 	}
 
+	// The skill is the module's other per-project artifact, and it rides across
+	// on the same key. Placed in the main checkout and not carried, it would
+	// teach the agent in the MAIN window and in no worktree — the same trap the
+	// hooks had, one directory deeper.
+	skill := filepath.Join(f.MainDir, ".claude", "skills", "treewright", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(skill), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(skill, []byte("---\nname: treewright\n---\n"), 0o644); err != nil {
+		t.Fatalf("write skill: %v", err)
+	}
+
 	f.mustRun("new", "alpha")
-	carried := filepath.Join(f.DirFor("alpha"), ".claude", "settings.local.json")
-	if _, err := os.Stat(carried); err != nil {
-		t.Errorf("the agent's settings were not carried: %v", err)
+	for _, rel := range []string{
+		".claude/settings.local.json",
+		".claude/skills/treewright/SKILL.md",
+	} {
+		if _, err := os.Stat(filepath.Join(f.DirFor("alpha"), filepath.FromSlash(rel))); err != nil {
+			t.Errorf("%s was not carried into the worktree: %v", rel, err)
+		}
 	}
 }
 
@@ -175,7 +191,9 @@ func TestConfigReportsWhatTheAgentKeySupplies(t *testing.T) {
 	for _, want := range []string{
 		"agent",
 		"claude",
-		".claude/settings.local.json  (from agent)",
+		// Both per-project artifacts the module carries, marked as the module's
+		// rather than the file's.
+		".claude/settings.local.json, .claude/skills/treewright/SKILL.md  (from agent)",
 		"claude {prompt}  (from agent)",
 	} {
 		if !strings.Contains(out, want) {

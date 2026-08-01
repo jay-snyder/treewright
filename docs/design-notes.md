@@ -580,16 +580,30 @@ file the user owns, which a JSON merge would reorder and reformat. Printing the
 fragment and naming the file is the honest version until there is a merge
 strategy worth trusting.
 
-**Where the hooks go, and the trap between the placements.** User-level
-(`~/.claude/settings.json`) covers every repository and every worktree at once,
-and costs nothing because `signal` silently no-ops outside treewright windows —
-that contract is what makes the global placement free. Per-repo means the main
-checkout's `.claude/settings.local.json`, which git ignores — so **every
-worktree treewright creates starts without it**, and hooks placed there fire in
-the MAIN window and in no worktree at all unless something carries the file.
-That half-configured state looks finished, which is why `doctor` checks for
-exactly it. The committed project file would work mechanically and is not
-offered: it imposes treewright on every teammate who clones the repo.
+**Where the wiring goes, and the trap between the placements.** Per-repo is the
+default, and it is the main checkout's `.claude/settings.local.json`: treewright
+is a tool you use in *some* repositories, and the wiring should follow that
+rather than assert itself in every checkout on the machine. User-level
+(`~/.claude/settings.json`) is offered second, for someone who does want every
+repository covered at once, and costs little because `signal` silently no-ops
+outside treewright windows.
+
+The per-repo placement has a trap, and closing it is what `agent = "claude"` is
+for. Those files are gitignored, so **every worktree treewright creates starts
+without them**, and wiring placed there reaches the MAIN window and no worktree
+at all unless something carries it. That half-configured state looks finished,
+which is why `doctor` checks for exactly it. The committed project file would
+work mechanically and is not offered: it imposes treewright on every teammate
+who clones the repo.
+
+**What is per-project is what is carried, derived rather than listed.**
+`Agent.LocalState()` is computed from the module's project paths instead of
+being a field beside them, because a module that named a per-project artifact
+and forgot to carry it would recreate the trap one directory deeper — which is
+exactly what happened to the skill, whose first version was user-level only.
+Deriving the list means a module cannot describe a per-project file it does not
+also carry. Whether any of it ends up in git is the repository's business:
+treewright writes to no `.gitignore` and generates none.
 
 **The `agent` config key is a defaults bundle, and the carry is the point.**
 `agent = "claude"` names a module and takes its command and resume_command as
@@ -621,7 +635,8 @@ treewright — read the estate with `ls --json`, spawn parallel work with `new`
 and a `--prompt`, respect the teardown guards, leave `signal` to the hooks.
 The text lives in `internal/agentinit` as a shared, agent-neutral guide, with
 each module contributing only its packaging (for claude, SKILL.md frontmatter
-and `~/.claude/skills/treewright/SKILL.md`): the CLI is the same whoever runs
+and `.claude/skills/treewright/SKILL.md`, carried like the settings beside it):
+the CLI is the same whoever runs
 it, so a second agent wraps the same words. It needed no new core surface at
 all, which is the sign the protocol boundary was drawn right — and it is held
 to the code by tests, so a command it names cannot be renamed out from under

@@ -341,10 +341,13 @@ func checkConfig(r *report, name string) {
 // half-configured state that looks finished, which is what doctor is for.
 func checkAgentWiring(r *report, name string, cfg *config.Config) {
 	module, ok := agentModuleFor(cfg)
-	if !ok || len(module.LocalState) == 0 {
+	if !ok || module.ProjectSettings == "" {
 		return
 	}
-	localState := module.LocalState[0]
+	// The settings file by name rather than the first thing carried: the carry
+	// holds every per-project artifact the module has, and hooks live in this
+	// one.
+	localState := module.ProjectSettings
 
 	userHooked := mentionsSignal(expandHome(module.UserSettings))
 	localHooked := mentionsSignal(filepath.Join(cfg.MainDir, localState))

@@ -467,7 +467,7 @@ func (c *Config) AgentCarries() []string {
 		return nil // Load refused the config; nothing can hold one like this
 	}
 	var out []string
-	for _, rel := range module.LocalState {
+	for _, rel := range module.LocalState() {
 		if !slices.Contains(c.CarryFiles, rel) {
 			out = append(out, rel)
 		}
