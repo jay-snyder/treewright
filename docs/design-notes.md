@@ -505,6 +505,17 @@ starship take, and for the same reason. The commands written to the eval file ar
 restricted to what zsh, bash, and fish all parse identically, so one writer serves
 every shell.
 
+They are *stored* as files even so: `internal/shellinit/scripts/init.zsh` and
+its two siblings, embedded into the binary by name. Emitting from the binary was
+never an argument for keeping 173 lines of shell quoted inside Go, where nothing
+highlights it, no shell parses it and an editor indents it as a string — the two
+questions are separate, and only the first one was ever about the user. Naming
+each file in a `//go:embed` rather than walking the directory is the same rule
+the agent plugin's files are held to, and it bites harder here: this text is
+`eval`'d into the user's interactive shell at every start, so a file that
+shipped merely by being in the folder would run on every terminal they open.
+`TestEveryScriptIsDeclared` fails on one that no shell claims.
+
 Every external program the wrappers call is invoked through `command`, because
 zsh and bash expand aliases in a function body when the function is *defined*: an
 `alias rm='rm -i'` in a startup file would otherwise rewrite the wrapper's own

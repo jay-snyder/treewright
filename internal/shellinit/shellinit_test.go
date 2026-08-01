@@ -12,6 +12,55 @@ import (
 	"github.com/jay-snyder/treewright/internal/testenv"
 )
 
+// TestEveryScriptIsDeclared holds scripts/ to the shells that claim it, both
+// ways.
+//
+// The shims are eval'd straight into the user's interactive shell at every
+// start, which makes a file that ships because it happened to be in a folder
+// the worst kind of accident: it would run on every terminal opened, on every
+// machine that installed treewright, before anything else the user typed. So
+// each script reaches the binary through a //go:embed naming it, and this
+// closes the other direction — a file checked in under scripts/ that no shell
+// claims, which would otherwise sit there emitting nothing while looking like
+// part of the integration.
+//
+// Deliberately not shared with internal/agentinit's equivalent, which enforces
+// the same shape over its plugin folder. What each one is really made of is
+// the sentence it fails with — one sends you to a module's Plugin list, the
+// other to the scripts map and an embed directive — and a helper taking both
+// the declared set and the message it should print would be a parameterized
+// wrapper around a directory walk, which is not an abstraction worth a package.
+func TestEveryScriptIsDeclared(t *testing.T) {
+	declared := map[string]bool{}
+	for _, shell := range Shells() {
+		declared["init."+shell] = true
+	}
+
+	entries, err := os.ReadDir("scripts")
+	if err != nil {
+		t.Fatalf("read scripts: %v", err)
+	}
+	checkedIn := map[string]bool{}
+	for _, e := range entries {
+		if e.IsDir() {
+			t.Errorf("scripts/%s is a directory — the scripts are one flat file per shell", e.Name())
+			continue
+		}
+		checkedIn[e.Name()] = true
+	}
+
+	for name := range checkedIn {
+		if !declared[name] {
+			t.Errorf("scripts/%s is checked in but no shell emits it — add it to the scripts map with an embed directive, or delete it", name)
+		}
+	}
+	for name := range declared {
+		if !checkedIn[name] {
+			t.Errorf("a shell emits scripts/%s, which is not checked in", name)
+		}
+	}
+}
+
 func TestScriptRejectsUnknownShells(t *testing.T) {
 	if _, err := Script("nushell"); err == nil {
 		t.Fatal("want an error for an unsupported shell")

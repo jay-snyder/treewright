@@ -125,7 +125,7 @@ ldflags. Validate config changes with `goreleaser check`.
 | `internal/git` | Every git call, including merged/unpushed/dirty logic. |
 | `internal/tmux` | Every tmux call, window identity, popups. |
 | `internal/ui` | Picker, table, color. |
-| `internal/shellinit` | zsh/bash/fish shims, as Go string constants. |
+| `internal/shellinit` | zsh/bash/fish shims, checked in under `scripts/` and embedded by named file. |
 | `internal/tmuxinit` | tmux key bindings and titles, as Go string constants. |
 | `internal/agentinit` | Facts about coding agents, one module per agent: launch/resume defaults, local-state carries, and the plugin `agent-init` installs — checked in under `plugins/<agent>/`, embedded file by named file. |
 | `internal/gittest` | Scratch-repo builder for tests (bare origin + checkout). |
@@ -263,20 +263,24 @@ placement `agent-init` leads with, because treewright is a tool you use in some
 repositories and not others; `--global` is the second option it names, never the
 first. treewright writes to no `.gitignore` and generates none.
 
-**A module's plugin is checked in, and every file of it is named in Go.**
-The bytes live under `internal/agentinit/plugins/<agent>/`, so the tree a
-contributor reads and lints is byte for byte the tree `agent-init` writes — but
-each file reaches the binary through a `//go:embed` naming *it*, never a pattern
-that walks the folder. **Nothing ships because it was sitting in the
-directory.** A plugin directory is not documentation: Claude Code loads `bin/`
-as executables on the Bash tool's PATH and `.mcp.json` as servers to start, so a
-file appearing there is code running on every installer's machine and carried
-into every worktree, and "a file was added" is the easiest thing to miss in a
-diff. `TestThePluginShipsOnlyWhatItDeclares` closes the other direction, failing
-on a file that is checked in and declared by nobody — silently inert is its own
-surprise. Nothing in Go touches a byte of those files, including the driving
-guide: each module owns its whole skill, because a skill is written for a
-particular reader, and what holds the copies to the CLI is
+**What ships as a file is checked in as a file, and named in Go one at a
+time.** Two directories work this way — `internal/agentinit/plugins/<agent>/`
+and `internal/shellinit/scripts/` — so the bytes a contributor reads and lints
+are the bytes that get written, shell as shell and JSON as JSON. Each file
+reaches the binary through a `//go:embed` naming *it*, never a pattern that
+walks the folder. **Nothing ships because it was sitting in the directory.**
+Both of these run: a plugin directory also honors `bin/` (executables on the
+Bash tool's PATH) and `.mcp.json` (servers to start), and a shim is `eval`'d
+into the user's interactive shell at every start — so a file added there is
+code on someone's machine, and "a file was added" is the easiest thing to miss
+in a diff. `TestThePluginShipsOnlyWhatItDeclares` and
+`TestEveryScriptIsDeclared` close the other direction, failing on a file that
+is checked in and claimed by nobody; they stay separate because what each is
+really made of is the sentence it fails with, which names a different fix.
+
+Nothing in Go touches a byte of those files, including the driving guide: each
+module owns its whole skill, because a skill is written for a particular
+reader, and what holds the copies to the CLI is
 `TestThePluginTeachesTheCLIThatExists` rather than a shared file.
 
 **Branch-name rules live in `internal/refname`, not in the code that uses them.**
@@ -331,8 +335,9 @@ assertions in `tmuxinit_test.go`.
 2. Implement it in `commands.go` (or its own file if substantial), parsing with
    `parseArgs` and returning `usageErrorf` for bad invocations.
 3. Add completion: the candidate lists live in `cmdComplete` (`init.go`), and the
-   command name goes in all three shims in `shellinit.go` (zsh's `cmds`, bash's
-   `compgen -W`, and fish's `complete` lines) plus any per-flag fish completions.
+   command name goes in all three shims under `internal/shellinit/scripts/`
+   (zsh's `cmds`, bash's `compgen -W`, and fish's `complete` lines) plus any
+   per-flag fish completions.
 4. Add a row to the Commands table in `README.md`, and to the output-contract
    table in `docs/design-notes.md` if it prints to stdout.
 
