@@ -444,10 +444,11 @@ func (c *Config) SplitPrefix(typed string) (prefix, slug string, matched bool) {
 }
 
 // AgentCarries returns the agent module's local-state files that carry_files
-// does not already list — for claude, .claude/settings.local.json, which holds
-// the hooks that report state and the "always allow" permission decisions the
-// agent records as it works. Carried into every new worktree so both travel
-// with the checkout.
+// does not already list — for claude, the plugin holding the hooks that report
+// state and the skill that teaches the agent to drive treewright, plus
+// .claude/settings.local.json, which holds the "always allow" permission
+// decisions the agent records as it works. Carried into every new worktree so
+// all of it travels with the checkout.
 //
 // These differ from carry_files entries in exactly one way: absent from the
 // main checkout they are skipped silently rather than warned about. An

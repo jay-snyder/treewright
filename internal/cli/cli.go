@@ -456,33 +456,37 @@ worth reading first.`,
 		},
 		{
 			name:    "agent-init",
-			args:    "[--skill] <agent>",
-			summary: "print the hooks that make an agent report its state",
-			long: `Prints an agent's hook configuration: its own hooks wired to
-"treewright signal", so the window it runs in says whether it is working,
-waiting on you, or done — the AGENT column of "treewright ls", and a marker on
-the window's name when it needs a person.
+			args:    "[--user] [--print] <agent>",
+			summary: "install the plugin that wires an agent to treewright",
+			long: `Installs an agent's plugin into the main checkout of the repository
+you are standing in. It holds two things, one in each direction: the agent's
+own hooks wired to "treewright signal", so the window it runs in says whether
+it is working, waiting on you, or done — the AGENT column of "treewright ls",
+and a marker on the window's name when it needs a person — and a skill
+teaching the agent to drive treewright, from reading what is in flight with
+"treewright ls --json" to starting parallel work with new and a --prompt.
 
-The fragment goes to stdout by itself, so it can be piped; where to put it is
-said alongside, on stderr. For claude that is ~/.claude/settings.json, and the
-hooks are safe to keep global there: outside a treewright window, signal does
-nothing, quietly.
+For claude that is .claude/skills/treewright/, which claude loads whole as
+treewright@skills-dir the next time it starts. Nothing else is edited: no
+settings file, no dotfile, no .gitignore.
 
-To scope the hooks to one repository instead, put them in the main checkout's
-.claude/settings.local.json — the file git ignores — and set agent = "claude"
-in the repo's config. The agent key is what carries that file into every new
-worktree; without it, hooks in a gitignored file reach the main checkout and
-no worktree at all. "treewright doctor" checks for exactly that gap.
+Set agent = "claude" in the repo's config so every new worktree gets a copy;
+without it the plugin reaches the main checkout and no worktree at all.
+"treewright doctor" checks for exactly that gap, and for a plugin left behind
+by an older treewright.
 
-Nothing is applied for you, deliberately: hooks live in a settings file you
-own, and a merge that reordered it would be worse than asking you to paste.
+stdout is the directory, so the path can be piped. Run it again after
+upgrading treewright: the files are treewright's own, so a second run updates
+the wiring rather than leaving a second copy of it somewhere.
 
---skill prints the other direction: a skill teaching the agent to drive
-treewright — see what is in flight with "treewright ls --json", start parallel
-work with new and a --prompt, respect the teardown guards. The instructions
-name the one-line redirect that installs it.`,
+--user installs it for every repository instead, treewright-managed or not,
+which is safe: outside a treewright window, signal does nothing, quietly.
+
+--print writes nothing and prints the files, for reading the hooks before
+they run. It is also the one form that needs no repository.`,
 			flags: []flagDoc{
-				{"--skill", "print the skill that teaches the agent to drive treewright instead"},
+				{"--user", "install it for every repository instead of this one"},
+				{"--print", "print the plugin's files instead of installing them"},
 			},
 			run: cmdAgentInit,
 		},

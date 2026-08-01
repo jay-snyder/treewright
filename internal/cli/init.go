@@ -79,23 +79,39 @@ func cmdTmuxInit(env *Env, args []string) error {
 	return nil
 }
 
-// cmdAgentInit prints an agent's integration: by default its hook
-// configuration — its own hooks wired to `treewright signal`, which is what
-// fills the AGENT column of ls — and with --skill the document that teaches
-// the agent to drive treewright, the same knowledge in the other direction.
+// cmdAgentInit installs an agent's plugin: the hooks wired to `treewright
+// signal`, which fill the AGENT column of ls, and the skill teaching the agent
+// to drive treewright — the same knowledge in the other direction, in one
+// directory the agent loads whole.
 //
-// Either artifact goes to stdout alone, pasteable or pipeable, with the
-// instructions around it on stderr — the same contract as every other command.
-// No --apply for the hooks, unlike tmux-init, and the difference is what
-// applying would mean: tmux's source-file is additive, while applying hooks
-// means rewriting a settings file the user owns, which a JSON merge would
-// reorder and reformat. Printing the fragment and naming the file is the
-// honest version until there is a merge strategy worth trusting. The skill has
-// no such problem — its file is treewright's own — so the instruction for it
-// is a redirect the user can run as printed.
+// This one writes, where its two siblings print, and the reason is that the
+// directory is treewright's own. `shell-init` and `tmux-init` print because
+// their output belongs in a file the user owns and has edited fifty times, and
+// so did the hooks, back when they were a JSON fragment for a settings file —
+// applying that would have meant a merge that reordered somebody else's file,
+// which is why it never applied. The plugin has no such problem: nothing else
+// lives in `.claude/skills/treewright/`, treewright named it, and treewright
+// is the only thing that will ever write there. The half-measure this replaces
+// was already a write in all but name — `--skill` printed a `mkdir -p ... &&
+// treewright ... > ...` one-liner for the user to paste back, and with three
+// files that recipe stops being reviewable and starts being a way to install a
+// plugin with one file missing.
+//
+// Writing is also what makes a second run mean something. A pasted fragment
+// could only ever be layered on: rename a signal verb and the old copy stays
+// where it was, wired to a word that no longer exists. Rewriting the files
+// treewright wrote makes agent-init an update rather than a second install.
+//
+// stdout is the directory, so `cd "$(treewright agent-init claude)"` and
+// friends work, with everything else on stderr — the same contract as every
+// other command. --print writes nothing and dumps the files instead, for
+// reading the hooks before they run, which is the reason tmux-init prints by
+// default; unlike the default path it needs no repository, so it is also how
+// agent-init still answers outside git entirely.
 func cmdAgentInit(env *Env, args []string) error {
-	var skill bool
-	positional, err := parseArgs("agent-init", args, map[string]*bool{"--skill": &skill}, nil, 1)
+	var user, dump bool
+	positional, err := parseArgs("agent-init", args,
+		map[string]*bool{"--user": &user, "--print": &dump}, nil, 1)
 	if err != nil {
 		return err
 	}
@@ -108,29 +124,75 @@ func cmdAgentInit(env *Env, args []string) error {
 		return usageErrorf("agent-init", "no module for %q (built-in modules: %s)", name, strings.Join(agentinit.Names(), ", "))
 	}
 
-	if skill {
-		fmt.Fprint(env.Stdout, agent.Skill)
-		env.progressf("save it in the main checkout, where agent = %q carries it into every new worktree:", agent.Name)
-		env.progressf("  mkdir -p %s && treewright agent-init %s --skill > %s",
-			filepath.Dir(agent.ProjectSkillPath), agent.Name, agent.ProjectSkillPath)
-		env.progressf("it teaches the agent to drive treewright — starting parallel work, reading the estate, guarded teardown")
-		// Said unconditionally rather than after a `git check-ignore`, which
-		// would make a pure printer need a repository to run in — agent-init
-		// works outside git entirely. The agent's settings file is
-		// conventionally ignored already and needs no such line; this path is
-		// treewright's own invention, so nothing ignores it until someone says
-		// so, and a committed skill is treewright imposed on everyone who
-		// clones.
-		env.progressf("git will not ignore it on its own — add it to .gitignore unless you mean to hand it to everyone who clones")
-		env.progressf("use %s instead to teach it in every repository, treewright-managed or not", agent.UserSkillPath)
+	if dump {
+		return dumpPlugin(env, agent, user)
+	}
+	if user {
+		return installAgentPlugin(env, agent, expandHome(agent.UserPlugin), nil)
+	}
+	// The repository decides where a per-repo plugin goes, so this is the one
+	// path that needs a config — and having one is what lets the carry warning
+	// below know whether it applies. Someone with no config yet still has
+	// --user and --print, and the error says so.
+	cfg, err := resolveConfig("")
+	if err != nil {
+		return fmt.Errorf("%w — or install it for every repository with \"%s agent-init %s --user\"", err, env.Argv0, agent.Name)
+	}
+	return installAgentPlugin(env, agent, filepath.Join(cfg.MainDir, filepath.FromSlash(agent.ProjectPlugin)), cfg)
+}
+
+// installAgentPlugin writes the plugin into dir and says what happened. A nil
+// cfg means user scope, where nothing has to be carried anywhere.
+func installAgentPlugin(env *Env, agent agentinit.Agent, dir string, cfg *config.Config) error {
+	written, err := agent.Install(dir)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintln(env.Stdout, dir)
+
+	// Named rather than counted, because the interesting run is the second one:
+	// "wrote hooks/hooks.json" after an upgrade says exactly which part of the
+	// wiring had gone stale, where "wrote 1 file" says only that something did.
+	if len(written) == 0 {
+		env.progressf("%s is already what treewright would write — nothing to update", dir)
+	} else {
+		env.progressf("wrote %s to %s", strings.Join(written, ", "), dir)
+	}
+	env.progressf("%s loads it as treewright@skills-dir when it next starts, once you have trusted the folder — in a session already open, /reload-plugins", agent.Name)
+
+	if cfg == nil {
+		env.progressf("every repository is covered now, treewright-managed or not: outside a treewright window, signal does nothing, quietly")
 		return nil
 	}
+	if cfg.Agent != agent.Name {
+		env.progressf("set agent = %q in %s so every new worktree gets a copy — without it the plugin reaches the main checkout and no worktree at all", agent.Name, cfg.Path())
+	}
+	// Said unconditionally rather than after a `git check-ignore`: the answer
+	// costs a git call to learn and the sentence is worth reading either way.
+	// The agent's settings file is conventionally ignored already; this path is
+	// treewright's own invention, so nothing ignores it until someone says so,
+	// and a committed plugin is treewright imposed on everyone who clones.
+	env.progressf("git will not ignore it on its own — add %s/ to .gitignore unless you mean to hand it to everyone who clones", agent.ProjectPlugin)
+	env.progressf("use --user instead to cover every repository at once: outside a treewright window, signal does nothing, quietly")
+	return nil
+}
 
-	fmt.Fprint(env.Stdout, agent.Hooks)
-	env.progressf("add these hooks to %s in the main checkout — they run \"treewright signal\" as %s works, and the AGENT column of \"%s ls\" says which window wants you",
-		agent.ProjectSettings, agent.Name, env.Argv0)
-	env.progressf("set agent = %q in the repo's config so every new worktree gets a copy — without it the hooks reach the main checkout and no worktree at all", agent.Name)
-	env.progressf("use %s instead to cover every repository at once: outside a treewright window, signal does nothing, quietly", agent.UserSettings)
+// dumpPlugin prints the plugin's files rather than installing them, each under
+// the path it would be written to. The headers are cat's own multi-file form,
+// because that is what the output is: several files at once, for reading.
+func dumpPlugin(env *Env, agent agentinit.Agent, user bool) error {
+	dir := agent.ProjectPlugin
+	if user {
+		dir = agent.UserPlugin
+	}
+	for i, f := range agent.Plugin {
+		if i > 0 {
+			fmt.Fprintln(env.Stdout)
+		}
+		fmt.Fprintf(env.Stdout, "==> %s/%s <==\n", dir, f.Path)
+		fmt.Fprint(env.Stdout, f.Body)
+	}
+	env.progressf("nothing was written — \"%s agent-init %s\" installs this into the repository you are standing in", env.Argv0, agent.Name)
 	return nil
 }
 

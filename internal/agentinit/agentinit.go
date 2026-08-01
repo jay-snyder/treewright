@@ -6,20 +6,99 @@
 // needs identically: what launches it, what resumes it, which gitignored files
 // hold its per-project state, and how its hooks are wired to `signal`. This
 // package is where those facts live, one module per agent, so that supporting
-// another agent is a file beside claude.go rather than edits across the tree.
+// another agent is a folder and a file beside claude.go rather than edits
+// across the tree.
 //
-// Two consumers read the modules. `treewright agent-init <agent>` prints the
-// agent's hook configuration, emitted by the binary the way the shell shims and
-// the tmux snippet are, so it can never drift out of sync with the `signal`
-// vocabulary it targets. And a config's `agent` key names a module to take
-// launch defaults from — and to have the agent's local-state files carried into
-// every new worktree, which is what makes per-repo hooks reach the worktrees
-// they exist for.
+// A module shares nothing with another by construction, including the document
+// teaching the agent to drive treewright. The CLI is the same whoever runs it,
+// but a skill is written for a particular reader — one that loads instructions
+// from a description, is told which of its own transitions the hooks cover, and
+// is asked to leave `signal` to them — and a second agent that parses
+// instructions or reports state differently wants those paragraphs rewritten
+// rather than inherited. What keeps the copies honest is a test rather than a
+// shared file: internal/cli holds every module's plugin to the command table.
+//
+// Two consumers read the modules. `treewright agent-init <agent>` installs the
+// agent's plugin — its hooks and its skill — emitted by the binary the way the
+// shell shims and the tmux snippet are, so it can never drift out of sync with
+// the `signal` vocabulary it targets. And a config's `agent` key names a module
+// to take launch defaults from — and to have the agent's local-state files
+// carried into every new worktree, which is what makes per-repo wiring reach
+// the worktrees it exists for.
+//
+// The plugin is the shape that closed the last gap between this package and its
+// two siblings. A shell shim is re-evaluated at every shell start and a tmux
+// snippet re-read at every server start, so both propagate a treewright upgrade
+// on their own; the hooks, printed as JSON for a person to paste into a settings
+// file, could not — JSON has no eval, and the pasted copy was frozen at the
+// version that printed it. A plugin directory is a place of treewright's own to
+// write, so the wiring is a file treewright can rewrite rather than a copy it
+// can only hope is current. See "Agent modules" in docs/design-notes.md.
 package agentinit
 
 import (
+	"io/fs"
+	"os"
+	"path"
+	"path/filepath"
 	"sort"
+	"strings"
 )
+
+// pluginFiles reads a module's plugin out of the files checked in beside it,
+// one PluginFile per file, in the order fs.WalkDir yields them — which is
+// lexical, so a listing of the directory and the order agent-init reports
+// writing them in are the same order.
+//
+// The directory is the plugin, and no Go code here touches a byte of it: a file
+// added to the folder ships, is installed, and is carried into every worktree
+// with no list to update anywhere. That is the derived-list rule from
+// LocalState below taken one step further back, to the artifacts themselves,
+// and it is why a module is a folder plus a dozen lines of Go rather than a
+// wall of quoted JSON — the plugin a contributor reads is the plugin that gets
+// written, and `claude plugin validate` can be pointed at the checkout.
+//
+// The panic is unreachable by construction: the only argument ever passed is an
+// embed.FS whose root //go:embed already proved exists at compile time, and
+// reading from one cannot fail at runtime. It is here because the alternative
+// is a discarded error, which would turn a broken embed directive into a plugin
+// silently missing a file.
+func pluginFiles(fsys fs.FS, root string) []PluginFile {
+	var out []PluginFile
+	err := fs.WalkDir(fsys, root, func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		body, err := fs.ReadFile(fsys, p)
+		if err != nil {
+			return err
+		}
+		out = append(out, PluginFile{
+			Path: strings.TrimPrefix(strings.TrimPrefix(p, root), "/"),
+			Body: string(body),
+		})
+		return nil
+	})
+	if err != nil {
+		panic("agentinit: reading the embedded plugin under " + root + ": " + err.Error())
+	}
+	return out
+}
+
+// PluginFile is one file of the plugin a module installs: a path relative to
+// the plugin's own directory, and the body treewright writes there.
+//
+// Kept as a list rather than as a field per artifact because two things read it
+// and both want all of them at once — agent-init writes every file, and doctor
+// compares every file against what agent-init would write, which is how a
+// plugin installed by an older treewright is reported as out of date rather
+// than mistaken for current.
+type PluginFile struct {
+	// Path is slash-separated and relative to the plugin root, in the layout
+	// the agent expects. Never absolute, and never leading out of the plugin.
+	Path string
+	Body string
+}
 
 // Agent is one agent module.
 type Agent struct {
@@ -33,27 +112,31 @@ type Agent struct {
 	ResumeCommand string
 
 	// ProjectSettings is where the agent reads a checkout's own configuration,
-	// relative to its root, and is where treewright's wiring belongs by
-	// default: a repository you use treewright in gets it, and one you do not
-	// stays untouched. Its counterpart UserSettings is the same wiring made
-	// global, for someone who wants every repository covered at once.
+	// relative to its root. treewright does not write there — its wiring lives
+	// in the plugin below, a directory of its own — but the file still holds
+	// the "always allow" permission decisions the agent records as it works,
+	// which every worktree wants, so it stays on the carried list.
+	//
+	// UserSettings is the same file made global. It is named for two reasons
+	// that outlived the paste it used to receive: doctor recognizes hooks an
+	// older treewright told the user to put there, and someone who wired the
+	// agent by hand put them in one of these two files.
 	ProjectSettings string
 	UserSettings    string
 
-	// ProjectSkillPath and UserSkillPath are the same split for the skill: the
-	// checkout's own skills directory, and the agent's user-level one.
-	ProjectSkillPath string
-	UserSkillPath    string
+	// ProjectPlugin is the directory the agent loads treewright's plugin from,
+	// relative to a checkout's root, and is where the wiring belongs by
+	// default: a repository you use treewright in gets it, and one you do not
+	// stays untouched. UserPlugin is the same made global, for someone who
+	// wants every repository covered at once.
+	ProjectPlugin string
+	UserPlugin    string
 
-	// Hooks is the configuration fragment agent-init prints: the agent's own
-	// hooks wired to `treewright signal`. It spells the canonical binary name
-	// throughout, being destined for a file a program reads.
-	Hooks string
-
-	// Skill is the document teaching the agent to drive treewright — the
-	// reverse of Hooks, which teaches treewright about the agent. Each module
-	// wraps the shared drivingGuide below in its own agent's packaging.
-	Skill string
+	// Plugin is what goes in either of them — the agent's own hooks wired to
+	// `treewright signal`, the skill teaching it to drive treewright, and
+	// whatever manifest the agent needs to load the two. Every file spells the
+	// canonical binary name, being destined for files a program reads.
+	Plugin []PluginFile
 }
 
 // LocalState are the per-project files a config naming this module has carried
@@ -66,110 +149,59 @@ type Agent struct {
 // worktree, which is the trap the carry exists to close. Deriving it means a
 // module cannot describe a per-project file it forgets to carry.
 //
+// The plugin is a tree rather than a file, and it is spelled out here one file
+// at a time rather than as the directory holding them. Teaching the carry to
+// copy directories was the alternative and it loses twice: a carry_files entry
+// naming a directory has no meaning for the warn-when-missing rule that entry
+// exists for, and a module could then ship a plugin file no list names, which
+// is the very omission deriving the list is here to make impossible.
+//
 // Whether these end up in git is the repository's business, not treewright's.
-// The agent's settings file is conventionally ignored already; the skill is a
-// file like any other, and a developer manages their own .gitignore.
+// The agent's settings file is conventionally ignored already; the plugin is a
+// directory like any other, and a developer manages their own .gitignore.
 func (a Agent) LocalState() []string {
 	var out []string
-	for _, p := range []string{a.ProjectSettings, a.ProjectSkillPath} {
-		if p != "" {
-			out = append(out, p)
-		}
+	if a.ProjectSettings != "" {
+		out = append(out, a.ProjectSettings)
+	}
+	for _, f := range a.Plugin {
+		out = append(out, path.Join(a.ProjectPlugin, f.Path))
 	}
 	return out
 }
 
-// drivingGuide teaches an agent to drive treewright, and it is deliberately a
-// package-level document rather than claude's: the knowledge is the CLI's own
-// — the same commands whoever runs them — and only the packaging around it
-// (frontmatter, install path) belongs to a module. A second agent wraps this
-// same text.
+// Install writes the module's plugin into dir and returns the files it changed,
+// in the module's own order. The caller chooses dir — a checkout's own, or the
+// agent's user-level one — because which repositories the wiring covers is the
+// user's decision and not the module's.
 //
-// Every command in it spells the canonical binary name. That is the Argv0
-// rule's own case made sharper: the consumer is an agent running commands in a
-// non-interactive shell, where `tw` — a function defined by the shell
-// integration in a startup file — may simply not exist, while the binary is on
-// PATH under its own name.
+// Unchanged files are left alone rather than rewritten with identical bytes,
+// which is what makes a second run reportable: agent-init is what you run after
+// upgrading treewright, and it can only say what the upgrade moved if it knows
+// what was already there. A file the user edited is overwritten without asking,
+// deliberately — the directory is treewright's, its contents are generated, and
+// an edit that survived would be a hook nobody could see going stale.
 //
-// What it teaches is held to the code by tests in internal/cli: every command
-// it names must exist in the command table, every flag in that command's
-// parser, every JSON field in the ls schema — so a rename that forgets the
-// guide fails the build rather than teaching agents a CLI that is gone.
-const drivingGuide = `# Driving treewright
-
-treewright gives each piece of work its own git worktree, tmux window, and
-agent session, created and torn down together. In a repository it manages,
-reach for it before ` + "`git worktree`, `git branch`, or `git checkout -b`" + `:
-it also copies gitignored env files into the new checkout, runs the configured
-install step, names the tmux window after the work, and guards teardown.
-
-Run it as ` + "`treewright`" + `. The short ` + "`tw`" + ` is a shell function
-from the interactive shell's startup file, and may not exist in the shell
-running your commands.
-
-## See what is in flight
-
-    treewright ls --json
-
-One JSON object per checkout:
-
-- ` + "`\"base\": true`" + ` marks the main checkout. It is not a worktree,
-  never a target for rm or prune, and new work should fork from it rather than
-  happen in it.
-- ` + "`status`" + `: ` + "`dirty`" + ` and ` + "`unpushed`" + ` mean work
-  that exists nowhere else; ` + "`merged`" + ` has landed and is safe to
-  remove; ` + "`active`" + ` is pushed and unmerged — an open pull request.
-- ` + "`agent_state`" + `: what the agent in that window last reported —
-  ` + "`working`, `waiting`" + ` (blocked on a person), or ` + "`done`" + `.
-  Empty when nothing has signaled.
-- ` + "`ahead`/`behind`" + ` measure against origin's base branch, and
-  ` + "`null`" + ` means the comparison was impossible — unknown, not zero.
-- The listing does not fetch, so a branch merged since the last fetch still
-  reads active; rm and prune fetch before they judge, and they are the ones to
-  trust.
-
-## Start a piece of work
-
-    treewright new eng-142-null-user --prompt "the instructions for that agent"
-
-Forks a branch from the latest origin base branch, makes the worktree, copies
-the env files in, starts the install step in the background, and opens a tmux
-window whose agent begins on the prompt. stdout is the new worktree's path and
-nothing else.
-
-- The slug may not contain "/". A leading "feature/" or "bug/" chooses a
-  configured branch prefix — ` + "`treewright new bug/eng-142`" + ` — and one
-  the repository has not configured is refused rather than guessed at.
-- A branch that already exists — a colleague's pull request after fetching —
-  is checked out rather than recreated, so this is also how work is picked up.
-
-## Continue or hand work onward
-
-    treewright resume eng-142 --prompt "address the review comments"
-
-An unambiguous prefix of a slug is enough, and the expansion is reported. The
-prompt reaches the agent only when the resume actually starts one: a window
-that was already open is switched to instead, with a warning that the prompt
-went undelivered.
-
-## Clean up
-
-    treewright rm eng-142
-    treewright prune --yes
-
-rm refuses a worktree with uncommitted changes or commits on no origin ref;
-prune only takes worktrees that are both merged and clean. The refusals mean
-work that exists nowhere else: do not pass --force on your own judgment —
-surface the refusal and let the person decide. With no tty, window-closing
-prompts are skipped and treewright prints the command to run instead.
-
-## Leave to the machinery
-
-- ` + "`treewright signal`" + ` is run by the agent's own hooks already; do
-  not call it by hand.
-- ` + "`treewright setup`, `shell-init`, `tmux-init`, and `agent-init`" + `
-  change a person's configuration; run them only when asked to.
-`
+// The layout lives here rather than in the command for the same reason the hook
+// mapping does: it is a fact about one agent. A second module ships a different
+// tree and this writes it unchanged.
+func (a Agent) Install(dir string) ([]string, error) {
+	var written []string
+	for _, f := range a.Plugin {
+		target := filepath.Join(dir, filepath.FromSlash(f.Path))
+		if existing, err := os.ReadFile(target); err == nil && string(existing) == f.Body {
+			continue
+		}
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			return nil, err
+		}
+		if err := os.WriteFile(target, []byte(f.Body), 0o644); err != nil {
+			return nil, err
+		}
+		written = append(written, f.Path)
+	}
+	return written, nil
+}
 
 // modules is the registry, keyed by name. One entry today; a second agent is a
 // file defining its Agent and an init adding it here.

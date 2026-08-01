@@ -1,0 +1,8 @@
+{
+  "name": "treewright",
+  "description": "treewright's own wiring: hooks that report what this window's agent is doing, and the skill that teaches it to drive treewright",
+  "version": "1.0.0",
+  "author": { "name": "treewright", "url": "https://github.com/jay-snyder/treewright" },
+  "homepage": "https://github.com/jay-snyder/treewright",
+  "license": "MIT"
+}

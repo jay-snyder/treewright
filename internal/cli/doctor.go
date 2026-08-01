@@ -327,40 +327,129 @@ func checkConfig(r *report, name string) {
 	checkAgentWiring(r, name, cfg)
 }
 
+// pluginState is how much of a module's plugin is present at a directory.
+type pluginState int
+
+const (
+	pluginAbsent  pluginState = iota // nothing of it is there
+	pluginStale                      // some of it is, and it is not what treewright would write
+	pluginCurrent                    // every file, byte for byte
+)
+
 // checkAgentWiring reports whether the agent this config runs is wired to
 // `signal` — the integration whose absence is otherwise invisible: everything
 // works, and the AGENT column simply never appears.
 //
 // The module is the config's `agent` key when it sets one, else the one whose
 // command matches the config's first word — a guess, but a warn-level hint may
-// rest on a guess in a way behavior never would. Hooks count wherever they
-// live: the agent's user-level settings cover every repository, and the main
-// checkout's local settings cover this one — provided they reach the
-// worktrees, which is the second check. Hooks in a gitignored local file with
-// nothing carrying it fire in the MAIN window and in no worktree at all: the
-// half-configured state that looks finished, which is what doctor is for.
+// rest on a guess in a way behavior never would. The plugin counts wherever it
+// is: the agent's user-level skills directory covers every repository, and the
+// main checkout's covers this one — provided it reaches the worktrees, which is
+// the second check. A plugin in a gitignored directory with nothing carrying it
+// fires in the MAIN window and in no worktree at all: the half-configured state
+// that looks finished, which is what doctor is for.
+//
+// The staleness check is the one this command could not make before. When the
+// wiring was a fragment the user pasted into their own settings file, all
+// doctor could ask was whether some hook mentioned `signal` — so a copy pasted
+// two releases ago, wired to a verb that has since been renamed, read exactly
+// like a current one. The plugin is treewright's own to write, so the question
+// becomes whether the files are what agent-init would write today, which is a
+// byte comparison and admits no false positives.
 func checkAgentWiring(r *report, name string, cfg *config.Config) {
 	module, ok := agentModuleFor(cfg)
-	if !ok || module.ProjectSettings == "" {
+	if !ok || len(module.Plugin) == 0 {
 		return
 	}
-	// The settings file by name rather than the first thing carried: the carry
-	// holds every per-project artifact the module has, and hooks live in this
-	// one.
-	localState := module.ProjectSettings
+	projectDir := filepath.Join(cfg.MainDir, filepath.FromSlash(module.ProjectPlugin))
+	project, user := inspectPlugin(module, projectDir), inspectPlugin(module, expandHome(module.UserPlugin))
+	pasted := settingsWithPastedHooks(module, cfg)
 
-	userHooked := mentionsSignal(expandHome(module.UserSettings))
-	localHooked := mentionsSignal(filepath.Join(cfg.MainDir, localState))
 	switch {
-	case !userHooked && !localHooked:
-		r.addf(levelWarn, "%s: %s does not report state — \"treewright agent-init %s\" prints the hooks that fill the AGENT column",
+	case project == pluginAbsent && user == pluginAbsent && pasted != "":
+		// The fragment older versions printed for pasting still works — Claude
+		// Code runs hooks from every scope it loads — so this is not "no
+		// wiring". It is wiring treewright cannot keep current, which is the
+		// whole reason the plugin exists.
+		r.addf(levelWarn, "%s: the hooks in %s are a pasted copy treewright cannot update — \"treewright agent-init %s\" installs the plugin that replaces them",
+			name, pasted, module.Name)
+	case project == pluginAbsent && user == pluginAbsent:
+		r.addf(levelWarn, "%s: %s does not report state — \"treewright agent-init %s\" installs the plugin that fills the AGENT column",
 			name, module.Name, module.Name)
-	case localHooked && cfg.Agent == "" && !slices.Contains(cfg.CarryFiles, localState):
-		r.addf(levelWarn, "%s: the hooks in %s reach no worktree — set agent = %q, or add %s to carry_files",
-			name, localState, module.Name, localState)
+	case project == pluginStale || user == pluginStale:
+		r.addf(levelWarn, "%s: the %s plugin is not what this treewright would write — rerun \"treewright agent-init %s\" to bring the wiring up to date",
+			name, module.Name, module.Name)
+	case project == pluginCurrent && cfg.Agent == "" && !carriesPlugin(module, cfg):
+		r.addf(levelWarn, "%s: the %s plugin in %s reaches no worktree — set agent = %q so every new one gets a copy",
+			name, module.Name, module.ProjectPlugin, module.Name)
 	default:
-		r.addf(levelOK, "%s: %s reports state through its hooks", name, module.Name)
+		r.addf(levelOK, "%s: %s reports state through its plugin", name, module.Name)
 	}
+
+	// Said as well as, not instead of, whatever the plugin's own state was: the
+	// two sets of hooks both fire, and the pasted ones are the copy frozen at
+	// whichever treewright printed them — a verb renamed since is an error
+	// message on every transition, from a file the user has long stopped
+	// thinking of as treewright's.
+	if pasted != "" && (project != pluginAbsent || user != pluginAbsent) {
+		r.addf(levelWarn, "%s: the hooks pasted in %s run alongside the plugin's — delete them, the plugin is the copy treewright keeps current", name, pasted)
+	}
+}
+
+// inspectPlugin reads what is installed at dir and compares it with what
+// agent-init would put there.
+//
+// A partial install is stale rather than absent: a plugin missing its hooks is
+// the state an interrupted write or a hand-copied directory leaves, and it is
+// the one worth naming — the skill loads, so everything looks installed, and
+// the AGENT column never appears.
+func inspectPlugin(module agentinit.Agent, dir string) pluginState {
+	found, current := 0, 0
+	for _, f := range module.Plugin {
+		body, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(f.Path)))
+		if err != nil {
+			continue
+		}
+		found++
+		if string(body) == f.Body {
+			current++
+		}
+	}
+	switch {
+	case found == 0:
+		return pluginAbsent
+	case current == len(module.Plugin):
+		return pluginCurrent
+	default:
+		return pluginStale
+	}
+}
+
+// carriesPlugin reports whether carry_files names every file of the plugin,
+// which is the long-hand alternative to the agent key. Every file, because a
+// worktree that got the skill and not the hooks is the half-installed state
+// this check exists to catch.
+func carriesPlugin(module agentinit.Agent, cfg *config.Config) bool {
+	for _, rel := range module.LocalState() {
+		if rel != module.ProjectSettings && !slices.Contains(cfg.CarryFiles, rel) {
+			return false
+		}
+	}
+	return true
+}
+
+// settingsWithPastedHooks names the settings file still carrying hooks an older
+// treewright printed for pasting, or "" when neither does.
+func settingsWithPastedHooks(module agentinit.Agent, cfg *config.Config) string {
+	for _, path := range []string{
+		filepath.Join(cfg.MainDir, filepath.FromSlash(module.ProjectSettings)),
+		expandHome(module.UserSettings),
+	} {
+		if mentionsSignal(path) {
+			return path
+		}
+	}
+	return ""
 }
 
 // agentModuleFor resolves which agent module a config runs: the `agent` key

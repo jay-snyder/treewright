@@ -99,7 +99,7 @@ _treewright() {
     'doctor:check the installation and every registered config'
     'shell-init:print the shell integration'
     'tmux-init:print the tmux integration'
-    'agent-init:print the hooks that make an agent report its state'
+    'agent-init:install the plugin that wires an agent to treewright'
   )
   if (( CURRENT == 2 )); then
     _describe -t commands 'treewright command' cmds
@@ -215,7 +215,7 @@ complete -c treewright -n __fish_use_subcommand -a config     -d 'print the sett
 complete -c treewright -n __fish_use_subcommand -a doctor     -d 'check the installation and every registered config'
 complete -c treewright -n __fish_use_subcommand -a shell-init -d 'print the shell integration'
 complete -c treewright -n __fish_use_subcommand -a tmux-init  -d 'print the tmux integration'
-complete -c treewright -n __fish_use_subcommand -a agent-init -d 'print the hooks that make an agent report its state'
+complete -c treewright -n __fish_use_subcommand -a agent-init -d 'install the plugin that wires an agent to treewright'
 complete -c treewright -n '__fish_seen_subcommand_from new' -a '(command treewright __complete prefixes)' -d 'branch prefix'
 complete -c treewright -n '__fish_seen_subcommand_from rm' -a '(command treewright __complete slugs)'
 complete -c treewright -n '__fish_seen_subcommand_from resume cd' -a '(command treewright __complete targets)'
@@ -233,7 +233,8 @@ complete -c treewright -n '__fish_seen_subcommand_from tmux-init' -l resume-key 
 complete -c treewright -n '__fish_seen_subcommand_from tmux-init' -l new-key -r -d 'prefix key that starts a worktree'
 complete -c treewright -n '__fish_seen_subcommand_from new' -s p -l prompt -r -d 'text the agent starts working on'
 complete -c treewright -n '__fish_seen_subcommand_from resume' -s p -l prompt -r -d 'text for the resumed agent'
-complete -c treewright -n '__fish_seen_subcommand_from agent-init' -l skill -d 'print the skill that teaches the agent to drive treewright'
+complete -c treewright -n '__fish_seen_subcommand_from agent-init' -l user -d 'install it for every repository instead of this one'
+complete -c treewright -n '__fish_seen_subcommand_from agent-init' -l print -d 'print the plugin files instead of installing them'
 
 # tw calls the treewright function, and --wraps inherits its completions. The
 # function runs the binary as "command treewright", which erases the name the
