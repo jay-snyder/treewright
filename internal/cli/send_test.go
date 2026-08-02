@@ -184,6 +184,13 @@ func TestSendRefusesAWindowHeldOpenAfterItsCommandDied(t *testing.T) {
 	if !strings.Contains(r.err.Error(), "no agent in it") {
 		t.Errorf("error = %q, want the dead agent named", r.err)
 	}
+	// The way out it names is a tmux command, so it has to reach the server
+	// treewright is driving. The fixture runs under a label, as anyone with a
+	// tmux server of their own does — and a line without the flag would close
+	// whatever that id happens to be on the default server instead.
+	if want := "-L " + os.Getenv("TREEWRIGHT_TMUX_LABEL"); !strings.Contains(r.err.Error(), want) {
+		t.Errorf("error = %q, want the close command aimed at %q", r.err, want)
+	}
 	// And the window is still there with the failure still on it, which is what
 	// the refusal is protecting.
 	if got := panesOn(t, f.DirFor("eng-1")); got != 1 {

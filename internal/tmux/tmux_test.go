@@ -458,6 +458,33 @@ func TestPopupIgnoresTheInnerCommandsExitStatus(t *testing.T) {
 	}
 }
 
+// TestKillWindowArgs covers the line treewright prints for someone to run when
+// there is nobody to ask, and the one thing it has to carry: the server flag.
+//
+// The line is run from a shell holding none of treewright's environment, so
+// under a label a bare `tmux kill-window -t @3` goes to the default server —
+// where @3 is some other window entirely. tmux closes it and exits 0, so the
+// window that was meant to close stays open, one nobody asked about is gone,
+// and nothing anywhere says so. A wrong session name fails loudly; a wrong
+// server does not, which is why this is the more dangerous of the two.
+func TestKillWindowArgs(t *testing.T) {
+	t.Setenv("TREEWRIGHT_TMUX_LABEL", "")
+	if got, want := strings.Join(KillWindowArgs("@3"), " "), "kill-window -t @3"; got != want {
+		t.Errorf("KillWindowArgs = %q, want %q", got, want)
+	}
+
+	t.Setenv("TREEWRIGHT_TMUX_LABEL", "work")
+	if got, want := strings.Join(KillWindowArgs("@3"), " "), "-L work kill-window -t @3"; got != want {
+		t.Errorf("KillWindowArgs under a label = %q, want %q", got, want)
+	}
+
+	// And it is the command KillWindow itself runs, not a second spelling of it
+	// that can drift: what gets printed has to be what treewright would have done.
+	if got, want := strings.Join(killWindow("@3"), " "), "kill-window -t @3"; got != want {
+		t.Errorf("killWindow = %q, want the printed line to name the same command", got)
+	}
+}
+
 // TestAttachArgs pins the two things `treewright attach` exists to get right, and
 // that a person copying "tmux attach -t myrepo" out of a progress line cannot:
 // the session is named exactly, and the server flag survives.

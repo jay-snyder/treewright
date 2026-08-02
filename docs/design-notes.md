@@ -730,6 +730,22 @@ unless you pass `--yes` to `rm`, because a window may still have a session
 running in it; with nobody to prompt — a script, an agent — both print the
 `tmux kill-window` to run instead.
 
+**That printed line carries the server flags**, through `tmux.KillWindowArgs`,
+for the reason `attachHint` carries them and with more at stake. It is run from
+a shell holding none of treewright's environment, so under
+`TREEWRIGHT_TMUX_LABEL` a bare `tmux kill-window -t @3` looks in the *default*
+server — where `@3` is some other window entirely. tmux closes it and exits 0.
+The window that was meant to close stays open, one nobody asked about is gone,
+and nothing anywhere says so: a wrong session name fails loudly, a wrong server
+does not. `send` names the same command for a window whose agent has died, and
+gets it from the same place — and both are built from the argument list
+`KillWindow` itself runs, so what is printed cannot drift from what treewright
+would have done.
+
+There is no treewright verb for closing a window, which is why this is a printed
+line at all. That is the remaining place where driving treewright means typing
+raw tmux.
+
 Closing a session's last window ends the session, which moves an attached client
 elsewhere or detaches it, so the prompt says when that is what is about to
 happen. Normally it is not: the base window outlives every worktree.

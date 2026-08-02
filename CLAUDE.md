@@ -372,6 +372,15 @@ files and ignored ones inside untracked directories. `git stash` is not
 available to this — one stash stack is shared by every worktree of a repository.
 See "Moving work that was started in the wrong place" in `docs/design-notes.md`.
 
+**A tmux command treewright *prints* carries the server flags.** It is run from
+a shell holding none of treewright's environment, so `tmux.AttachArgs` and
+`tmux.KillWindowArgs` build those lines rather than a call site concatenating
+one. Under `TREEWRIGHT_TMUX_LABEL` a bare `tmux kill-window -t @3` reaches the
+default server, closes whatever `@3` is there, and exits 0 — a wrong session
+name fails loudly, a wrong server does not. `KillWindowArgs` and `KillWindow`
+are built from the same argument list, so the printed line cannot drift from the
+command treewright would have run.
+
 **No tmux call lives outside `internal/tmux`, including the ones `send` makes.**
 `Send` is `send-keys -l -- <text>` then `send-keys Enter`, two calls because tmux
 reads its arguments as key names otherwise, and `Capture` is what puts "look

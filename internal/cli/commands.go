@@ -662,7 +662,7 @@ func offerWindowClose(env *Env, window tmux.Window, assumeYes bool) {
 		// running in it.
 		env.progressf("tmux window %s now points at a deleted directory%s%s",
 			window.Name, under(last),
-			asFields(field("close it with", env.copyable("tmux kill-window -t "+window.ID))))
+			asFields(field("close it with", env.copyable(killWindowHint(window.ID)))))
 		return
 	}
 	defer tty.Close()
