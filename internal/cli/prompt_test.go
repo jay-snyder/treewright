@@ -68,6 +68,27 @@ func TestNewWithAPromptAndNoTmuxDoesNotClaimAWindowWasOpen(t *testing.T) {
 	}
 }
 
+// TestPromptAgainstABlankCommandNamesTheShell: with command = "" the window
+// holds a shell, so there is no agent to hand a prompt to. The general refusal
+// would tell the reader to write a {prompt} into the very key they emptied on
+// purpose — advice that undoes the configuration to fix the invocation.
+func TestPromptAgainstABlankCommandNamesTheShell(t *testing.T) {
+	f := newFixture(t, "command = ''\n")
+
+	r := f.exec("new", "eng-1", "--prompt", "fix the rounding")
+	if r.err == nil {
+		t.Fatal("want an error for a prompt with no agent to receive it")
+	}
+	msg := r.err.Error()
+	if !strings.Contains(msg, "opens a shell") {
+		t.Errorf("error = %q, want the blank command explained as the shell it opens", msg)
+	}
+	// Refused before anything exists, like every other prompt refusal.
+	if f.Exists("eng-1") {
+		t.Error("a worktree was created behind a refused prompt")
+	}
+}
+
 // TestPromptRefusedWithoutAPlaceholder is the third rule, plus its timing:
 // the refusal comes before anything is created, so a flag mistake does not
 // leave a half-made worktree behind.

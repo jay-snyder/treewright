@@ -136,6 +136,15 @@ func fillPrompt(command, key, prompt string) (string, error) {
 // about an arbitrary agent's CLI; the error names the setting and shows where
 // the text should go, which turns the guess into the user's own line.
 func fillTemplate(command, key, prompt string) (string, error) {
+	// A blank template is the setting that opens a window on a shell, so there
+	// is no agent standing there to be handed anything. It gets its own
+	// refusal because the general one below would tell the reader to write a
+	// {prompt} into the very key they deliberately emptied — advice that
+	// undoes the configuration to fix the invocation.
+	if strings.TrimSpace(command) == "" && prompt != "" {
+		return "", fmt.Errorf("%s is blank, so the window opens a shell and there is no agent to hand a prompt to\nset %s to what should run there, with %s where the text belongs",
+			key, key, promptPlaceholder)
+	}
 	if !strings.Contains(command, promptPlaceholder) {
 		if prompt == "" {
 			return command, nil

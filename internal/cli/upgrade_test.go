@@ -738,6 +738,60 @@ func TestSetupRefreshKeepsAnExplicitlyEmptyPrefix(t *testing.T) {
 	}
 }
 
+// TestSetupRefreshKeepsABlankCommand: `command = ""` is the setting that opens
+// a window on a shell, so a rewrite that read the blank as "unset" would drop
+// the line and hand the repository its agent back — the same shape as the
+// ticket_pattern opt-out, and the reason writeSetting is told whether a key was
+// set rather than inferring it from the value.
+func TestSetupRefreshKeepsABlankCommand(t *testing.T) {
+	f := newFixture(t, "")
+	f.writeConfig("main_dir = '" + f.MainDir + "'\ncommand = ''\nresume_command = ''\n")
+
+	f.mustRun("setup", "--refresh")
+
+	cfg, err := config.Load(filepath.Join(f.registry, "proj.toml"))
+	if err != nil {
+		t.Fatalf("the refreshed config does not load: %v", err)
+	}
+	for _, tc := range []struct{ key, got string }{
+		{"command", cfg.Command},
+		{"resume_command", cfg.ResumeCommand},
+	} {
+		if !cfg.Explicit(tc.key) || tc.got != "" {
+			t.Errorf("%s = %q (explicit %v) after a refresh, want the blank kept as the setting it is",
+				tc.key, tc.got, cfg.Explicit(tc.key))
+		}
+	}
+}
+
+// TestSetupRefreshDoesNotPinTheAgentsOwnCommand is the other direction, and the
+// one Explicit cannot answer alone. With an agent named, a blank command is
+// filled by the module before it reaches the file's reader — so an explicit
+// blank and an absent key arrive identical, and writing that value back as a
+// live setting would pin the file to whatever this release's module says.
+func TestSetupRefreshDoesNotPinTheAgentsOwnCommand(t *testing.T) {
+	f := newFixture(t, "")
+	f.writeConfig("main_dir = '" + f.MainDir + "'\nagent = 'claude'\ncommand = ''\n")
+
+	f.mustRun("setup", "--refresh")
+
+	body, err := os.ReadFile(filepath.Join(f.registry, "proj.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(body), "\ncommand = ") {
+		t.Errorf("refresh wrote the module's own command back as a setting:\n%s", body)
+	}
+	// And the behavior is unchanged either way: the module still supplies it.
+	cfg, err := config.Load(filepath.Join(f.registry, "proj.toml"))
+	if err != nil {
+		t.Fatalf("the refreshed config does not load: %v", err)
+	}
+	if cfg.Command != config.DefaultCommand {
+		t.Errorf("command = %q, want the module's default still in force", cfg.Command)
+	}
+}
+
 // TestSetupRefreshDryRunWritesNothing keeps the look-before-it-writes path that
 // -n is for, on the one command here that rewrites a file somebody has edited.
 func TestSetupRefreshDryRunWritesNothing(t *testing.T) {

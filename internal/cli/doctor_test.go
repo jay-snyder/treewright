@@ -232,6 +232,32 @@ func TestDoctorReportsAMissingCommand(t *testing.T) {
 	}
 }
 
+// TestDoctorReportsABlankCommandAsASetting: a blank command is how a
+// repository asks for a window with no agent in it, so it is not a fault — but
+// it is still said, because the AGENT column never filling is otherwise a
+// silence somebody eventually files as a bug.
+func TestDoctorReportsABlankCommandAsASetting(t *testing.T) {
+	f := newFixture(t, "command = ''\nresume_command = ''\n")
+
+	found := findings(t, f)
+	// Keyed to each setting's own check name, since both are blank here and
+	// carry the same sentence — which is what has() refuses to guess between.
+	for _, key := range []string{": command blank", ": resume_command blank"} {
+		if got := has(t, found, key+" — the window opens a shell"); got != "ok" {
+			t.Errorf("finding for %q = %q, want an ok naming what a blank command does\nall: %v", key, got, found)
+		}
+	}
+	if got := has(t, found, "would open running nothing"); got != "" {
+		t.Errorf("finding = %q, want the old warning gone — the window opens a shell, not nothing", got)
+	}
+	// A deliberate setting must not fail the run a setup script gates on.
+	if tmux.Available() {
+		if r := f.exec("doctor"); r.err != nil {
+			t.Errorf("doctor with a blank command = %v, want exit 0\n%s", r.err, r.stdout)
+		}
+	}
+}
+
 func TestDoctorOutsideARepository(t *testing.T) {
 	f := newFixture(t, "command = 'true'\nresume_command = 'true'\n")
 	t.Chdir(t.TempDir())

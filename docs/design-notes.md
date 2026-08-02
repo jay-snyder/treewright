@@ -130,6 +130,44 @@ value, so an omitted key defaults and a key set to `""` stays empty. A
 never-matching regexp was the alternative — undiscoverable, and RE2 has no
 negative lookahead to write one with.
 
+### An empty command, and the one key that overrules it
+
+The command keys have the same shape and reached it later. `tmux.Spec` has
+always documented a blank command as "leaves a shell", and `newWindow` omits a
+blank rather than passing an empty string — so the plumbing for a window with no
+agent in it was there the whole time, and no config could ask for it. `Load`
+defaulted on the value, so `command = ""` came back as `claude {prompt}`, and
+`treewright config` — the command whose entire subject is the gap between a file
+and its behavior — reported that value with the FROM column blank, meaning *the
+file's own*. About a file that said no such thing.
+
+Both command keys now default on `!Explicit(...)`, so `command = ""` opens the
+window on a shell and only a file that never mentions the key takes `claude`.
+The half-deleted-line worry that argued for the old collapse does not survive
+contact with the failure it produces: a window holding a shell is visible the
+moment it opens, where a wrong `ticket_pattern` is invisible for weeks.
+
+**`agent` is the exception, deliberately.** It fills a blank command however the
+blank got there, so `agent = "claude"` with `command = ""` runs claude, and a
+repository that wants the shell removes the agent key too. The alternative —
+carry claude's settings and plugin into every worktree, then open a shell — is a
+combination nobody asked for, and supporting it would make one key's empty value
+mean two different things depending on whether another key is present.
+
+That exception costs one piece of bookkeeping. Once the module has filled a
+blank, an explicit `""` and an absent key are the same value under two different
+answers from `Explicit`, so `setup --refresh` cannot tell whether to write the
+line back. `Config.AgentFilled` records the fill for exactly that reader:
+a value the module supplied follows treewright's changes to that module, and the
+identical string written into the file stops following them — the
+default-becomes-a-setting trap every other key here is guarded against.
+
+The old generated config carried the other half of this. "Remove this key for a
+window with no agent in it," it said about `agent`, which was false: removing it
+stopped the carry and the module's defaults, and left `DefaultCommand`, which is
+`claude {prompt}`. You got claude either way. It now says to set `command = ""`
+as well, which is the thing that is actually true.
+
 **The fallback spent characters saying characters were missing.** `rewrite-css` is
 eleven characters and arrived as `REWRITE-CS...` — thirteen, to save one. So
 `shorten` now keeps a shortened name only when it is genuinely narrower than what

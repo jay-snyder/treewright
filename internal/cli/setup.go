@@ -235,12 +235,16 @@ func settingsFrom(cfg *config.Config) configSettings {
 	// decaying into a commented-out example.
 	s.prefixFromFile = true
 	s.prefixExplicit = cfg.Explicit("branch_prefix") || cfg.Explicit("branch_prefixes")
-	if cfg.Explicit("command") {
-		s.command = cfg.Command
-	}
-	if cfg.Explicit("resume_command") {
-		s.resumeCommand = cfg.ResumeCommand
-	}
+	// The command keys take ticket_pattern's shape, an empty value being a
+	// decision rather than an omission: `command = ""` opens a window on a
+	// shell. So what is kept is whether the key was written — with the one
+	// subtraction that Explicit cannot make on its own, a blank the agent
+	// module filled. That value is the module's default, and writing it back
+	// as a setting would pin the file to whatever this release's module says.
+	s.commandSet = cfg.Explicit("command") && !cfg.AgentFilled("command")
+	s.command = cfg.Command
+	s.resumeCommandSet = cfg.Explicit("resume_command") && !cfg.AgentFilled("resume_command")
+	s.resumeCommand = cfg.ResumeCommand
 	if cfg.Explicit("post_create") {
 		s.postCreate = cfg.PostCreate
 	}
@@ -472,11 +476,16 @@ type configSettings struct {
 	carry []string
 	agent string
 
-	// Written only when set, commented as the default otherwise. Empty means the
-	// file did not say — except for ticketPattern, where empty is a setting and
-	// ticketPatternSet is what distinguishes the two.
+	// Written only when set, commented as the default otherwise. Empty usually
+	// means the file did not say — except for the three keys whose empty value
+	// is itself a setting: ticket_pattern turns the ticket search off, and
+	// either command key opens the window on a shell. For those the paired Set
+	// field is what distinguishes a decision from an omission, since the value
+	// cannot.
 	command          string
+	commandSet       bool
 	resumeCommand    string
+	resumeCommandSet bool
 	postCreate       []string
 	ticketPattern    string
 	ticketPatternSet bool
@@ -613,8 +622,10 @@ func renderConfig(s configSettings) string {
 	fmt.Fprintf(&b, "# and copies the agent's own per-project files — its settings, and the\n")
 	fmt.Fprintf(&b, "# plugin holding treewright's hooks and skill — into each new worktree.\n")
 	fmt.Fprintf(&b, "# Nothing ignores that plugin until you say so, so it reads as untracked\n")
-	fmt.Fprintf(&b, "# everywhere it lands — \"treewright doctor\" says so too. Remove this key\n")
-	fmt.Fprintf(&b, "# for a window with no agent in it.\n")
+	fmt.Fprintf(&b, "# everywhere it lands — \"treewright doctor\" says so too. Removing this key\n")
+	fmt.Fprintf(&b, "# stops the carry and the defaults it supplies, but the windows still run\n")
+	fmt.Fprintf(&b, "# the command below — which defaults to claude. For a window with no agent\n")
+	fmt.Fprintf(&b, "# in it, set command = \"\" as well.\n")
 	if s.agent == "" {
 		fmt.Fprintf(&b, "# agent = \"claude\"\n\n")
 	} else {
@@ -629,8 +640,11 @@ func renderConfig(s configSettings) string {
 	fmt.Fprintf(&b, "# resume_command by resume; the two default independently, and either\n")
 	fmt.Fprintf(&b, "# overrides what agent supplies. {prompt} is where --prompt's text lands,\n")
 	fmt.Fprintf(&b, "# shell-quoted; without a prompt the placeholder disappears.\n")
-	writeSetting(&b, "command", commandKeyWidth, s.command, config.DefaultCommand)
-	writeSetting(&b, "resume_command", commandKeyWidth, s.resumeCommand, config.DefaultResumeCommand)
+	fmt.Fprintf(&b, "# Set one to \"\" for a window holding nothing but your shell — but the\n")
+	fmt.Fprintf(&b, "# agent key fills a blank command before that applies, so a repository\n")
+	fmt.Fprintf(&b, "# that names an agent has to remove that key as well.\n")
+	writeSetting(&b, "command", commandKeyWidth, s.command, config.DefaultCommand, s.commandSet)
+	writeSetting(&b, "resume_command", commandKeyWidth, s.resumeCommand, config.DefaultResumeCommand, s.resumeCommandSet)
 	fmt.Fprintln(&b)
 
 	fmt.Fprintf(&b, "# Run in the background in each new worktree, for dependency installation.\n")
@@ -672,7 +686,10 @@ func renderConfig(s configSettings) string {
 
 	fmt.Fprintf(&b, "# The tmux session holding this repository's windows, so that they stay\n")
 	fmt.Fprintf(&b, "# separate from every other repository's. Defaults to %q.\n", s.name)
-	writeSetting(&b, "tmux_session", 0, s.tmuxSession, s.name)
+	// The one key here whose empty value carries no meaning of its own:
+	// sessionFor trims it and falls back to the config's name, so a blank and
+	// an absent key are the same session.
+	writeSetting(&b, "tmux_session", 0, s.tmuxSession, s.name, s.tmuxSession != "")
 
 	return b.String()
 }
@@ -684,12 +701,17 @@ const commandKeyWidth = len("resume_command")
 // writeSetting writes one key: as a live line when the config set it, and as the
 // commented default otherwise.
 //
+// set says which, rather than the value's own emptiness, because two of the
+// three keys written this way have an empty value that is a setting of its
+// own: `command = ""` opens the window on a shell, and a rewrite that read the
+// blank as "unset" would drop the line and hand the repository its agent back.
+//
 // Only the commented form is padded. Aligning the live one too would put a run
 // of spaces before the "=" of a value somebody actually set, to line it up with
 // a comment — and a file where every key is set would be padded to a width
 // nothing in it needs.
-func writeSetting(b *strings.Builder, key string, width int, value, fallback string) {
-	if value == "" {
+func writeSetting(b *strings.Builder, key string, width int, value, fallback string, set bool) {
+	if !set {
 		fmt.Fprintf(b, "# %-*s = %s\n", width, key, tomlString(fallback))
 		return
 	}

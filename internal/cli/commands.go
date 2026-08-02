@@ -1262,6 +1262,16 @@ func openBaseWindow(env *Env, cfg *config.Config, command string) (created bool,
 		})
 	}
 
+	// A blank command is the setting that leaves a window holding a shell, and
+	// outside tmux there is no window to leave one in — the caller is standing
+	// in a shell already. Said rather than done, because `sh -c ""` returns
+	// instantly and `base` would otherwise exit 0 having visibly done nothing.
+	if strings.TrimSpace(command) == "" {
+		env.progressf("no tmux and a blank command, so there is nothing to open%s",
+			asFields(field("the checkout is at", cfg.MainDir)))
+		return false, nil
+	}
+
 	// Without tmux there is no window to open, so run the command here and hand
 	// it the terminal — which is the command running, prompt included, so this
 	// counts as created for the caller weighing whether a prompt was delivered.

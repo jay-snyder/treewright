@@ -248,6 +248,17 @@ pattern — it is one key taking either a string or a list, via
 `config.Commands.UnmarshalTOML`, so there is no second key to set as well. Don't
 "make it consistent" by adding one.
 
+**An empty `command` is a setting too, and the agent key is its one exception.**
+`command = ""` opens the window on a shell — `tmux.Spec` has always honored a
+blank that way, and it is the only way a repo asks for a window with no agent in
+it — so `Load` defaults both command keys on `!Explicit(...)` as it does
+`ticket_pattern`. The exception is `agent`, which fills a blank command however
+the blank got there: `agent = "claude"` plus `command = ""` runs claude, and a
+repo that wants the shell drops the agent key as well. That fill is *recorded*
+(`Config.AgentFilled`), because once it has happened an explicit blank and an
+absent key are the same value — and `setup --refresh` has to tell them apart or
+it writes the module's own command back as a setting that stops following it.
+
 **An empty `ticket_pattern` is a setting, not a missing one.** `Load` defaults it
 on `!Explicit("ticket_pattern")` rather than on `== ""`, because `""` is how a
 repository that tracks no tickets turns the search off — collapsing that back to

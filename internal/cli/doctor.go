@@ -486,7 +486,13 @@ func checkConfig(env *Env, r *report, name string) *config.Config {
 	} {
 		words := strings.Fields(setting.command)
 		if len(words) == 0 {
-			r.addf(levelWarn, setting.label, "blank — the window would open running nothing")
+			// A setting rather than a fault: a blank command opens the window
+			// on a shell, which is how a repository asks for a window with no
+			// agent in it. It is still said, unlike the ordinary command that
+			// merely works, because what follows from it — an AGENT column
+			// that never fills and no state ever reported — is otherwise a
+			// silence somebody eventually files as a bug.
+			r.addf(levelOK, setting.label, "blank — the window opens a shell, and no agent reports state")
 			continue
 		}
 		if _, err := exec.LookPath(words[0]); err != nil {

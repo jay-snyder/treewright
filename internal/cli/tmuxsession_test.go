@@ -572,6 +572,44 @@ func TestTheWorktreesWindowIsFoundHoweverWindowsAreArranged(t *testing.T) {
 	}
 }
 
+// TestABlankCommandLeavesAShellInTheWindow is what `command = ""` buys, proved
+// against a real server rather than asserted about the config.
+//
+// tmux is handed no command at all — newWindow omits a blank rather than
+// passing an empty string, which would have tmux run nothing and close the
+// window immediately — so the pane ends up running the server's own
+// default-shell. That is the discriminator: with the old collapse the window
+// ran the fixture's stubbed claude, which exits at once and takes the window
+// with it.
+func TestABlankCommandLeavesAShellInTheWindow(t *testing.T) {
+	requireTmux(t)
+	f := newFixture(t, "command = ''\n")
+
+	r := f.exec("new", "eng-1")
+	if r.err != nil {
+		t.Fatalf("new: %v\n%s", r.err, r.both())
+	}
+
+	id := windowIDNamed(t, "proj", "ENG-1")
+	shell, err := tmuxctl(t, "show-options", "-gv", "default-shell")
+	if err != nil {
+		t.Fatalf("ask tmux for its default shell: %v\n%s", shell, err)
+	}
+	want := filepath.Base(shell)
+	got, err := tmuxctl(t, "display-message", "-p", "-t", id, "#{pane_current_command}")
+	if err != nil {
+		t.Fatalf("read the pane's command: %v\n%s", err, got)
+	}
+	if got != want {
+		t.Errorf("pane runs %q, want tmux's default-shell %q — a blank command must leave a shell", got, want)
+	}
+	// And it is a window like any other: found by the worktree treewright
+	// stamped on it, so resume switches to it rather than opening a second.
+	if stamped := windowStamp(t, "ENG-1", "@treewright_worktree"); stamped != f.DirFor("eng-1") {
+		t.Errorf("window records worktree %q, want %q", stamped, f.DirFor("eng-1"))
+	}
+}
+
 // TestAFailingCommandKeepsItsWindowOpen is the visibility a vanishing window
 // takes away. tmux closes a window as soon as its command exits, so a `command`
 // that cannot start — a typo, a tool not installed, a config the tool rejects —
