@@ -1,5 +1,9 @@
 # treewright
 
+[![CI](https://github.com/jay-snyder/treewright/actions/workflows/ci.yaml/badge.svg)](https://github.com/jay-snyder/treewright/actions/workflows/ci.yaml)
+[![Release](https://img.shields.io/github/v/release/jay-snyder/treewright)](https://github.com/jay-snyder/treewright/releases)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+
 Give every piece of work its own git worktree, tmux window, and agent session.
 One command to start it, one to tear it down.
 
@@ -18,7 +22,7 @@ treewright is the part git leaves out:
 tw new eng-2318-cart-total-rounding
 ```
 
-That gets you:
+That one line gets you:
 
 - a checkout at `~/code/storefront-eng-2318-cart-total-rounding`
 - a branch `john/eng-2318-cart-total-rounding`, forked off the latest `origin/main`
@@ -30,14 +34,13 @@ Add `--prompt "the cart total rounds down at checkout"` and the agent in that
 window starts on it before you've even switched to it — `tw new` stops being
 "prepare a desk" and becomes "assign the work".
 
-That example carries a ticket key, because the repo it comes from uses one.
-Nothing here needs one: `tw new dark-mode-toggle` is the same command, and gets
-you the same worktree, branch and window. See [Do I need a ticket
-system?](#do-i-need-a-ticket-system).
-
 Do that three times and `prefix + T` switches between all three from anywhere,
 including from inside a running agent. When the PR merges, `tw rm eng-2318`
 takes the whole thing away, and stops you if there's unpushed work in there.
+
+No ticket system required. The examples carry a key because the repo they come
+from does; `tw new dark-mode-toggle` is the same command and gets you the same
+worktree, branch and window.
 
 ## One session per repo
 
@@ -56,9 +59,9 @@ tmux session "checkout-api"
 └── PAY-88  ~/code/checkout-api-pay-88-idempotency-keys
 ```
 
-`MAIN` is your home base. It sits in the main checkout, parked on `main`. Start
-new work from there, ask your general questions there, and keep feature work out
-of it.
+`MAIN` is home base, and `tw base` opens it from anywhere. It sits in the main
+checkout, parked on `main` — start new work there, ask your general questions
+there, and keep feature work out of it.
 
 ## Install
 
@@ -66,31 +69,21 @@ of it.
 brew install jay-snyder/tap/treewright
 ```
 
-You get two names for one binary: `treewright`, and `tw`, which is the one
-you'll actually type. The cask pulls in git and tmux, and clears the quarantine
-flag macOS puts on unsigned downloads.
+Two names for one binary: `treewright`, and `tw`, which is the one you'll
+actually type. The cask brings git and tmux along and clears the quarantine flag
+macOS puts on unsigned downloads.
 
-The cask is macOS only. On Linux, grab a tarball from
-[releases](https://github.com/jay-snyder/treewright/releases) or:
+Not on macOS? Grab a tarball from
+[releases](https://github.com/jay-snyder/treewright/releases), or:
 
 ```sh
 go install github.com/jay-snyder/treewright@latest
 ```
 
-That puts the binary in `$(go env GOPATH)/bin`, which is not on your `PATH`
-unless you have put it there. Check before going on:
-
-```sh
-command -v treewright
-```
-
-If that prints nothing, add the directory to your `PATH`. Both setup steps below
-run `treewright` to get their output, and so does everything after them.
-
 ### Set up your shell
 
-Add one line to your shell's startup file. It defines `tw`, sets up tab
-completion, and lets `tw cd` move your shell:
+One line in your shell's startup file defines `tw`, turns on tab completion, and
+lets `tw cd` actually move your shell:
 
 ```sh
 # in ~/.zshrc
@@ -103,23 +96,17 @@ eval "$(treewright shell-init bash)"
 treewright shell-init fish | source
 ```
 
-Open a new terminal afterwards, or re-source the file, and `tw` is there.
-
-That line runs `treewright`, so an unreachable binary makes it print
-`command not found` and define nothing — the error names your startup file,
-not the `PATH` behind it. If you put the `go install` directory on your `PATH`
-in a login-only file like `~/.profile`, `~/.zprofile` or `~/.bash_profile`, a new
-terminal is not enough to pick it up: log out and back in.
+Open a new terminal, or re-source the file, and `tw` is there.
 
 ### Set up tmux
 
-Add one line to `~/.tmux.conf`:
+One line in `~/.tmux.conf`:
 
 ```tmux
 run-shell 'treewright tmux-init --apply'
 ```
 
-That binds two keys, which open a popup over whatever's running — a treewright
+That binds two keys. Both open a popup over whatever's running — a treewright
 window runs your agent as the window's command, so there's no shell in there to
 type into:
 
@@ -128,36 +115,49 @@ type into:
 | `prefix + T` | Pick a worktree and jump to it |
 | `prefix + N` | Type a slug, get a worktree |
 
-`run-shell` looks up `treewright` in the tmux server's `PATH`, not your shell's,
-and tmux says nothing when a line in your config fails. So if the keys do nothing,
-make treewright reachable and then restart the server with `tmux kill-server` — a
-running server keeps the `PATH` it started with, and a new window inherits it.
-
-Both are unbound in stock tmux. If your config already uses them, choose your
-own by adding flags to the same line:
+Both keys are free in stock tmux. Already using them? Pick your own on the same
+line:
 
 ```tmux
 run-shell 'treewright tmux-init --apply --resume-key G --new-key C-n'
 ```
 
+### If something didn't take
+
+`tw doctor` checks all of it and names whatever is missing. Three answers cover
+almost every case:
+
+- **`tw: command not found`** — the `eval` line ran before `treewright` was
+  reachable, so it defined nothing. Note that a `PATH` set in a login-only file
+  like `~/.profile`, `~/.zprofile` or `~/.bash_profile` needs a logout to take;
+  a new terminal isn't enough.
+- **The keys do nothing** — `run-shell` searches the tmux server's `PATH`, not
+  your shell's, and tmux stays quiet when a line in your config fails. Make
+  treewright reachable, then `tmux kill-server`: a running server keeps the
+  `PATH` it started with.
+- **`go install` finished, `treewright` isn't found** — it went to
+  `$(go env GOPATH)/bin`, which is on your `PATH` only if you put it there.
+
 ## Getting started
 
-Go to the repo you want to work in and run two commands:
+From inside the repo you want to work in:
 
 ```sh
 tw setup      # writes a config for this repo
-tw doctor     # tells you if anything's missing
+tw doctor     # confirms it's all wired up
 ```
 
-`setup` works out most of it for you: where your main checkout is, which branch
-to fork from (it reads `origin/HEAD`), your branch prefixes — read off the
-branches already on origin, or your git email if they say nothing — and
-which gitignored `.env` files to carry into new worktrees. It prints every guess
-and writes them to a commented TOML file that says which values it detected and
-which it guessed, so fixing a bad one is a two-second edit. The email-derived
-branch prefix is the one worth a look: a git address that names a forge rather
-than a person gives you a namespace called `codeberg/`. Use `--dry-run` if
-you'd rather look before it writes anything.
+`setup` works the rest out for you, and shows its work:
+
+- **your main checkout, and the branch to fork from** — read from `origin/HEAD`
+- **your branch prefixes** — read off the branches already on origin, or from
+  your git email if they say nothing
+- **the gitignored `.env` files** a fresh worktree needs
+
+Those go into a commented TOML file marking what it detected and what it
+guessed, so correcting one is a two-second edit — and `--dry-run` looks without
+writing anything. Give the email-derived prefix a glance, though: a git address
+that names a forge rather than a person gets you a namespace called `codeberg/`.
 
 After that it's four commands:
 
@@ -167,6 +167,17 @@ tw ls                                 # what's going on
 tw resume eng-2318                    # back to that window from anywhere
 tw rm eng-2318                        # PR merged, clean it up
 ```
+
+Prefixes are enough. `tw cd eng-2318` finds `eng-2318-cart-total-rounding` and
+tells you that's what it did. A prefix matching two worktrees is an error
+listing both, because guessing on `tw rm` is how people lose work.
+
+Started something in your main checkout before realizing it wanted a branch?
+`tw move eng-2318` builds the worktree exactly as `new` does and carries the
+uncommitted changes over. Nothing is cleared out of the checkout until the work
+has demonstrably arrived on the other side.
+
+`tw help` lists every command; `tw help <command>` has its flags and the detail.
 
 ## Seeing where everything stands
 
@@ -185,49 +196,15 @@ going stale.
 
 | Status | What it means |
 |---|---|
-| `dirty (n)` | `n` uncommitted files. Beats every other status, since it's the easiest thing to lose. |
+| `dirty (n)` | `n` uncommitted files. Outranks every other status, since it's the easiest thing to lose. |
 | `merged` | Landed on `origin/main`. Safe to delete, and `tw prune` will. |
 | `unpushed (n)` | `n` commits that exist nowhere else. `tw rm` won't touch it without `--force`. |
 | `active` | Pushed, not merged. An open PR. `tw prune` leaves these alone. |
 | `base` | Your main checkout. Not a worktree, never deleted. |
 
 Squash merges count as merged, which sounds obvious but isn't: a squash merge
-leaves none of your branch's commits upstream, so the usual check says your work
-is unpushed and refuses to clean up. treewright rebuilds the patch and asks git
-whether it already landed.
-
-With three agents running at once, the question the table can't answer from git
-alone is which one needs you. If your agent's hooks report what it's doing —
-they run `tw signal` with `working`, `waiting`, or `done` — the table grows an
-AGENT column saying exactly that, and a window whose agent is waiting on you
-gets a `!` in front of its name in the tmux status line. Agents that report
-nothing cost nothing: the column only exists once something has signaled.
-
-Any agent that can run a command when its state changes can report this way, and
-`tw agent-init claude` installs the wiring for the ones it knows. What it writes
-is a plugin — `.claude/skills/treewright/` in your main checkout, which claude
-loads whole on its next start — and it goes both directions: the hooks that fill
-the AGENT column, and a skill teaching the agent to drive treewright. Read
-what's in flight, spawn a sibling worktree with a prompt, respect the teardown
-guards — so you can ask the agent in your MAIN window to farm three jobs out to
-three worktrees and it knows exactly how.
-
-Nothing else is edited: no settings file, no dotfile, no `.gitignore`. Set
-`agent = "claude"` in the config and the plugin is carried into every new
-worktree, so the repos you use treewright in are wired and the ones you don't
-are untouched. Run it again after upgrading treewright and it updates the wiring
-in your main checkout in place — that's the reason it's a directory of
-treewright's own rather than a fragment you paste somewhere.
-
-The copies in your worktrees are a different matter: each got its own when it
-was created, and `tw agent-init` doesn't reach them. `tw refresh` rewrites all
-of them, and `tw doctor` names any that have fallen behind. See
-[Upgrading](#upgrading).
-
-Since it won't write your `.gitignore` for you, that directory shows up as
-untracked until you decide what it is: ignore it and the wiring stays yours,
-commit it and everyone who clones gets it. `tw doctor` keeps mentioning it until
-you've picked one.
+leaves none of your branch's commits upstream, so the usual check calls landed
+work unpushed and refuses to clean it up.
 
 Hit `prefix + T` and that same table becomes a menu, in a popup sized to fit it:
 
@@ -244,42 +221,9 @@ select 1-4 (Esc to cancel):
 One keypress, no Enter. Your main checkout is always row 1, so home base doesn't
 move around on you.
 
-## Commands
-
-| Command | What it does |
-|---|---|
-| `tw new <slug> [window-name]` | Fork a branch off the latest `origin/<base_branch>`, make the worktree, open a window on it. `--prompt` hands the agent its first instruction, `--prompt-file` points it at a brief too long to type |
-| `tw resume [slug]` | Go back to a worktree's window, or open it again — `--prompt` hands the agent its next instruction. Shows the menu if you don't name one |
-| `tw move <slug>` | Same as `new`, but carries the uncommitted work in your main checkout over into it. `--keep` leaves a copy behind |
-| `tw send <slug> <message>` | Type one line at the agent already running in that worktree's window, showing you the pane first. `--dry-run` just looks |
-| `tw cd [slug]` | Move your shell into a worktree |
-| `tw base [repo]` | Go to the main checkout's window |
-| `tw attach [repo]` | Attach this terminal to a repo's tmux session |
-| `tw ls [--json] [repo]` | The table above. Touches nothing |
-| `tw rm [-f] [-y] <slug>` | Delete the worktree, branch, stale remote ref, and window |
-| `tw prune [-y] [repo]` | Delete every merged, clean worktree. Lists them first unless you pass `--yes` |
-| `tw close <slug>` | Close a worktree's tmux window and nothing else. Works after the worktree is gone, which is what `rm` names it for |
-| `tw setup [-n] [--refresh] [name]` | Register the repo you're standing in, or regenerate its config in place |
-| `tw config [repo]` | Show the settings actually in force, defaults and all |
-| `tw doctor` | Check your install and every config you've registered |
-| `tw shell-init <shell>` | Print the shell integration for zsh, bash, or fish |
-| `tw tmux-init [--apply]` | Print the tmux integration, or load it straight into the server |
-| `tw agent-init [--global] [--print] <agent>` | Install the plugin that wires an agent to treewright — hooks in, skill out |
-| `tw refresh [repo]` | After an upgrade: rewrite the plugin in every checkout, reload the tmux bindings |
-| `tw version [--check]` | Print the version, and with `--check` say whether a newer one is out |
-
-`tw help <command>` has the details on any of them. There's also `tw popup`,
-which is what the key bindings run, and `tw signal`, which is what agent hooks
-run to fill the AGENT column; you won't type either yourself.
-
-You don't have to spell slugs out. `tw cd eng-2318` finds
-`eng-2318-cart-total-rounding` and tells you that's what it did. If a
-prefix matches two worktrees you get an error listing both, because guessing on
-`tw rm` is how people lose work.
-
-Output is pipe-friendly. stdout is the answer and nothing else, so
-`cd "$(tw new eng-2318)"` and `tw ls --json | jq` both do what you'd hope. The
-JSON always leads with your main checkout's row, even in a repo with no
+It pipes, too. stdout carries the answer and nothing else, so
+`cd "$(tw new eng-2318)"` and `tw ls --json | jq` both do what you'd hope, and
+the JSON always leads with your main checkout's row — even in a repo with no
 worktrees yet, so anything reading it has somewhere to start.
 
 ## Configuring it
@@ -303,24 +247,63 @@ ticket_pattern = '(?i)^(eng-[0-9]+)'  # names the window; "" if you don't track 
 tmux_session   = "shop"               # session for this repo (default: this file's name)
 ```
 
-`main_dir` is the only one you need, and `tw setup` writes the rest as a
-commented file explaining each one, so this is the shape rather than the manual.
-Misspell a key and you get an error instead of a setting that silently does
-nothing — or, if it came from a newer treewright than the one you're running,
-the error says that too. If you're unsure what's in effect, `tw config` prints
-the lot with defaults filled in, and `tw doctor` checks it.
+`main_dir` is the only one you need. `tw setup` writes the rest as a commented
+file explaining each key, so treat this as the shape rather than the manual. Not
+sure what's in effect? `tw config` prints the lot with defaults filled in, and
+`tw doctor` checks it. Misspell a key and you get an error rather than a setting
+that silently does nothing — and if the key came from a newer treewright than
+the one you're running, the error says so.
 
-Nothing that runs for you fails quietly. If `post_create` stops, the next `ls`,
-`cd` or `resume` for that worktree tells you which command it stopped at and where
-the log is. If `command` fails, its window stays open with the error still on
-screen rather than closing before you can read it. If the window never opened at
-all, `tw resume` starts the agent from scratch instead of trying to continue a
-conversation that was never had, and says that's what it's doing. And a
-`--prompt` too long for tmux to carry is refused before the worktree is made,
-rather than after.
+Nothing that runs for you fails quietly:
 
-You don't have to say which repo you mean. treewright matches on where you're
-standing, and that works from inside a worktree too.
+- **`post_create` stops** — the next `ls`, `cd` or `resume` on that worktree
+  names the command it stopped at and where the log is.
+- **`command` fails** — its window stays open with the error still on screen,
+  rather than closing before you can read it.
+- **The window never opened** — `tw resume` starts the agent fresh instead of
+  trying to continue a conversation that was never had, and says so.
+- **A `--prompt` too long for tmux to carry** — refused before the worktree is
+  made, not after.
+
+You never have to say which repo you mean, either. treewright matches on where
+you're standing, and that works from inside a worktree too.
+
+## Working with an agent
+
+Run three agents at once and the question git can't answer is which one needs
+you. So the ones that can report, do: an agent's hooks run `tw signal` with
+`working`, `waiting` or `done`, the table grows an AGENT column saying exactly
+that, and a window whose agent is waiting on you gets a `!` in front of its name
+in the tmux status line. Agents that report nothing cost nothing — the column
+appears only once something has signaled.
+
+Any agent that can run a command when its state changes can report this way, and
+`tw agent-init claude` installs the wiring for the ones treewright knows. It goes
+both directions:
+
+- **Hooks in**, which fill the AGENT column and the `!`.
+- **A skill out**, teaching the agent to drive treewright: read what's in
+  flight, spawn a sibling worktree with a prompt, respect the teardown guards.
+  Ask the agent in your MAIN window to farm three jobs out to three worktrees
+  and it knows exactly how.
+
+What it writes is a plugin — `.claude/skills/treewright/` in your main checkout,
+which claude loads whole on its next start. Nothing else is edited: no settings
+file, no dotfile, no `.gitignore`. Set `agent = "claude"` in the config and every
+new worktree gets a copy, so the repos you use treewright in are wired and the
+ones you don't are left alone.
+
+Since it won't write your `.gitignore` for you, that directory shows up as
+untracked until you decide what it is: ignore it and the wiring stays yours,
+commit it and everyone who clones gets it. `tw doctor` keeps mentioning it until
+you've picked one.
+
+Already have an agent running? `tw send eng-2318 "rebase on main first"` types
+one line into its window and presses Enter — where `--prompt` only reaches an
+agent that a `new` or `resume` actually starts, this reaches the one standing
+there. It shows you the pane first, every time: an agent sitting on a question
+with options takes your next keystrokes as the answer, so a message sent blind
+can pick an option nobody read.
 
 ## It won't let you lose work
 
@@ -332,11 +315,16 @@ standing, and that works from inside a worktree too.
 - Nothing destructive runs on a guess. An ambiguous slug is an error, not a
   coin flip.
 - `tw new` forks from `origin/<base_branch>`, so it tells you when your main
-  checkout is holding commits you haven't pushed: they aren't in the new
+  checkout is holding commits you haven't pushed — they aren't in the new
   worktree, and neither are the files they added.
+- The agent *is* the window's command, so closing a window while its agent is
+  `working` stops the work and loses the conversation with it. Anything that
+  closes one says so first. A warning rather than a refusal: a refusal would
+  need a `--force`, and those get passed by reflex.
 - Deleting a worktree strands its tmux window in a directory that no longer
-  exists, so treewright offers to close it for you. If that window is the last
-  one in the session, it says so first, because closing it would detach you.
+  exists, so treewright offers to close it for you — `tw close <slug>` does it
+  later if you decline. If that window is the last one in the session, it says
+  so first, because closing it would detach you.
 
 ## Upgrading
 
@@ -346,39 +334,35 @@ tw refresh                       # from a repo you use treewright in
 tw doctor                        # says whether anything is still behind
 ```
 
-Most of it keeps up on its own. The line in your shell startup file and the line
+Most of it keeps up on its own: the line in your shell startup file and the line
 in `~/.tmux.conf` both ask the binary for their own text, so a new shell and a
-new tmux server get the new version without you doing anything. Three things
-don't, and all three are quiet about it:
+new tmux server pick up the new version for free. Three things don't, and all
+three are quiet about it:
 
-- **Your worktrees.** Each gets its copy of the agent plugin when it's created,
-  and nothing looks at it again — so a worktree made before the upgrade keeps
-  running the old hooks and the old skill for as long as it lives. `tw refresh`
-  rewrites every copy and tells you which files moved where.
+- **Your worktrees.** Each got its copy of the agent plugin when it was created,
+  and nothing looks at it again — so one made before the upgrade keeps running
+  the old hooks and the old skill for as long as it lives. `tw refresh` rewrites
+  every copy and names what moved where.
 - **The tmux server you're attached to.** It keeps what it loaded at start,
-  which may have been weeks ago. `tw refresh` reloads the bindings, onto
-  whatever keys they're already on — if you moved them with `--resume-key`,
-  they stay moved.
-- **The shell you're sitting in.** Nothing can replace a function in a running
-  shell except that shell. Open a new terminal. `tw doctor` and `tw refresh`
-  both say when yours is out of date, since it's the one thing neither can fix.
+  which may have been weeks ago. `tw refresh` reloads the bindings onto whatever
+  keys they're already on.
+- **The shell you're sitting in.** Only that shell can replace its own
+  functions, so open a new terminal. `tw doctor` and `tw refresh` both say when
+  yours is out of date, since it's the one thing neither can fix.
 
 Your config file is yours and never gets rewritten behind you. When you want the
-newer commentary and any key added since, `tw setup --refresh` regenerates one
-in place: it keeps every setting you'd chosen and re-detects nothing, so a base
-branch or a prefix you corrected by hand stays corrected. `tw doctor` says when
-a config predates the generator.
+newer commentary and any key added since, `tw setup --refresh` regenerates one in
+place: it keeps every setting you'd chosen and re-detects nothing, so a base
+branch or a prefix you fixed by hand stays fixed.
 
 `tw version --check` asks GitHub whether there's a newer release and names the
 upgrade command for the route you installed by. It's the only thing here that
-touches the network, it only does it when asked, and `tw doctor` — which asks
-too — skips it in silence when you're offline.
+touches the network, and only when you ask it to.
 
 ## Uninstalling
 
-There's no uninstall script, and the list is short on purpose: treewright writes
-its own registry and nothing else outside a repository. Everything else is a line
-you pasted in yourself.
+Short list, on purpose: treewright writes its own registry and nothing else
+outside a repository. Everything else is a line you pasted in yourself.
 
 **Take the worktrees back first, while treewright is still here to do it** —
 afterwards they're ordinary git worktrees, removed one at a time by hand:
@@ -392,15 +376,15 @@ rm -r ~/.config/treewright          # the one thing it wrote for itself
 
 Then delete the `shell-init` line from your shell startup file and the
 `tmux-init` line from `~/.tmux.conf`. Agent hooks and skills were per-repo, so
-they leave with the repo. Leftover tmux sessions close with `tmux kill-session
--t <repo>`.
+they leave with the repo. Leftover tmux sessions close with
+`tmux kill-session -t <repo>`.
 
 ## Questions you might have
 
 ### Why not just use `git worktree`?
 
-You should, and treewright does. Git makes the directory. It doesn't copy your
-`.env` files, run your install step, name a tmux window after the work,
+You should, and treewright does — git makes the directory. What it doesn't do is
+copy your `.env` files, run your install step, name a tmux window after the work,
 remember which window belongs to which checkout, or stop you deleting a branch
 you never pushed.
 
@@ -417,31 +401,31 @@ one, or name a window outright with `tw new dark-mode-toggle DARKMODE`.
 
 ### Do I need to be using an AI agent?
 
-No, though that's what it was built for, and it shows. The defaults launch
+No, though that's what it was built for and it shows. The defaults launch
 `claude`, and the tmux key bindings exist because a window running an agent has
-no shell in it to type into. But `command` is just a shell command. Set it to
+no shell in it to type into. But `command` is just a shell command: set it to
 `nvim`, or to `""` for a window holding nothing but your shell, and you've got a
 worktree and tmux manager with no AI in it anywhere. Drop the `agent` key too if
-you have one: it supplies a command when yours is blank, which is the one place
+you have one — it supplies a command when yours is blank, which is the one place
 an empty setting doesn't win.
 
 ### Will it mess with my existing tmux setup?
 
 No. Every repo's windows go in their own session, named after its config. The
-one global thing the tmux snippet does is turn terminal titles on, and it's two
+one global thing the tmux snippet does is turn terminal titles on, and that's two
 lines you can delete.
 
 ### What if I'm not in tmux?
 
-Everything still works. Windows get created detached and treewright tells you
-how to attach. Without the shell integration, `tw cd` prints the path instead of
-moving you.
+Everything still works. Windows get created detached, and `tw attach` puts this
+terminal in a repo's session when you want one. Without the shell integration,
+`tw cd` prints the path instead of moving you.
 
-## More
+## Read more
 
-- `tw help <command>` for detail on anything above.
-- [`docs/design-notes.md`](docs/design-notes.md) if you want to know why it
-  behaves the way it does — with [`docs/tmux.md`](docs/tmux.md) for sessions,
-  windows and key bindings, and [`docs/agents.md`](docs/agents.md) for how an
-  agent reports what it is doing.
+- `tw help <command>` for detail on any command, including its flags.
+- [`docs/design-notes.md`](docs/design-notes.md) for why it behaves the way it
+  does — with [`docs/tmux.md`](docs/tmux.md) for sessions, windows and key
+  bindings, and [`docs/agents.md`](docs/agents.md) for how an agent reports what
+  it's doing.
 - [`CLAUDE.md`](CLAUDE.md) if you're working on treewright itself.
