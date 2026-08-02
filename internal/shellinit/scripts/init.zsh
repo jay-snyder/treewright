@@ -31,6 +31,7 @@ _treewright() {
     'popup:run a treewright command in a tmux popup sized to its output'
     'attach:attach this terminal to the repository tmux session'
     'signal:record the state of the agent running in this worktree'
+    'guard:refuse a tool call that would mutate another worktree'
     'ls:list worktrees with their status'
     'rm:tear down a worktree and its branch'
     'prune:remove every merged, clean worktree'

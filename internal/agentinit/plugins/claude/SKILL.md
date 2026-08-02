@@ -57,44 +57,45 @@ the env files in, starts the install step in the background, and opens a tmux
 window whose agent begins on the prompt. stdout is the new worktree's path and
 nothing else.
 
-**The work belongs to the agent in that window.** Asked to start a piece of work
-in a worktree, hand the work over in `--prompt` and let the agent there do it.
-Creating the worktree and then carrying out the work in your own session leaves
-an idle agent sitting in a window doing nothing while the work happens somewhere
-else entirely, which is the opposite of what the tool is for. That agent starts
-with none of this conversation, so whatever it needs — the plan, the file to
-start from, what finished looks like — belongs in the prompt.
+**A worktree is created with a prompt.** The work in it belongs to the agent in
+its window, so hand the work over and let that agent do it. Omitting the prompt
+readies a worktree for a *person* — name that out loud when it is what you mean;
+it is never where a command lands because the work was going to be done from
+here.
 
-The symptom is concrete, and it shows up long before the work is done:
-**editing files under a worktree path you just created means you have already
-got this wrong.** The path `new` prints is where that window's agent works, not
-a directory to go and work in yourself, so an Edit or a Write beneath it is the
-handoff not having happened. Notice it at the first one rather than at the end
-of the task.
+**Finished work is not an exception.** A branch that needs only a commit and a
+pull request still goes to the agent standing in it. There is no amount of
+work-remaining small enough to make doing it yourself the shorter path.
 
-Recovering from it is not what it looks like. `resume --prompt` does not repair
-a worktree whose agent was never told what to do: the window `new` opened is
-still there with that idle agent in it, so it is switched to, with the prompt
-warned as undelivered, and the instructions still reach nobody. Remove the
-worktree and make it again with the prompt it should have carried:
+**The tripwire is any command naming that worktree's path, run from here.** Not
+a principle to weigh — a thing to notice the first time it happens. An `Edit` or
+a `Write` beneath the path, `git -C <path> commit`, `cd <path> && …`, a
+`gh pr create` from inside it: each is the handoff not having happened. Reading
+that worktree is fine and always allowed; changing it is not.
+
+A `PreToolUse` hook refuses those, so this may arrive as a blocked tool call
+rather than as a rule you remembered. It means what the tripwire means: route
+the work to the agent rather than looking for a spelling the hook misses.
+
+**When the instructions depend on this conversation, write them to a file** and
+pass `--prompt-file`: a commit body arguing a design decision, a description
+recounting an audit. A fresh agent has none of that.
+
+    treewright new eng-142-null-user --prompt-file /tmp/eng-142-brief.md
+
+Recovering is not what it looks like. `resume --prompt` does not repair a
+worktree whose agent was never told what to do: the window is already open, so
+it is switched to and the prompt is warned as undelivered. While the worktree is
+clean — the state it is in whenever this is caught early — remove it and make it
+again with the prompt it should have carried:
 
     treewright rm eng-142-null-user
-    treewright new eng-142-null-user --prompt "the instructions that should have gone in"
+    treewright new eng-142-null-user --prompt-file /tmp/eng-142-brief.md
 
-While the worktree is clean and holds no commits that costs nothing, which is
-the state it is in whenever this is caught early. A refusal from rm is the guard
-under Clean up doing its job — there is work in there that exists nowhere else,
-and that is the person's to decide about rather than yours to force past.
-
-The other way is to hand the brief to that idle agent where it stands, under
-Continue or hand work onward. Remaking the worktree is the simpler story while
-it is empty; once there is anything in it worth keeping, reaching the agent in
-place is the only one of the two that works.
-
-Without `--prompt` the window opens on an agent waiting to be told what to do,
-which is a legitimate thing to want: a worktree readied for a person, or for
-work whose instructions do not exist yet. It is a choice to make rather than the
-default to fall into.
+A refusal from rm is the guard under Clean up doing its job: there is work in
+there that exists nowhere else, and that is the person's to decide about. Once
+the worktree holds anything worth keeping, reaching the idle agent where it
+stands — under Continue or hand work onward — is the only route left.
 
 - The slug may not contain "/". A leading "feature/" or "bug/" chooses a
   configured branch prefix — `treewright new bug/eng-142` — and one

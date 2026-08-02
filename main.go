@@ -37,8 +37,8 @@ func main() {
 	if err == nil {
 		return
 	}
-	if !errors.Is(err, cli.ErrUsage) && !errors.Is(err, cli.ErrSilent) {
-		// The two sentinels have reported themselves already. Printed through
+	if !errors.Is(err, cli.ErrUsage) && !errors.Is(err, cli.ErrSilent) && !errors.Is(err, cli.ErrRefused) {
+		// The three sentinels have reported themselves already. Printed through
 		// cli rather than here, so that an error saying what to do next on a
 		// second line is laid out the way every other message is.
 		cli.WriteError(os.Stderr, err)
@@ -48,9 +48,14 @@ func main() {
 	// path that reaches here, and nothing else says how to dismiss it.
 	cli.PopupHint(os.Stderr)
 
-	if errors.Is(err, cli.ErrUsage) {
+	if errors.Is(err, cli.ErrUsage) || errors.Is(err, cli.ErrRefused) {
 		// Invoked wrongly, and already told why. 2 distinguishes that from a
 		// command that ran and failed, which scripts sometimes need to tell apart.
+		//
+		// `guard` shares the code deliberately: an agent's PreToolUse hook blocks
+		// on 2 and on nothing else, so a refusal has to arrive as this number.
+		// Nothing reads the two apart — the caller of one is a shell and of the
+		// other an agent hook, and neither ever sees the other's exit.
 		os.Exit(2)
 	}
 	os.Exit(1)

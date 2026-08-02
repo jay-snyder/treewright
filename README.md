@@ -287,6 +287,11 @@ both directions:
   Ask the agent in your MAIN window to farm three jobs out to three worktrees
   and it knows exactly how.
 
+The hooks also hold the rule the skill teaches. A tool call that would change
+*another* worktree from outside its window is refused, and the refusal names the
+two commands that hand the work over instead. Reading another worktree is never
+blocked — that is how you review it.
+
 What it writes is a plugin — `.claude/skills/treewright/` in your main checkout,
 which claude loads whole on its next start. Nothing else is edited: no settings
 file, no dotfile, no `.gitignore`. Set `agent = "claude"` in the config and every

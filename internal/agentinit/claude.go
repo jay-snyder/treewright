@@ -31,7 +31,7 @@ import _ "embed"
 // manifest turns the directory treewright was already writing into a place the
 // hooks can live too, which makes the wiring treewright's to keep current.
 //
-// The hook mapping is the whole of the wiring: each hook fires on one of the
+// Four of the five hooks are the agent-state protocol: each fires on one of the
 // agent's own transitions and reports the matching signal state, so the AGENT
 // column of `ls` answers which window wants a person.
 //
@@ -43,6 +43,14 @@ import _ "embed"
 // SessionStart deliberately maps to nothing. A fresh window sits at the
 // agent's prompt because the human just made it, and signaling `waiting` there
 // would make every `new` open a window already demanding attention.
+//
+// The fifth runs the other way. `PreToolUse` is asked rather than told: it
+// hands the tool call to `treewright guard`, which refuses one that would
+// mutate a worktree other than the one this agent is standing in. The skill
+// teaches the same rule in prose, and prose alone did not hold it — see
+// "Enforcing the handoff" in docs/agents.md. Its matcher names the tools whose
+// calls are worth reading, and it has to agree with the list in the guard
+// itself, which TestTheGuardAndItsMatcherAgree checks.
 //
 // `--continue` is what makes resuming per-worktree exact: each worktree is its
 // own directory, and claude resumes the session that last ran in the directory

@@ -223,14 +223,106 @@ agent may weigh before asking eventually becomes the reason it does not ask.
 The handoff rule fails differently, and shows what a stated principle is worth
 on its own. "The work belongs to the agent in that window" was read and then
 ignored twice in one conversation, because a value gives an agent nothing to
-notice itself doing. The guide now names the symptom — editing files under a
-worktree path you just created — and the recovery, which is the part that could
-not be guessed: `resume --prompt` looks like the repair and is not, since a
-window already open is switched to with the prompt warned as undelivered, so the
+notice itself doing. The guide names the symptom — a command naming a worktree
+path you just created — and the recovery, which is the part that could not be
+guessed: `resume --prompt` looks like the repair and is not, since a window
+already open is switched to with the prompt warned as undelivered, so the
 worktree has to be removed and remade. That recovery is cheap exactly while the
 worktree is clean and unpushed, and the `rm` guards refuse it precisely when it
 would stop being cheap — the guide can recommend it without a caveat about
 losing work, because the CLI already holds that line.
+
+That paragraph was revised five times and the rule still failed, which is what
+the next section is about.
+
+### Enforcing the handoff
+
+**Prose that has been rewritten five times and still leaks is not a wording
+problem.** The handoff rule — hand a worktree's work to the agent in its window,
+do not carry it out from the window you are in — went through five revisions and
+failed again in the same turn an agent read it. The failure was never ignorance.
+It was rationalization, and three properties of the text made it available:
+
+- **The escape hatch was cover.** "Without `--prompt` the window opens on an
+  agent waiting to be told what to do, which is a legitimate thing to want" was
+  written to describe a real case — a worktree readied for a person. An agent
+  that had already decided to do the work itself classified into it and moved
+  on. A named alternative is a named permission; it now survives only as
+  something said out loud, never as what a command falls into by omission.
+- **The tell named two tools.** "An Edit or a Write beneath it is the handoff
+  not having happened" is checkable, which was the point — but the agent used
+  neither. It ran `git -C <worktree> commit` and `cd <worktree> && gh pr create`
+  from the window it was already in, and its self-check passed honestly. The
+  tell is now any command naming that path, with `git -C`, `cd` and `gh` spelled
+  out, and stated as a tripwire rather than a principle: principles get weighed.
+- **Finished work was not ruled on.** Every example was work in progress. The
+  case that arose was work already complete, with only a commit and a pull
+  request left, and nothing said which way that goes — so the agent decided.
+  **Publishing is not an exception**: a worktree is created with a prompt, full
+  stop, and where the instructions depend on session context a fresh agent
+  cannot have — a commit body arguing a design decision, a description
+  recounting an audit — the caller writes a file and passes `--prompt-file`.
+  There is deliberately no judgment left in it.
+
+**And the prose stopped being the only line of defence.** The plugin's
+`PreToolUse` hook runs `treewright guard`, which refuses a tool call that
+mutates a worktree other than the one the calling agent is standing in. A hook
+fires whether or not the agent has talked itself into something, which is the
+property no revision of the text could have.
+
+**It is a subcommand rather than a shell script**, and that is the same call
+`signal` made. treewright already knows every worktree path, which configs are
+registered, and where the caller is standing; a shell reimplementation globbing
+sibling directories would drift from `git worktree list` the first time somebody
+moved a checkout, and it would have to be right about path containment, which
+is where a string-prefix comparison quietly says `<main>-eng-12` is inside
+`<main>-eng-1`.
+
+**What it refuses, and what it must not.** A write into another worktree: an
+edit under its path, a `git -C <path>` that is not a read, a `cd <path>`
+followed by anything that changes it, a redirect into it. Reads are always
+allowed — reviewing another agent's work is the ordinary way to check on it, and
+a guard that made review expensive would be worked around rather than obeyed —
+and so is everything treewright's own commands do, `rm`, `close`, `resume` and
+`send` being both full of worktree paths and the way out the refusal names.
+
+The read/write split is a closed list of read-only programs and git subcommands,
+with everything absent from it treated as a write. That is conservative in one
+direction on purpose: nothing is consulted until a command has already been
+found reaching into somebody else's worktree, where the question is not "is this
+safe" but "is this a review". The list deliberately omits the commands that read
+in one form and write in another — `git branch` lists branches and also deletes
+them — because splitting those on their flags would put a second, subtler parser
+in the guard for a question `ls --json` already answers without touching the
+worktree at all.
+
+**It is silent and permissive out of scope, and for a sharper reason than
+`signal` has.** Outside tmux, outside a registered repository, outside git, in a
+repository with no worktrees, on a payload it cannot parse, on a tool it does
+not know, or invoked with arguments it does not understand — exit 0, print
+nothing, allow. `signal` is quiet out of scope because a hook that nags gets
+ripped out; this one can *block*, and a refusal fired where treewright has no
+business is not a nag but work somebody has to argue their agent past.
+
+**Being invoked wrong is one of those out-of-scope cases**, which is the one
+place `guard` steps outside the "Adding a subcommand" checklist. A PreToolUse
+hook blocks on exit 2 and on nothing else, and `ErrUsage` is also exit 2 — so a
+`guard` that returned a usage error would refuse every tool call in the session
+and hand back its own help text as the reason. Every other non-zero exit is a
+note in the transcript with the call allowed through, so the fail-open direction
+is the default one.
+
+**The refusal is the point of the hook, not a side effect of it.** A refusal
+that only refuses teaches an agent to look for a spelling that gets past it;
+one that names the fix ends the turn the way it should have gone. So it names
+the worktree, what was refused, and the two commands that reach the agent
+standing there — through the same message writers as everything else, because
+the agent reads it now and the maintainer reads it in the transcript later.
+
+**The window is deliberately not part of the test.** The guard asks where the
+work lives, not whether anyone is currently home: a worktree whose window has
+been closed is exactly the state an agent could manufacture to get past a
+window-shaped rule, and `resume --prompt` is the way back into one either way.
 
 ### Procedure belongs in the binary, not in the guide
 

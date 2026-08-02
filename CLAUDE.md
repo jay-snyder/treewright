@@ -159,6 +159,7 @@ ldflags. Validate config changes with `goreleaser check`.
 | `internal/cli/message.go` | How a message is shaped on the way out: `progressf`/`warnf`/`errorf`, the continuation indent, `asLines`, `under`, `count`. |
 | `internal/cli/popup.go` | `popup`, popup sizing, the no-worktrees message. |
 | `internal/cli/signal.go` | `signal`: the agent-state protocol's one verb, run by agent hooks. |
+| `internal/cli/guard.go` | `guard`: the PreToolUse decision, run by agent hooks — which tool calls may change another worktree, and the shell reader that answers it. |
 | `internal/cli/eval.go` | The eval-file protocol and shell quoting. |
 | `internal/cli/init.go` | `shell-init`, `tmux-init`, `agent-init`, `__complete`. |
 | `internal/cli/version.go` | What `version` reports: the ldflags stamp, else the build info — and `--check`. |
@@ -183,8 +184,11 @@ anything in them.
 looks the name up in the `commands` table → the command calls `resolveConfig("")`
 (explicit name wins, else the repo you are standing in) → talks to
 `internal/git` and `internal/tmux` → returns an error or nil. `main` translates:
-`ErrUsage` → exit 2, `ErrSilent` → exit 1 silently, any other error → printed as
-`error: ...` then exit 1.
+`ErrUsage` → exit 2, `ErrSilent` → exit 1 silently, `ErrRefused` → exit 2
+silently, any other error → printed as `error: ...` then exit 1. `ErrRefused`
+shares a code with `ErrUsage` because the code was chosen by somebody else: a
+PreToolUse hook blocks on 2 and on nothing else. Nothing reads the two apart —
+one is answered to a shell and the other to an agent hook.
 
 ## Invariants that are easy to break
 
@@ -198,7 +202,8 @@ and `tw ls --json | jq` must both stay clean. Enforced by
 code. That is what makes every command testable through `Run`.
 
 **No globals for I/O.** Streams, args, and the eval file arrive on `Env`. Tests
-point them at buffers.
+point them at buffers — `Env.Stdin` included, which only `guard` reads, and
+which is on `Env` rather than taken from `os.Stdin` for exactly that reason.
 
 **Argv0 vs. the canonical name.** Anything the user is told to *type* uses
 `env.Argv0` (`tw`, usually). Anything destined for a *file* a program reads —
@@ -438,6 +443,30 @@ command, so agent death is state death — and the `!` waiting marker is display
 only: `tmux.Windows` strips it at parse, so `Window.Name` is always the clean
 name. The held-open wrapper is the one place a window outlives its agent, and it
 clears both itself. See "Agent state" in `docs/agents.md`.
+
+**`guard` is `signal`'s discipline with a sharper reason, and it is the one
+command that never returns a usage error.** It reads a PreToolUse payload on
+stdin and refuses a tool call that would mutate a worktree other than the one
+the calling agent stands in — the handoff rule made mechanical, after five
+revisions of the prose failed to hold it. Everything out of scope exits 0 in
+silence, as `signal` does, and the reason is stronger here: `signal` nags, where
+this one *blocks*, and a refusal fired where treewright has no business is work
+somebody has to argue their agent past. A PreToolUse hook blocks on exit 2 and
+on nothing else, which is why the refusal is `ErrRefused` — and why being
+invoked wrong is out of scope rather than an `ErrUsage`, that being exit 2 as
+well: a mis-wired hook would otherwise refuse every tool call in the session and
+hand back this command's help as the reason.
+
+**Reads of another worktree are never refused, and neither is treewright
+itself.** Reviewing another agent's work is the ordinary way to check on it, and
+the two commands the refusal names — `resume --prompt-file` and `send` — are
+full of the worktree path it just refused. The read/write split is a closed list
+of read-only programs and git subcommands with everything else treated as a
+write, which is only conservative in appearance: nothing consults it until a
+command has already been found reaching into somebody else's worktree. The
+plugin's PreToolUse matcher and `guardedTools` must name the same tools, which
+`TestTheGuardAndItsMatcherAgree` holds. See "Enforcing the handoff" in
+`docs/agents.md`.
 
 **An integration that propagates an upgrade must be able to say which
 treewright it came from.** The shim, the tmux snippet and the plugin all follow
