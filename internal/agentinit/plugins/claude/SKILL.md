@@ -41,6 +41,9 @@ One JSON object per checkout:
   Empty when nothing has signaled.
 - `ahead`/`behind` measure against origin's base branch, and
   `null` means the comparison was impossible — unknown, not zero.
+- `window_is_current` marks the window you are running in, and
+  `window_last_in_session` the window whose closing would end its session.
+  Both matter under Clean up, and both are false where no window is open.
 - The listing does not fetch, so a branch merged since the last fetch still
   reads active; rm and prune fetch before they judge, and they are the ones to
   trust.
@@ -93,10 +96,6 @@ which is a legitimate thing to want: a worktree readied for a person, or for
 work whose instructions do not exist yet. It is a choice to make rather than the
 default to fall into.
 
-- Commits sitting unpushed in the base checkout are invisible to a new worktree,
-  which forks from origin rather than from the checkout beside it — files added
-  in those commits do not exist there at all. Read the base row's `unpushed`
-  from `ls --json` before `new`, and get them pushed first.
 - The slug may not contain "/". A leading "feature/" or "bug/" chooses a
   configured branch prefix — `treewright new bug/eng-142` — and one
   the repository has not configured is refused rather than guessed at.
@@ -105,55 +104,45 @@ default to fall into.
 
 ## Hand over a long brief
 
-    treewright new eng-142-null-user --prompt "read /tmp/eng-142-brief.md in full — it is your complete brief"
+    treewright new eng-142-null-user --prompt-file /tmp/eng-142-brief.md
 
-Anything longer than a few sentences goes in a file, and the prompt is one line
-pointing at it. That is the default for a handoff worth the name rather than a
-fallback for when something breaks: `--prompt` is interpolated into a tmux
-command line, tmux has a hard ceiling on how long a command it will run, and
-quoting the text into that line inflates it — so a brief long enough to be worth
-writing gets there sooner than its size suggests. Past the ceiling `new` refuses
-and creates nothing at all: no branch, no worktree, nothing half-made to clean
-up, and the way on from the error is this one anyway.
+Anything longer than a few sentences goes in a file, and `--prompt-file` writes
+the prompt: one line telling the agent to read that file in full. That is the
+default for a handoff worth the name rather than a fallback for when something
+breaks. The agent can read the file again after a compaction, when the prompt it
+started on is long gone, and it outlives the session that wrote it. It is also
+the shape that reaches an agent whose window is already open, under Continue or
+hand work onward.
 
-The file is worth it well before the ceiling. The agent can read it again after
-a compaction, when the prompt it started on is long gone, and it outlives the
-session that wrote it. It is also the shape that reaches an agent whose window
-is already open, under Continue or hand work onward.
+`--prompt` is the same setting for an instruction short enough to type — passing
+both is an error — and it is refused past the length tmux will run a command of,
+before anything at all is created. `--prompt-file` has no such limit.
 
-Write it to /tmp. Inside the new worktree is the obvious place and it is the
-wrong one: a BRIEF.md in the checkout arrives as an untracked file in the diff
-somebody reviews. `.git/` is the trap that looks like the answer — it stays out
-of `git status`, so it feels tidy, and that is exactly why nothing will ever
-remove it and nobody will ever see it again. Delete the file once the work has
-landed, wherever it went; /tmp is cleared eventually, and eventually is not
-cleanup.
+treewright neither copies the file nor deletes it, so it has to stay where it is
+for as long as the agent may want it. Delete it once the work has landed;
+nothing else will.
 
 ## Move work already started in the base checkout
 
+    treewright move eng-142-null-user --prompt "carry on with the null-user fix"
+
 Typing in the main checkout and then realizing the change wants a branch of its
-own is ordinary. Move it as a patch, in this order:
+own is ordinary. `move` makes the worktree exactly as `new` does — same fork
+point, same window, same `--prompt` and `--prompt-file` — and carries the
+uncommitted work into it: staged and unstaged changes, and the files git does
+not yet track. Files git ignores stay where they are, those being what gets
+copied into every worktree anyway.
 
-    cd <main checkout>
-    git add -N .                             # so files not yet tracked reach the diff
-    git diff HEAD > /tmp/wip.patch
-    treewright new eng-142-null-user --prompt "carry on with the null-user fix"
-    git -C <new worktree> apply --3way /tmp/wip.patch
-    git -C <new worktree> diff HEAD --stat   # confirm the same work arrived
+Do not do this by hand. Until the work is somewhere else the main checkout is
+the only copy of it, and what protects it is an ordering `move` holds to: write
+the patch, apply it in the worktree, check that it arrived, and only then clear
+the checkout. A failure before that check leaves the checkout untouched and
+names the patch. `git stash` is especially the wrong reach — one stash stack is
+shared by every worktree of a repository, so a `pop` in the wrong checkout is a
+keystroke away and the work is then in neither place you expected.
 
-`--3way` applies through the index, so the work lands staged in the worktree —
-which is why the check is `diff HEAD` and not `diff`, the latter having nothing
-to show and reading exactly like a patch that never applied.
-
-Only once that has been confirmed, clear the base checkout — `git reset` to undo
-the `add -N`, `git checkout -- .` for the tracked changes, and delete by hand the
-files it created, which `checkout` does not touch. The order is the whole point:
-until the patch has landed in the worktree the base checkout is the only copy of
-that work, so it is the last thing to touch and never the first.
-
-`git stash` is the wrong reach here. One stash stack is shared by every worktree
-of a repository, so a `pop` in the wrong checkout is a keystroke away, and the
-work is then in neither place you expected.
+`--keep` leaves the work in the main checkout as well, for when you want it in
+both places.
 
 ## Continue or hand work onward
 
@@ -165,25 +154,25 @@ that was already open is switched to instead, with a warning that the prompt
 went undelivered.
 
 That warning is not the end of the road. The agent in that window is an ordinary
-TUI on an ordinary tty, so tmux can type at it:
+TUI on an ordinary tty, and `send` types at it:
 
-    treewright ls --json                      # window_id, e.g. "@16"
-    tmux capture-pane -p -t @16 | tail -20    # look before you type
-    tmux send-keys -t @16 -l "read /tmp/eng-142-review.md and address the comments in it"
-    tmux send-keys -t @16 Enter
+    treewright send eng-142 "read /tmp/eng-142-review.md and address the comments in it"
 
-Read the pane first. An agent sitting on a question with options takes
-keystrokes as the answer to it, and `capture-pane` changes nothing and costs
-nothing; typing blind is how you choose an option you never saw. `-l` sends the
-string literally — without it tmux reads the words as key names and the message
-arrives mangled — and `Enter` is a separate call for the same reason, since
-under `-l` it would arrive as five characters.
+What the window is showing is printed before anything is typed, and it is worth
+reading: an agent sitting on a question with options takes keystrokes as the
+answer to it, so a message sent to one answers a question you never saw.
+`--dry-run` shows that and sends nothing, for when looking is all you wanted.
 
-Send one line. Enter is what submits in these TUIs, so a message with a newline
-in it submits at the first one and posts the rest as further turns: anything
-longer goes in a file and the line names it, exactly as a long brief does. A
-message that lands mid-turn is queued and picked up when that turn ends, so this
-works whether the row reads `working` or `waiting`.
+One line. Enter is what submits in these TUIs, so a message with a newline in it
+is refused rather than posting the rest as further turns: anything longer goes
+in a file and the line names it, exactly as a long brief does. A message that
+lands mid-turn is queued and picked up when that turn ends, so this works
+whether the row reads `working` or `waiting`.
+
+It refuses the window you are running in — typing at yourself puts the message
+into this session, ahead of whatever you were answering — and a window whose
+command has died and is being held open on its output, there being no agent
+left in it to reach.
 
 `waiting` is the case this is for — that agent is blocked on a person, and this
 is how it gets unblocked without one walking over to the window. It is still
@@ -202,18 +191,19 @@ work that exists nowhere else: do not pass --force on your own judgment —
 surface the refusal and let the person decide.
 
 Removal empties the work's tmux window, and with no tty on this end treewright
-prints `tmux kill-window -t @<id>` for each one rather than asking. That line
-is not homework to hand back: put the question to the person with
-AskUserQuestion, and run the command yourself if they say yes. Ask with the
-caveat treewright printed above it — a window that is the last in its session
-ends the session with it, and detaches whoever was attached.
+prints the command that closes each one rather than asking. That line is not
+homework to hand back: put the question to the person with AskUserQuestion, and
+run the line treewright printed if they say yes. Ask with the caveat treewright
+printed above it — a window that is the last in its session ends the session
+with it, and detaches whoever was attached, which `window_last_in_session` in
+the JSON also says.
 
 **The window you are running in is asked about like every other one**, and it is
 the case the question exists for. An agent asked to tear down the worktree it is
 standing in meets that window every time, so exempting it is an exception that
 swallows the rule: nothing gets asked, and the person is handed back exactly the
-printed command the paragraph above refuses to hand back. `tmux display-message
--p '#{window_id}'` tells you which id is your own.
+printed command the paragraph above refuses to hand back. `window_is_current`
+says which one is yours.
 
 What being your own window changes is the ordering, not the question. Closing it
 ends this session, so a yes on it is honoured last — after the final message
