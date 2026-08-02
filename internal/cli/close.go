@@ -67,6 +67,7 @@ func cmdClose(env *Env, args []string) error {
 	// to report from — and closing a session's last window can detach the client
 	// that would have read it. A message that arrives only when nothing important
 	// happened is not a message.
+	warnIfAgentWorking(env, window)
 	env.progressf("closing tmux window %s%s", window.Name, under(strings.Join(closeCosts(window), "\n")))
 	if err := tmux.KillWindow(window.ID); err != nil {
 		return err
@@ -99,6 +100,33 @@ func closeTarget(env *Env, cfg *config.Config, slug string) (name, dir string) {
 		}
 	}
 	return slug, cfg.DirFor(slug)
+}
+
+// warnIfAgentWorking says so before a window closes with an agent still working
+// in it.
+//
+// The agent is the window's command, so there is no detaching from this and
+// coming back: closing the window stops the work and takes the session with it.
+// That is the one thing about a window treewright knows and the caller may not,
+// since the state comes from the agent's own hooks rather than from anything
+// visible in the window's name.
+//
+// It warns rather than refuses. The caller asked to close this window, and
+// treewright is in no position to judge whether what the agent is doing still
+// matters — a refusal would need a --force to get past, which is a flag people
+// learn to pass by reflex. What a warning buys is that the loss is on the record
+// at the moment it happens rather than discovered later, and that is also why it
+// is said before the window goes: afterwards there may be no session left to say
+// it in.
+//
+// Only `working` warns. `waiting` is an agent blocked on a person and `done` is
+// one with nothing in flight — those are the states an ordinary teardown closes,
+// and a warning that fires on the ordinary case is one that stops being read.
+func warnIfAgentWorking(env *Env, window tmux.Window) {
+	if window.State != stateWorking {
+		return
+	}
+	env.warnf("the agent in %s says it is working\nit is the window's command, so closing the window stops it", window.Name)
 }
 
 // closeCosts lists what closing this window will take with it, one per line.

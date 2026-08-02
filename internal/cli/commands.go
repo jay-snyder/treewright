@@ -650,6 +650,11 @@ func offerWindowClose(env *Env, slug string, window tmux.Window, assumeYes bool)
 	}
 
 	if assumeYes {
+		// --yes answered "close the window", which is not the same as "tell me
+		// nothing about what was in it" — the whole reason a window is not closed
+		// unasked is that something may still be running in it, and here treewright
+		// knows that something was.
+		warnIfAgentWorking(env, window)
 		_ = tmux.KillWindow(window.ID)
 		env.progressf("closed its tmux window %s%s", window.Name, under(last))
 		return
@@ -669,9 +674,13 @@ func offerWindowClose(env *Env, slug string, window tmux.Window, assumeYes bool)
 	}
 	defer tty.Close()
 
-	// Above the question rather than through progressf, because the caveat and
+	// Above the question rather than through progressf, because the caveats and
 	// the question have to arrive together on the same terminal, and stderr may
-	// have been sent somewhere else entirely.
+	// have been sent somewhere else entirely. A working agent is the caveat most
+	// likely to change the answer, so it goes first.
+	if window.State == stateWorking {
+		fmt.Fprintf(tty, "its agent says it is working, and closing the window stops it\n")
+	}
 	if last != "" {
 		fmt.Fprintf(tty, "%s\n", last)
 	}

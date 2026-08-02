@@ -391,6 +391,15 @@ is reported *before* the window goes: closing the caller's own window kills the
 pane treewright runs in, and closing a session's last window can detach whoever
 would have read it.
 
+**A window whose agent is `working` is warned about wherever one is closed** —
+`close`, `rm --yes`, and above `rm`/`prune`'s own prompt — through
+`warnIfAgentWorking`. The agent is the window's command, so closing the window
+stops the work and takes the session with it, and that is the one thing about a
+window treewright knows and the caller may not. It warns rather than refuses: a
+refusal would need a `--force`, which is a flag people learn to pass by reflex.
+Only `working` warns; `waiting` and `done` are the states an ordinary teardown
+closes, and a warning that fires on the ordinary case stops being read.
+
 **No tmux call lives outside `internal/tmux`, including the ones `send` makes.**
 `Send` is `send-keys -l -- <text>` then `send-keys Enter`, two calls because tmux
 reads its arguments as key names otherwise, and `Capture` is what puts "look

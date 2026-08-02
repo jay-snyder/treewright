@@ -189,3 +189,85 @@ func TestCloseReachesTheBaseWindow(t *testing.T) {
 		t.Errorf("%d panes still in the main checkout, want the base window closed", got)
 	}
 }
+
+// TestCloseWarnsWhenTheAgentIsWorking. The agent is the window's command, so
+// closing the window stops it — and that is the one thing about a window
+// treewright knows and the caller may not, the state coming from the agent's own
+// hooks rather than from anything visible in the window's name.
+//
+// It warns rather than refuses: the caller asked for this, and a refusal would
+// need a --force, which is a flag people learn to pass by reflex. What the
+// warning buys is the loss being on the record at the moment it happens.
+func TestCloseWarnsWhenTheAgentIsWorking(t *testing.T) {
+	requireTmux(t)
+	f := newFixture(t, "command = 'sleep 300'\n")
+	f.mustRun("new", "eng-1")
+	t.Chdir(f.DirFor("eng-1"))
+	f.mustRun("signal", "working")
+
+	r := f.exec("close", "eng-1")
+	if r.err != nil {
+		t.Fatalf("close: %v\n%s", r.err, r.both())
+	}
+	if !strings.Contains(r.stderr, "warning: the agent in ENG-1 says it is working") {
+		t.Errorf("stderr = %q, want the working agent warned about", r.stderr)
+	}
+	// Warned, and then closed: this is not a refusal.
+	if got := windowsIn(t, "proj"); slices.Contains(got, "ENG-1") {
+		t.Errorf("windows = %v, want the window closed as asked", got)
+	}
+	// And the warning arrives before the window does, since afterwards there may
+	// be no session left to say it in.
+	warned, closing := strings.Index(r.stderr, "says it is working"), strings.Index(r.stderr, "closing tmux window")
+	if warned < 0 || closing < 0 || warned > closing {
+		t.Errorf("stderr = %q, want the warning before the close is announced", r.stderr)
+	}
+}
+
+// TestCloseIsQuietAboutTheStatesATeardownExpects. waiting is an agent blocked on
+// a person and done is one with nothing in flight — both are what an ordinary
+// cleanup closes, and a warning that fires on the ordinary case is one that
+// stops being read.
+func TestCloseIsQuietAboutTheStatesATeardownExpects(t *testing.T) {
+	requireTmux(t)
+	for _, state := range []string{"waiting", "done", "clear"} {
+		t.Run(state, func(t *testing.T) {
+			f := newFixture(t, "command = 'sleep 300'\n")
+			f.mustRun("new", "eng-1")
+			t.Chdir(f.DirFor("eng-1"))
+			f.mustRun("signal", state)
+
+			r := f.exec("close", "eng-1")
+			if r.err != nil {
+				t.Fatalf("close: %v\n%s", r.err, r.both())
+			}
+			if strings.Contains(r.stderr, "warning:") {
+				t.Errorf("stderr = %q, want no warning for a %s agent", r.stderr, state)
+			}
+		})
+	}
+}
+
+// TestRmYesWarnsAboutAWorkingAgent. --yes answered "close the window", which is
+// not the same as "tell me nothing about what was in it": the reason a window is
+// never closed unasked is that something may still be running in it, and here
+// treewright knows that something was.
+func TestRmYesWarnsAboutAWorkingAgent(t *testing.T) {
+	requireTmux(t)
+	f := newFixture(t, "command = 'sleep 300'\n")
+	f.mustRun("new", "eng-1")
+	t.Chdir(f.DirFor("eng-1"))
+	f.mustRun("signal", "working")
+	t.Chdir(f.MainDir)
+
+	r := f.exec("rm", "--yes", "eng-1")
+	if r.err != nil {
+		t.Fatalf("rm --yes: %v\n%s", r.err, r.both())
+	}
+	if !strings.Contains(r.stderr, "says it is working") {
+		t.Errorf("stderr = %q, want the working agent warned about", r.stderr)
+	}
+	if !strings.Contains(r.stderr, "closed its tmux window ENG-1") {
+		t.Errorf("stderr = %q, want the window still closed", r.stderr)
+	}
+}

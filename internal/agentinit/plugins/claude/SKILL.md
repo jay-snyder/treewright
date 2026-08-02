@@ -196,8 +196,10 @@ names the command that closes each one rather than asking:
     treewright close eng-142
 
 That is not homework to hand back. Put the question to the person with
-AskUserQuestion, and run it yourself if they say yes. Ask with the caveat
-treewright printed above it — a window that is the last in its session ends the
+AskUserQuestion, and run it yourself if they say yes. Ask with the caveats
+treewright printed above it — an agent that is still `working` in that window
+stops when the window closes, and it is worth saying so in the question rather
+than after the answer — a window that is the last in its session ends the
 session with it, and detaches whoever was attached, which
 `window_last_in_session` in the JSON also says. `close` takes the window and
 nothing else; the worktree is already gone by then, and it finds the window

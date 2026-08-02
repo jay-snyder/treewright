@@ -756,6 +756,26 @@ afterwards to report from. Both are said rather than refused: the second is a
 real thing to want, and the agent guide asks for exactly it as the last step of
 a teardown.
 
+**An agent still working is warned about, wherever a window is closed.** The
+agent is the window's command, so there is no detaching from this and coming
+back — the work stops and the session goes with it. That is the one thing about
+a window treewright knows and the caller may not, since the state comes from the
+agent's own hooks rather than from anything visible in the window's name, and it
+is exactly the "something may still be running in it" that stops `rm` and
+`prune` closing a window unasked in the first place. So `rm --yes` says it too,
+and `rm`'s own prompt puts it above the question, where it is the caveat most
+likely to change the answer.
+
+It warns rather than refuses. The caller asked for this, and treewright is in no
+position to judge whether what the agent is doing still matters; a refusal would
+need a `--force` to get past, which is a flag people learn to pass by reflex and
+then pass everywhere. What a warning buys is the loss being on the record at the
+moment it happens rather than discovered later.
+
+Only `working` warns. `waiting` is an agent blocked on a person and `done` is
+one with nothing in flight — those are the states an ordinary teardown closes,
+and a warning that fires on the ordinary case is one that stops being read.
+
 Closing a session's last window ends the session, which moves an attached client
 elsewhere or detaches it, so the prompt says when that is what is about to
 happen. Normally it is not: the base window outlives every worktree.
