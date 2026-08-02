@@ -288,6 +288,68 @@ means for the worktree just made, and names the two ways out: push and recreate,
 or cherry-pick the commits over. It is the branch that is compared, not whatever
 the checkout has out — that is `base`'s question, and it asks it separately.
 
+## Moving work that was started in the wrong place
+
+Typing in the main checkout and then realizing the change wants a branch of its
+own is ordinary. What makes it dangerous is that the work is uncommitted: until
+it is somewhere else, the base checkout is the only copy of it, and the sequence
+that moves it has a verification gate in the middle whose entire purpose is to
+be passed before anything is thrown away.
+
+That sequence lived in the claude module's guide as six commands in a strict
+order, and the order *was* the safety. Prose cannot hold that. An agent
+improvising anywhere in it loses work, and the improvisation to expect is
+`git clean -fd` for the last step — which reads as "delete the untracked files"
+and means "delete every untracked file", including the ones this move never
+touched and any ignored file sitting inside an untracked directory. So it is
+`tw move <slug>`, and the order is in the binary.
+
+**The base checkout is the last thing touched and never the first.** What runs,
+in order: list the untracked files, mark them intent-to-add so they reach a
+diff at all, write `git diff HEAD --binary` to `.git/treewright/move-<slug>.patch`,
+put the index straight back, make the worktree exactly as `new` does, apply
+with `--3way`, check the result, and only then clear the checkout the work came
+from. Every failure before that check leaves the checkout as it was found, says
+so in those words, and names the patch — which is a second copy of the work and
+the way in by hand.
+
+Four details carry more weight than they look:
+
+- **The index goes back immediately**, not at the end. From the moment the patch
+  is written the checkout is byte for byte what it was, so every later failure
+  is honest without a cleanup path of its own to get wrong.
+- **It goes back by path.** A bare `git reset` would also unstage whatever the
+  user had staged themselves, which is theirs and none of a move's business.
+  `git reset -- <the untracked files>` undoes exactly the intent-to-add entries
+  treewright wrote.
+- **The check is `git diff HEAD --stat`, not `git diff`.** `--3way` applies
+  through the index, so the work arrives staged and a plain `diff` has nothing
+  to show — which reads exactly like a patch that never applied. Verifying with
+  the wrong command is worse than not verifying: it is a gate that opens on
+  failure.
+- **What gets deleted is read from the diff, not from the untracked listing.**
+  `git diff HEAD --name-only --diff-filter=A` is every path the patch creates,
+  which includes a file the user had already `git add`ed — one the untracked
+  listing does not mention and which would otherwise survive as a second copy.
+
+Files git ignores stay where they are. They are what `carry_files` copies into
+every worktree, so a move that swept them up would take the `.env` out of the
+checkout every future worktree is carried from. Empty directories are left
+behind too, where a deleted file was the last thing in one: removing directories
+is precisely the reach that makes `clean -fd` dangerous, and an empty directory
+costs a reader nothing.
+
+**`git stash` is not the shortcut it looks like**, and this is the note for
+whoever proposes it next: one stash stack is shared by every worktree of a
+repository. A `pop` in the wrong checkout is a keystroke away, and the work is
+then in neither place anybody expected — a failure with no error message in it.
+A patch file is worse to type and cannot be popped anywhere by accident.
+
+**The window opens last**, after the work has landed, so the agent's first sight
+of the worktree is the work already in it rather than an empty checkout it is
+being asked to carry on with. `--keep` leaves the base checkout alone on success
+too, for when the work is wanted in both places.
+
 ## Output contract
 
 stdout carries the answer and nothing else, so any command can be piped:
@@ -295,6 +357,7 @@ stdout carries the answer and nothing else, so any command can be piped:
 | Command | stdout |
 |---|---|
 | `new` | the new worktree's path — `cd "$(tw new eng-1)"` works |
+| `move` | the same, printed once the work has arrived — until then there is no honest answer to where it went |
 | `cd` | the chosen worktree's path, so `cd "$(tw cd eng-1)"` works unaided |
 | `rm` | the removed worktree's path |
 | `prune` | the paths it removed, or would remove |
@@ -694,6 +757,7 @@ What it writes, in full:
 | `<config dir>/<name>.toml` | The registry *is* the configuration; there is no treewright without it. One directory, `rm -r` and it is gone. |
 | `<main_dir>/.git/treewright/post-create-*` | A background step's log and failure marker, inside the repository's own `.git`, which goes when the repository does. |
 | `<main_dir>/.git/treewright/no-agent-yet-*` | The note that a worktree has never had an agent in it, beside that log and gone the same way. It says what it is for in its own first line, since a marker nobody can read is a marker nobody can delete. |
+| `<main_dir>/.git/treewright/move-*.patch` | The uncommitted work `move` is carrying, written before anything is created and deleted once it has landed. What is left behind is left after a failure, deliberately: it is a second copy of work that exists in one place, and the way back in by hand. |
 | `<main_dir>/.claude/skills/treewright/` | The agent plugin, written by `agent-init` — inside the repository, in a directory treewright named and nothing else writes to. `rm -r` and it is gone, and `claude plugin disable treewright@skills-dir` stops it loading without deleting anything. |
 | `~/.claude/skills/treewright/` | The same plugin, when `agent-init --global` is asked for it. The only thing on this list outside a repository besides the registry, and the flag *is* the consent: it is not written unless it is named. |
 | The worktrees themselves | What the tool is for, and `rm` takes each one back. |

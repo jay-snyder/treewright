@@ -542,3 +542,149 @@ func (r Repo) DeleteBranch(branch string) error {
 	_, err := r.run("branch", "-D", branch)
 	return err
 }
+
+// ---- moving uncommitted work between checkouts ------------------------------
+
+// The operations `move` is built out of. They take a directory rather than
+// hanging off Repo because the whole point is that two checkouts are involved:
+// the work leaves one and arrives in the other, and neither is "the repository".
+//
+// Everything here is a plain git command with nothing clever in it, which is
+// deliberate — this is the one path in treewright that can destroy uncommitted
+// work, and what makes it auditable is that each step is a command a person
+// could have run and can check afterwards.
+
+// UntrackedFiles lists the files git neither tracks nor ignores in a checkout,
+// relative to its root.
+//
+// --exclude-standard is what keeps the ignored files out, and they are kept out
+// on purpose: a .env is carried into a new worktree by carry_files, and a move
+// that swept it up would take it out of the checkout every other worktree is
+// carried from.
+//
+// -z because these paths are handed straight back to git and to os.Remove, and
+// a filename with a newline in it would otherwise arrive as two.
+func UntrackedFiles(dir string) ([]string, error) {
+	out, err := runIn(dir, "ls-files", "--others", "--exclude-standard", "-z")
+	if err != nil {
+		return nil, err
+	}
+	return nulSeparated(out), nil
+}
+
+// IntentToAdd records paths in the index as files meant to be added, which is
+// what puts an untracked file into `git diff HEAD` — without it a patch of the
+// working tree carries changes to tracked files and nothing else.
+//
+// An empty list is a no-op rather than a bare `git add -N`, which would mean
+// every untracked file in the checkout.
+func IntentToAdd(dir string, paths []string) error {
+	if len(paths) == 0 {
+		return nil
+	}
+	_, err := runIn(dir, append([]string{"add", "-N", "--"}, paths...)...)
+	return err
+}
+
+// Unstage puts the index entries for paths back to what HEAD says, which for a
+// path HEAD does not have means removing the entry — undoing IntentToAdd exactly.
+//
+// Named paths rather than a bare `git reset`, and that is the whole reason this
+// exists as its own function. A pathless reset would also unstage whatever the
+// user had staged themselves, which is theirs and none of a move's business; by
+// path, only the entries treewright wrote are touched.
+//
+// An empty list is a no-op for the same reason IntentToAdd's is.
+func Unstage(dir string, paths []string) error {
+	if len(paths) == 0 {
+		return nil
+	}
+	_, err := runIn(dir, append([]string{"reset", "--quiet", "--"}, paths...)...)
+	return err
+}
+
+// AddedPaths lists the paths a diff against HEAD would create — the untracked
+// files just marked intent-to-add, and any the user had staged as new.
+//
+// It is what a move deletes from the checkout it took the work out of, and it
+// is read from the diff rather than from the untracked listing so that a file
+// the user had already `git add`ed is not left behind as a second copy.
+func AddedPaths(dir string) ([]string, error) {
+	out, err := runIn(dir, "diff", "HEAD", "--name-only", "--diff-filter=A", "-z")
+	if err != nil {
+		return nil, err
+	}
+	return nulSeparated(out), nil
+}
+
+// nulSeparated splits git's -z output, dropping the empty field its trailing
+// separator leaves behind.
+func nulSeparated(out string) []string {
+	var paths []string
+	for p := range strings.SplitSeq(out, "\x00") {
+		if p != "" {
+			paths = append(paths, p)
+		}
+	}
+	return paths
+}
+
+// WritePatch writes a checkout's whole diff against HEAD to path — staged and
+// unstaged alike, which is what "everything that is not committed" means.
+//
+// It streams into the file rather than going through runIn, for two reasons
+// that both matter here: a working tree's diff can be large, and runIn trims
+// its output, which would take the final newline off a patch that has to end
+// with one.
+//
+// --binary so that a changed image or a compiled fixture crosses too. Without
+// it git writes "Binary files differ" and the patch is one git apply refuses.
+func WritePatch(dir, path string) error {
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	cmd := exec.Command("git", "diff", "HEAD", "--binary")
+	cmd.Dir = dir
+	cmd.Stdout = f
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		_ = f.Close()
+		if msg := strings.TrimSpace(stderr.String()); msg != "" {
+			return fmt.Errorf("git diff HEAD: %s (%w)", msg, err)
+		}
+		return fmt.Errorf("git diff HEAD: %w", err)
+	}
+	return f.Close()
+}
+
+// ApplyPatch applies a patch in a checkout.
+//
+// --3way is what makes it land rather than merely apply: it falls back to a
+// three-way merge using the blobs the patch names, so a patch written against
+// one commit still applies over another. It goes through the index, so the work
+// arrives staged — which is why a caller checking that it worked has to ask
+// `git diff HEAD` rather than `git diff`.
+func ApplyPatch(dir, path string) error {
+	_, err := runIn(dir, "apply", "--3way", path)
+	return err
+}
+
+// DiffStat summarizes what a checkout holds that HEAD does not, staged
+// included. Empty means nothing does.
+func DiffStat(dir string) (string, error) {
+	return runIn(dir, "diff", "HEAD", "--stat")
+}
+
+// RestoreTracked puts every tracked file in a checkout back to HEAD, in the
+// index and in the working tree both.
+//
+// From HEAD rather than from the index, which is the difference between
+// clearing a checkout and merely discarding the changes nobody had staged: work
+// that was staged is in the patch that has already landed elsewhere, so leaving
+// it here would be leaving a second copy.
+func RestoreTracked(dir string) error {
+	_, err := runIn(dir, "checkout", "HEAD", "--", ".")
+	return err
+}

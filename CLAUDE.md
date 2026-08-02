@@ -145,6 +145,9 @@ ldflags. Validate config changes with `goreleaser check`.
 | `main.go` | The only place errors become exit codes. Nothing else calls `os.Exit`. |
 | `internal/cli/cli.go` | `Env`, the command table, dispatch, help rendering. |
 | `internal/cli/commands.go` | `new`, `rm`, `ls`, `prune`, `resume`, `cd`, `base`, `attach`. |
+| `internal/cli/move.go` | `move`: uncommitted work out of the base checkout and into a worktree. |
+| `internal/cli/send.go` | `send`: one line typed at the agent in an open window. |
+| `internal/cli/prompt.go` | `{prompt}`, the two flags that fill it, and what `--prompt-file` builds. |
 | `internal/cli/setup.go` | `setup` (config generation, `--refresh`) and `config`. |
 | `internal/cli/refresh.go` | `refresh`: the one post-upgrade action. |
 | `internal/cli/release.go` | Whether a newer treewright exists, and how this one was installed. |
@@ -263,7 +266,8 @@ on a window that was already open and its command never ran.
 
 **treewright writes its own registry, its own plugin directory, and nothing
 else.** The whole list is `<config dir>/<name>.toml`,
-`.git/treewright/post-create-*` and `.git/treewright/no-agent-yet-*` inside the
+`.git/treewright/post-create-*`, `.git/treewright/no-agent-yet-*` and
+`.git/treewright/move-*.patch` inside the
 repo, the worktrees, and `.claude/skills/treewright/` —
 `~/.claude/skills/treewright/` only when `agent-init --global` names it.
 Everything else — the shell line, the tmux line, any `.gitignore` entry — is
@@ -353,6 +357,31 @@ made by an older treewright would be met by a fresh agent in place of the sessio
 it had. It records that an *agent started*, not that a *window opened* — the two
 differ exactly in the case it exists for — and `base` is deliberately outside it.
 See "When there is nothing to resume" in `docs/agents.md`.
+
+**`move` touches the base checkout last, and only after the work has been seen
+somewhere else.** The base checkout is the only copy of uncommitted work until
+the patch has landed, so the order is the safety: record the untracked files,
+`add -N` them, write the patch, put the index back *immediately* — by path, so
+the user's own staging survives — make the worktree, apply with `--3way`, check
+with `git diff HEAD --stat`, and only then clear. `git diff` is the wrong check
+because `--3way` staged everything, so it has nothing to show and reads exactly
+like a patch that never applied: a gate that opens on failure. What gets deleted
+is `--diff-filter=A`'s list, which includes a file the user had already staged;
+`git clean -fd` is what an improvising hand reaches for and it takes unrelated
+files and ignored ones inside untracked directories. `git stash` is not
+available to this — one stash stack is shared by every worktree of a repository.
+See "Moving work that was started in the wrong place" in `docs/design-notes.md`.
+
+**No tmux call lives outside `internal/tmux`, including the ones `send` makes.**
+`Send` is `send-keys -l -- <text>` then `send-keys Enter`, two calls because tmux
+reads its arguments as key names otherwise, and `Capture` is what puts "look
+before you type" in the transcript rather than in a rule. `send` refuses a
+message with a newline (Enter submits, so the rest would post as further turns),
+the caller's own window, and a window held open after its command died —
+recognized from `heldOpenNotice` being the capture's last line, since the
+wrapper clears the agent state and so it cannot be told from a window that never
+signaled. Nothing there writes `@treewright_agent_state`: the receiving agent's
+own hook does.
 
 **A background failure needs somewhere to be reported.** Nothing waits for
 post_create, so a failing step leaves a marker beside its log and

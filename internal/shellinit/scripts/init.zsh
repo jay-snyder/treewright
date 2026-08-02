@@ -23,6 +23,7 @@ _treewright() {
   local -a cmds
   cmds=(
     'new:create a worktree and branch, and open a tmux window in it'
+    'move:move uncommitted work out of the main checkout into a new worktree'
     'resume:reopen a window on an existing worktree'
     'send:type one line at the agent in a worktree window'
     'cd:move your shell into a worktree'
@@ -60,7 +61,7 @@ _treewright() {
     return
   fi
   case "$words[2]" in
-    new)                         compadd -S '' -- ${(f)"$(command treewright __complete prefixes 2>/dev/null)"} ;;
+    new|move)                    compadd -S '' -- ${(f)"$(command treewright __complete prefixes 2>/dev/null)"} ;;
     rm)                          compadd -- ${(f)"$(command treewright __complete slugs 2>/dev/null)"} ;;
     resume|cd|send)              compadd -- ${(f)"$(command treewright __complete targets 2>/dev/null)"} ;;
     ls|prune|base|config|attach|refresh) compadd -- ${(f)"$(command treewright __complete repos 2>/dev/null)"} ;;

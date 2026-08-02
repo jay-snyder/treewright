@@ -21,7 +21,7 @@ treewright() {
 _treewright_completions() {
   local cur="${COMP_WORDS[COMP_CWORD]}"
   if [[ $COMP_CWORD -eq 1 ]]; then
-    COMPREPLY=($(compgen -W "new resume send cd base attach popup signal ls rm prune setup config doctor shell-init tmux-init agent-init refresh version" -- "$cur"))
+    COMPREPLY=($(compgen -W "new move resume send cd base attach popup signal ls rm prune setup config doctor shell-init tmux-init agent-init refresh version" -- "$cur"))
     return
   fi
   if [[ "$cur" == -* ]]; then
@@ -37,7 +37,7 @@ _treewright_completions() {
   fi
   local candidates=""
   case "${COMP_WORDS[1]}" in
-    new)
+    new|move)
       candidates="$(command treewright __complete prefixes 2>/dev/null)"
       # A branch prefix is half a word — the slug is typed straight onto it — so the
       # space bash appends would have to be deleted again. compopt arrived in bash 4;

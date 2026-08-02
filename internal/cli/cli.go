@@ -164,10 +164,41 @@ outlive the command — treewright neither copies it nor deletes it, and clearin
 it up once the work has landed is yours. The two flags fill one setting, and
 passing both is an error rather than a precedence rule to learn.`,
 			flags: []flagDoc{
-				{"-p, --prompt", "text the agent starts working on, placed at the command's {prompt}"},
-				{promptFileFlag, "a file holding the brief; the prompt becomes one line naming it"},
+				{promptFlagNames, "text the agent starts working on, placed at the command's {prompt}"},
+				promptFileDoc,
 			},
 			run: cmdNew,
+		},
+		{
+			name:    "move",
+			args:    "[-p <text>] [--keep] <slug> [window-name]",
+			summary: "move uncommitted work out of the main checkout into a new worktree",
+			long: `For work you started in the main checkout before realizing it wants a
+branch of its own. It makes the worktree exactly as "new" does — same fork
+point, same carried files, same post_create, same window — and carries the
+uncommitted work over on the way.
+
+Everything not committed goes: staged and unstaged changes, and the files git
+does not yet track. Files git ignores stay, since those are what carry_files
+copies into every worktree. The main checkout is left as it was at HEAD.
+
+Nothing is thrown away until the work has demonstrably arrived. It travels as a
+patch under .git/treewright/, which is applied in the new worktree and checked
+there before the main checkout is touched at all; a failure anywhere before that
+leaves the checkout untouched, says so, and names the patch, which is a second
+copy of the work and the way in by hand. --keep leaves the checkout alone even
+on success, for when you want the work in both places.
+
+The work arrives staged, because a three-way apply goes through the index.
+
+stdout is the new worktree's path, so cd "$(treewright move eng-1)" works, and
+--prompt and --prompt-file hand the agent its instructions as they do on "new".`,
+			flags: []flagDoc{
+				{promptFlagNames, "text the agent starts working on, placed at the command's {prompt}"},
+				promptFileDoc,
+				{"--keep", "leave the work in the main checkout as well"},
+			},
+			run: cmdMove,
 		},
 		{
 			name:    "resume",
@@ -197,8 +228,8 @@ standing in it.
 becomes one line telling the agent to read it. See "treewright help new" for
 what that buys and what it leaves you to clean up.`,
 			flags: []flagDoc{
-				{"-p, --prompt", "text for the resumed agent, placed at resume_command's {prompt}"},
-				{promptFileFlag, "a file holding the brief; the prompt becomes one line naming it"},
+				{promptFlagNames, "text for the resumed agent, placed at resume_command's {prompt}"},
+				promptFileDoc,
 			},
 			run: cmdResume,
 		},

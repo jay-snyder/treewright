@@ -22,9 +22,7 @@ import (
 
 func cmdNew(env *Env, args []string) error {
 	var prompt, promptFile string
-	positional, err := parseArgs("new", args, nil, map[string]*string{
-		"-p": &prompt, "--prompt": &prompt, promptFileFlag: &promptFile,
-	}, 2)
+	positional, err := parseArgs("new", args, nil, promptValues(&prompt, &promptFile), 2)
 	if err != nil {
 		return err
 	}
@@ -844,9 +842,7 @@ func cmdPrune(env *Env, args []string) error {
 
 func cmdResume(env *Env, args []string) error {
 	var prompt, promptFile string
-	positional, err := parseArgs("resume", args, nil, map[string]*string{
-		"-p": &prompt, "--prompt": &prompt, promptFileFlag: &promptFile,
-	}, 1)
+	positional, err := parseArgs("resume", args, nil, promptValues(&prompt, &promptFile), 1)
 	if err != nil {
 		return err
 	}

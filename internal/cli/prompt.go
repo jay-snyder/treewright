@@ -16,10 +16,28 @@ import (
 // promptPlaceholder is where a command template takes the prompt's text.
 const promptPlaceholder = "{prompt}"
 
-// promptFileFlag is the flag's own spelling, named once because it is parsed by
-// two commands and documented beside each — and because a flag whose name is
-// typed out at four call sites is a flag one of them will eventually misspell.
-const promptFileFlag = "--prompt-file"
+// How the two prompt flags are spelled, parsed and documented, in one place.
+//
+// Three commands hand an agent its instructions — new, move and resume — and
+// the flags mean the same thing on each. Spelled out at each of them, they were
+// three chances to misspell a flag name and three copies of one sentence to
+// drift apart. What stays per command is the half that genuinely differs: what
+// the prompt is for there, which resume answers differently from the other two.
+const (
+	promptFlag      = "--prompt"
+	promptFileFlag  = "--prompt-file"
+	promptFlagNames = "-p, " + promptFlag
+)
+
+// promptFileDoc documents --prompt-file wherever it appears. It is one flag
+// with one behavior, so it is one sentence.
+var promptFileDoc = flagDoc{promptFileFlag, "a file holding the brief; the prompt becomes one line naming it"}
+
+// promptValues is the flag pair as parseArgs takes it, pointed at a command's
+// own two variables.
+func promptValues(prompt, promptFile *string) map[string]*string {
+	return map[string]*string{"-p": prompt, promptFlag: prompt, promptFileFlag: promptFile}
+}
 
 // promptPointer is the prompt --prompt-file builds: one line naming the file,
 // and none of the file's own text.
