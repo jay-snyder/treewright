@@ -1,5 +1,11 @@
 {
   "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Edit|Write|NotebookEdit",
+        "hooks": [{ "type": "command", "command": "treewright guard" }]
+      }
+    ],
     "UserPromptSubmit": [
       { "hooks": [{ "type": "command", "command": "treewright signal working" }] }
     ],

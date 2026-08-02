@@ -41,6 +41,7 @@ complete -c treewright -n __fish_use_subcommand -a base       -d 'open a window 
 complete -c treewright -n __fish_use_subcommand -a attach     -d 'attach this terminal to the repository tmux session'
 complete -c treewright -n __fish_use_subcommand -a popup      -d 'run a treewright command in a tmux popup sized to its output'
 complete -c treewright -n __fish_use_subcommand -a signal     -d 'record the state of the agent running in this worktree'
+complete -c treewright -n __fish_use_subcommand -a guard      -d 'refuse a tool call that would mutate another worktree'
 complete -c treewright -n __fish_use_subcommand -a ls         -d 'list worktrees with their status'
 complete -c treewright -n __fish_use_subcommand -a rm         -d 'tear down a worktree and its branch'
 complete -c treewright -n __fish_use_subcommand -a prune      -d 'remove every merged, clean worktree'

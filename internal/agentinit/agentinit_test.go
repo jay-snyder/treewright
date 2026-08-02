@@ -57,8 +57,17 @@ func TestClaudeHooksParseAsJSON(t *testing.T) {
 		"Stop":             "done",
 		"SessionEnd":       "clear",
 	}
-	if len(settings.Hooks) != len(want) {
-		t.Errorf("the hooks wire %d events, want %d: %v", len(settings.Hooks), len(want), settings.Hooks)
+	// PreToolUse is the one hook that is not the state protocol: it asks rather
+	// than tells, and internal/cli holds it to the guard's own list of tools.
+	// Every other event has to be one of the four, so a fifth signal wired here
+	// by accident still fails.
+	for event := range settings.Hooks {
+		if _, ok := want[event]; !ok && event != "PreToolUse" {
+			t.Errorf("the hooks wire %s, which is neither a state transition nor the guard", event)
+		}
+	}
+	if len(settings.Hooks) != len(want)+1 {
+		t.Errorf("the hooks wire %d events, want %d: %v", len(settings.Hooks), len(want)+1, settings.Hooks)
 	}
 	for event, state := range want {
 		matchers, ok := settings.Hooks[event]

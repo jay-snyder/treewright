@@ -409,6 +409,7 @@ stdout carries the answer and nothing else, so any command can be piped:
 | `send` | nothing — there is no answer, only something done; what the window was showing and what was typed go to stderr |
 | `close` | nothing — there is no answer, only a window that is gone; what it closed and what that cost go to stderr |
 | `signal` | nothing — the answer is the stamp on the window, and out of scope it is silent on stderr too |
+| `guard` | nothing — the answer is the exit code, that being what a PreToolUse hook reads, and the refusal it carries goes to stderr for the agent |
 
 Progress, warnings, prompts, and errors go to stderr, prefixed `warning:` or
 `error:` following git's convention, and unprefixed when it is just narration. So

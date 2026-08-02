@@ -27,6 +27,19 @@ var (
 	// ErrUsage exits 2, the conventional code for being invoked wrongly, as
 	// distinct from a command that ran and failed.
 	ErrUsage = errors.New("usage error")
+
+	// ErrRefused exits 2 without printing, the refusal having been written to
+	// stderr already. It is `guard` and nothing else: an agent's PreToolUse hook
+	// reads 2 as "block this tool call" and hands stderr back to the agent as
+	// the reason, so the exit code is the verdict and stderr is the message.
+	//
+	// It shares its code with ErrUsage because the hook protocol chose the code,
+	// not treewright — 2 is the only value that blocks, and every other non-zero
+	// exit is a note in the transcript with the call allowed through. That is
+	// also why `guard` never returns a usage error: a mis-wired hook would
+	// otherwise refuse every tool call in the session and hand back help text as
+	// its reason. See cmdGuard.
+	ErrRefused = errors.New("refused")
 )
 
 // usageError is a command invoked wrongly: a bad flag, a missing or extra
@@ -42,6 +55,13 @@ func usageErrorf(command, format string, args ...any) error {
 	return &usageError{command: command, message: fmt.Sprintf(format, args...)}
 }
 
+// canonicalName is the binary's own name, as against the name a user typed for
+// it. It is the fallback for Argv0, what a popup falls back to when it cannot
+// find its own path, and the spelling `guard` recognizes in a command line —
+// three places that have to agree, and none of which is help prose, where the
+// word is written out for a reader rather than matched.
+const canonicalName = "treewright"
+
 // Env is everything a subcommand needs from the outside world. Passing this in
 // rather than reading globals is what makes the subcommands testable: a test can
 // point the streams at buffers and assert on exactly what each one received.
@@ -52,6 +72,12 @@ type Env struct {
 	Stdout  io.Writer // the answer
 	Stderr  io.Writer // progress, warnings, prompts
 
+	// Stdin is a payload a caller pipes in. Only `guard` reads it — agent hooks
+	// hand their tool call over that way — and it is here rather than read from
+	// os.Stdin directly for the reason every other stream is: a test points it
+	// at a buffer.
+	Stdin io.Reader
+
 	// EvalFile is a path the shell integration wants shell commands appended
 	// to, so treewright can affect the calling shell. From $TREEWRIGHT_EVAL_FILE.
 	EvalFile string
@@ -59,13 +85,16 @@ type Env struct {
 
 func (e *Env) defaults() {
 	if e.Argv0 == "" {
-		e.Argv0 = "treewright"
+		e.Argv0 = canonicalName
 	}
 	if e.Stdout == nil {
 		e.Stdout = os.Stdout
 	}
 	if e.Stderr == nil {
 		e.Stderr = os.Stderr
+	}
+	if e.Stdin == nil {
+		e.Stdin = os.Stdin
 	}
 	if e.EvalFile == "" {
 		e.EvalFile = os.Getenv("TREEWRIGHT_EVAL_FILE")
@@ -365,6 +394,36 @@ checkout with no window — it exits 0 and prints nothing. Hooks fire in every
 session the agent runs, and most of those are none of treewright's business; a
 hook that complains about that would nag from every plain terminal.`,
 			run: cmdSignal,
+		},
+		{
+			name:    "guard",
+			summary: "refuse a tool call that would mutate another worktree",
+			long: `Reads a coding agent's PreToolUse hook payload on stdin and decides
+it: a tool call that would change a treewright worktree other than the one the
+agent is standing in is refused, and everything else is allowed through.
+
+This is for an agent's own hooks to run rather than for typing. The claude
+plugin wires it, and the refusal it prints is what the agent reads: the work in
+a worktree belongs to the agent in that worktree's window, so the way on is to
+hand the instructions over with "treewright resume <slug> --prompt-file" or
+"treewright send <slug>", not to do the work from here.
+
+Reads of another worktree are never refused — reviewing what another agent
+wrote is legitimate, and has to stay cheap. Neither is anything treewright's
+own commands do, since rm, close, resume and send name worktree paths
+constantly. What is refused is a write: an edit under that path, a
+"git -C <path> commit", a "cd <path>" followed by something that changes it,
+output redirected into it.
+
+Anywhere out of scope — outside tmux, outside a registered repository, in a
+repository with no worktrees, on a payload it cannot read, or invoked with
+arguments it does not know — it exits 0 and allows the call. Agent hooks fire
+in every session the agent has, and a guard that refused whatever it could not
+place would be argued past rather than fixed.
+
+Exit 2 is the refusal, that being the one code a PreToolUse hook blocks on, and
+the reason goes to stderr for the agent to read. Nothing is printed to stdout.`,
+			run: cmdGuard,
 		},
 		{
 			name:    "ls",

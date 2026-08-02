@@ -101,7 +101,7 @@ func cmdPopup(env *Env, args []string) error {
 	// started it and need not be the one treewright was found on.
 	self, err := os.Executable()
 	if err != nil {
-		self = "treewright"
+		self = canonicalName
 	}
 	inner := make([]string, 0, len(positional)+3)
 	// The invoked name rides along because the popup was just sized to messages
