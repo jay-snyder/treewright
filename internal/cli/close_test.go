@@ -65,15 +65,14 @@ func TestCloseWorksAfterTheWorktreeIsGone(t *testing.T) {
 		t.Fatalf("windows = %v, want the stranded window still open", got)
 	}
 
-	// The window is counted by name rather than by the panes standing in the
-	// directory, and that is the point rather than a convenience: once the
-	// directory is deleted a pane no longer reports it, so a lookup that went by
-	// pane_current_path would find nothing here. @treewright_worktree still holds
-	// the path, which is what makes the window reachable at all.
-	if got := panesOn(t, wt); got != 0 {
-		t.Fatalf("%d panes still report the deleted directory, so this proves less than it should", got)
-	}
-
+	// Counted by window name rather than by the panes standing in the directory,
+	// and deliberately so: whether a pane still reports a directory that has been
+	// deleted is a fact about the operating system rather than about treewright.
+	// Linux stops reporting it and macOS keeps reporting it, so an assertion
+	// either way would be testing the kernel. What makes the window reachable
+	// here is @treewright_worktree, and the mechanism itself is covered where it
+	// can be covered without an operating system in the way — parsePanes' "a
+	// window opened on a worktree answers for it after its pane moves".
 	if r := f.exec("close", "eng-1"); r.err != nil {
 		t.Fatalf("close after rm: %v\n%s", r.err, r.both())
 	}
