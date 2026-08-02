@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -141,6 +143,123 @@ func TestALongPromptThatFitsStillOpensAWindow(t *testing.T) {
 
 	f.mustRun("new", "alpha", "--prompt", prompt)
 	waitForContent(t, marker, prompt, "the window's command")
+}
+
+// ---- --prompt-file -----------------------------------------------------------
+
+// TestAPromptFileSendsTheAgentToTheBriefRatherThanCarryingIt is the whole of
+// what the flag does: the command line gets one line naming the file, and the
+// brief itself never enters it.
+//
+// The path is checked to be absolute, which is not decoration — the command
+// runs in the new worktree, so a relative path resolved there would name a file
+// that is not in it.
+func TestAPromptFileSendsTheAgentToTheBriefRatherThanCarryingIt(t *testing.T) {
+	requireTmux(t)
+	marker := filepath.Join(t.TempDir(), "prompt")
+	f := newFixture(t, "command = \"printf %s {prompt} > "+marker+"\"\n")
+
+	// Written outside the worktree and reached by a relative path, which is how
+	// a caller standing in the main checkout would type it.
+	f.Write(f.Root, "brief.md", "the whole brief, several paragraphs of it\n")
+	f.mustRun("new", "alpha", "--prompt-file", "../brief.md")
+
+	want := fmt.Sprintf(promptPointer, filepath.Join(f.Root, "brief.md"))
+	waitForContent(t, marker, want, "the window's command")
+
+	body, err := os.ReadFile(marker)
+	if err != nil {
+		t.Fatalf("read the marker: %v", err)
+	}
+	if strings.Contains(string(body), "several paragraphs") {
+		t.Errorf("prompt = %q, want the file named rather than quoted into the command", body)
+	}
+}
+
+// TestAPromptFileIsCheckedBeforeAnythingIsCreated holds the flag to the same
+// discipline as the rest of fillPrompt's refusals: a brief that is not there,
+// is a directory, or is empty is this invocation being wrong, and finding out
+// after the worktree exists would leave a half-made one behind an error about
+// a flag.
+func TestAPromptFileIsCheckedBeforeAnythingIsCreated(t *testing.T) {
+	dir := t.TempDir()
+	empty := filepath.Join(dir, "empty.md")
+	if err := os.WriteFile(empty, nil, 0o644); err != nil {
+		t.Fatalf("write the empty brief: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name string
+		path string
+		want string
+	}{
+		{"missing", filepath.Join(dir, "nowhere.md"), "no file at"},
+		{"a directory", dir, "is a directory"},
+		{"empty", empty, "is empty"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFixture(t, "")
+
+			r := f.exec("new", "alpha", "--prompt-file", tc.path)
+			if r.err == nil {
+				t.Fatalf("want an error for a brief that is %s", tc.name)
+			}
+			if !strings.Contains(r.err.Error(), tc.want) {
+				t.Errorf("error = %q, want it to say %q", r.err, tc.want)
+			}
+			if r.stdout != "" {
+				t.Errorf("stdout = %q, want no path for a worktree that must not exist", r.stdout)
+			}
+			if f.Exists("alpha") {
+				t.Error("the worktree was created despite the refusal")
+			}
+		})
+	}
+}
+
+// TestPromptAndPromptFileFillOneSetting: two ways to say the same thing, so
+// saying both is a wrong invocation rather than a precedence rule to learn.
+func TestPromptAndPromptFileFillOneSetting(t *testing.T) {
+	f := newFixture(t, "")
+	f.Write(f.Root, "brief.md", "a brief\n")
+	brief := filepath.Join(f.Root, "brief.md")
+
+	r := f.exec("new", "alpha", "--prompt", "inline", "--prompt-file", brief)
+	if !errors.Is(r.err, ErrUsage) {
+		t.Fatalf("err = %v, want a usage error", r.err)
+	}
+	if !strings.Contains(r.stderr, "one setting") {
+		t.Errorf("stderr = %q, want the two flags named as one setting", r.stderr)
+	}
+	if f.Exists("alpha") {
+		t.Error("the worktree was created despite the refusal")
+	}
+
+	// resume refuses it identically: the flag is the same flag on both.
+	f.mustRun("new", "beta")
+	if r := f.exec("resume", "beta", "-p", "inline", "--prompt-file", brief); !errors.Is(r.err, ErrUsage) {
+		t.Errorf("err = %v, want resume to refuse both as well", r.err)
+	}
+}
+
+// TestAPromptFileCarriesABriefTooLongToPass is why the flag exists. The same
+// text passed to --prompt is refused outright — tmux will not run a command
+// that long — and as a file it is one short line whatever the size.
+func TestAPromptFileCarriesABriefTooLongToPass(t *testing.T) {
+	requireTmux(t)
+	marker := filepath.Join(t.TempDir(), "prompt")
+	f := newFixture(t, "command = \"printf %s {prompt} > "+marker+"\"\n")
+
+	brief := strings.Repeat("it's a long brief. ", 1200)
+	f.Write(f.Root, "long.md", brief)
+	path := filepath.Join(f.Root, "long.md")
+
+	if r := f.exec("new", "alpha", "--prompt", brief); r.err == nil {
+		t.Fatal("want the inline form refused, or this proves nothing")
+	}
+
+	f.mustRun("new", "alpha", "--prompt-file", path)
+	waitForContent(t, marker, fmt.Sprintf(promptPointer, path), "the window's command")
 }
 
 // TestResumePromptDelivery covers both halves of delivery: a resume that

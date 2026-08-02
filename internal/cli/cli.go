@@ -154,11 +154,51 @@ working rather than waiting to be told what the work is. The text lands where
 the command template says with {prompt} — the default is "claude {prompt}" —
 shell-quoted as one argument. Without the flag the placeholder simply
 disappears; with the flag and no placeholder to take it, the error says where
-to write one.`,
+to write one.
+
+--prompt-file is the same instruction, for a brief too long to type: the prompt
+becomes one line telling the agent to read that file, so its size never counts
+against the ceiling tmux puts on how long a command it will run. The path is
+made absolute and travels in the agent's command line, so the file has to
+outlive the command — treewright neither copies it nor deletes it, and clearing
+it up once the work has landed is yours. The two flags fill one setting, and
+passing both is an error rather than a precedence rule to learn.`,
 			flags: []flagDoc{
-				{"-p, --prompt", "text the agent starts working on, placed at the command's {prompt}"},
+				{promptFlagNames, "text the agent starts working on, placed at the command's {prompt}"},
+				promptFileDoc,
 			},
 			run: cmdNew,
+		},
+		{
+			name:    "move",
+			args:    "[-p <text>] [--keep] <slug> [window-name]",
+			summary: "move uncommitted work out of the main checkout into a new worktree",
+			long: `For work you started in the main checkout before realizing it wants a
+branch of its own. It makes the worktree exactly as "new" does — same fork
+point, same carried files, same post_create, same window — and carries the
+uncommitted work over on the way.
+
+Everything not committed goes: staged and unstaged changes, and the files git
+does not yet track. Files git ignores stay, since those are what carry_files
+copies into every worktree. The main checkout is left as it was at HEAD.
+
+Nothing is thrown away until the work has demonstrably arrived. It travels as a
+patch under .git/treewright/, which is applied in the new worktree and checked
+there before the main checkout is touched at all; a failure anywhere before that
+leaves the checkout untouched, says so, and names the patch, which is a second
+copy of the work and the way in by hand. --keep leaves the checkout alone even
+on success, for when you want the work in both places.
+
+The work arrives staged, because a three-way apply goes through the index.
+
+stdout is the new worktree's path, so cd "$(treewright move eng-1)" works, and
+--prompt and --prompt-file hand the agent its instructions as they do on "new".`,
+			flags: []flagDoc{
+				{promptFlagNames, "text the agent starts working on, placed at the command's {prompt}"},
+				promptFileDoc,
+				{"--keep", "leave the work in the main checkout as well"},
+			},
+			run: cmdMove,
 		},
 		{
 			name:    "resume",
@@ -181,11 +221,50 @@ other row; "treewright base" is the way in that opens it fresh.
 --prompt hands the resumed agent its next instruction, at resume_command's
 {prompt} placeholder. It only reaches an agent the resume actually starts: a
 window that was already open is switched to as usual, with a warning that the
-prompt went undelivered and is worth pasting there.`,
+prompt went undelivered — and "treewright send" is what reaches the agent
+standing in it.
+
+--prompt-file names a file holding the instructions instead, and the prompt
+becomes one line telling the agent to read it. See "treewright help new" for
+what that buys and what it leaves you to clean up.`,
 			flags: []flagDoc{
-				{"-p, --prompt", "text for the resumed agent, placed at resume_command's {prompt}"},
+				{promptFlagNames, "text for the resumed agent, placed at resume_command's {prompt}"},
+				promptFileDoc,
 			},
 			run: cmdResume,
+		},
+		{
+			name:    "send",
+			args:    "[-n] <slug> <message>",
+			summary: "type one line at the agent in a worktree's window",
+			long: `Types a message into the window open on a worktree and presses Enter,
+which is how an agent already running gets its next instruction. --prompt only
+reaches an agent a resume actually starts; this reaches the one standing there.
+
+An unambiguous prefix of a slug is enough, and "base" reaches the main
+checkout's window. There has to be a window open — "treewright resume <slug>"
+is what opens one.
+
+What the window is showing is printed first, every time. An agent sitting on a
+question with options takes the next keystrokes as the answer to it, so a
+message sent blind can pick an option nobody read; reading the pane changes
+nothing and costs one tmux call. --dry-run stops there and sends nothing, which
+is also how you look at a window without having anything to say — the message
+can be left off entirely.
+
+One line only. Enter is what submits, so a message with a line break in it would
+post the rest as further turns: that is refused, and the way through is the one
+--prompt-file takes — put the text in a file and send a line naming it.
+
+The window you are running in is refused too. A message sent to yourself arrives
+in this session ahead of whatever you were answering, and reads afterwards as an
+instruction from somewhere else.
+
+Nothing is printed to stdout: there is no answer here, only something done.`,
+			flags: []flagDoc{
+				{"-n, --dry-run", "show what the window is displaying and send nothing"},
+			},
+			run: cmdSend,
 		},
 		{
 			name:    "cd",
@@ -356,6 +435,32 @@ something running in them.`,
 				{"-y, --yes", "actually remove them, instead of listing"},
 			},
 			run: cmdPrune,
+		},
+		{
+			name:    "close",
+			args:    "<slug>",
+			summary: "close the tmux window open on a worktree",
+			long: `Closes the window treewright opened on a worktree, and nothing else —
+the worktree, the branch and any work in them are left alone. "treewright rm" is
+what removes those.
+
+It works after the worktree is gone, which is mostly what it is for. rm and
+prune do not close a window without being asked, since something may still be
+running in it, so with nobody to prompt they name this command instead. The
+window is found by the directory treewright recorded on it, and that record
+outlives the directory.
+
+An unambiguous prefix of a slug is enough while the worktree is still there;
+once it has been removed there is nothing to match against, so name it in full.
+"base" closes the main checkout's window.
+
+Closing a session's last window ends the session, which moves an attached client
+elsewhere or detaches it. That is said rather than refused, as is closing the
+window you are running in — which is a real thing to want, and the last thing
+that happens in that session.
+
+Nothing is printed to stdout: there is no answer here, only something done.`,
+			run: cmdClose,
 		},
 		{
 			name:    "setup",

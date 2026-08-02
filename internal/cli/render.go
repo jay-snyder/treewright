@@ -303,6 +303,24 @@ type worktreeJSON struct {
 	WindowID      string `json:"window_id"`
 	WindowSession string `json:"window_session"`
 
+	// WindowIsCurrent marks the window this command is running in, which a
+	// consumer deciding what to close needs and can work out no other way: it
+	// is the one window whose closing ends the session it is reporting from,
+	// and the one an agent must never take down before it has finished
+	// answering. False outside tmux, where there is no such window, and false
+	// when no window is open on the worktree at all.
+	//
+	// Reported rather than left to the caller because the alternative is a
+	// second command and a comparison — `tmux display-message -p
+	// '#{window_id}'` against window_id — which is a fact treewright already
+	// has and a shell-out an agent can get wrong.
+	WindowIsCurrent bool `json:"window_is_current"`
+
+	// WindowLastInSession says that closing the window would end its session
+	// with it, moving an attached client elsewhere or detaching it. False when
+	// no window is open, and false for a window with company.
+	WindowLastInSession bool `json:"window_last_in_session"`
+
 	// AgentState is what the agent in the window last said it was doing, via
 	// `signal`: working, waiting, or done. Empty like the window fields when no
 	// window is open — and when one is open but nothing has ever signaled, since
@@ -310,7 +328,11 @@ type worktreeJSON struct {
 	AgentState string `json:"agent_state"`
 }
 
-func worktreesJSON(infos []git.Info, windows map[string]tmux.Window) []worktreeJSON {
+// worktreesJSON renders the listing. current is the window the caller is
+// running in, from tmux.CurrentWindow — passed in rather than asked for here so
+// that one invocation asks the server once, and so a test can say where it is
+// standing without a client to be standing in.
+func worktreesJSON(infos []git.Info, windows map[string]tmux.Window, current string) []worktreeJSON {
 	out := make([]worktreeJSON, 0, len(infos))
 	for _, info := range infos {
 		w := windows[info.Dir]
@@ -326,6 +348,11 @@ func worktreesJSON(infos []git.Info, windows map[string]tmux.Window) []worktreeJ
 			WindowID:      w.ID,
 			WindowSession: w.Session,
 			AgentState:    w.State,
+			// The empty id has to be excluded explicitly: outside tmux current
+			// is empty too, and every row with no window open would otherwise
+			// come back as the caller's own.
+			WindowIsCurrent:     w.ID != "" && w.ID == current,
+			WindowLastInSession: w.LastInSession(),
 		}
 		if info.Compared {
 			ahead, behind := info.Ahead, info.Behind

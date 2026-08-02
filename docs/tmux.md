@@ -107,6 +107,57 @@ shelling out to git on every status interval. They keep the full `@treewright_`
 prefix because they are a public, greppable interface, and a cryptic `@tw_` would
 save nothing anyone types by hand.
 
+## Typing at the window
+
+`--prompt` reaches an agent only where the resume actually starts one: the
+command carrying it runs in a window that was *created*, so a resume that finds
+one already open switches to it and warns that the prompt went nowhere. What is
+left in that window is an agent, and an agent is an ordinary TUI on an ordinary
+tty — so tmux can type at it. `tw send <slug> <message>` is that.
+
+It was taught as raw `tmux send-keys` in the claude skill before it was a
+command, and everything wrong with that is in the four rules the prose had to
+carry, each of which fails silently and differently:
+
+- **Capture the pane first.** An agent sitting on a question with options takes
+  the next keystrokes as the answer to it, so a message sent blind can pick an
+  option nobody read. Reading the pane changes nothing and costs one call, so
+  `send` does it every time rather than behind a flag — a flag would be a way to
+  turn off the check, and what it prevents leaves no trace. `--dry-run` captures
+  and sends nothing, which makes looking an action of its own; the message may
+  be left off entirely there.
+- **`-l`, or the words arrive as key names.** "Enter the review comments" is
+  four keystrokes to tmux without it.
+- **`Enter` as its own call**, since under `-l` it would arrive as five
+  characters. The flags end with `--` as well, so a message starting with a dash
+  is a message.
+- **One line.** Enter submits, so a newline posts the rest as further turns —
+  refused rather than split, treewright having no way to tell an accident from an
+  intention and no way to undo either. The way through is `--prompt-file`'s: put
+  the text in a file, send a line naming it.
+
+Two things it refuses that the prose never mentioned. **The caller's own
+window**, since an agent typing at itself puts the message into this very
+session ahead of whatever it was answering — `tmux.CurrentWindow` has the id, so
+this needs no vigilance from the sender. And **a window held open after its
+command died**, which is the one place a treewright window outlives its agent:
+what is reading the keyboard there is a shell blocked on `read`, so the message
+reaches nobody and the Enter after it closes the window, erasing the output the
+wrapper exists to preserve. It is recognized from the capture — the held-open
+notice is the last line such a window shows — rather than from the agent state,
+which the wrapper clears and which is equally absent from every window whose
+agent never signaled.
+
+Nothing writes `@treewright_agent_state`. The receiving agent's own
+`UserPromptSubmit` hook fires `signal working` when the message lands, which is
+the protocol working as designed; a sender stamping the window would be guessing
+at a state only the agent can report.
+
+`send` goes through `internal/tmux` like everything else, which is the other half
+of why it is a command. The raw form honored no `TREEWRIGHT_TMUX_LABEL`, went
+through no `exact()`, and knew nothing of the `@treewright_worktree` stamp — so
+it typed into whichever window happened to be standing in the directory.
+
 ## Terminal and tab titles
 
 Attaching tends to leave the terminal tab titled with the command line that

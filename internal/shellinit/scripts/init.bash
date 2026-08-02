@@ -21,16 +21,23 @@ treewright() {
 _treewright_completions() {
   local cur="${COMP_WORDS[COMP_CWORD]}"
   if [[ $COMP_CWORD -eq 1 ]]; then
-    COMPREPLY=($(compgen -W "new resume cd base attach popup signal ls rm prune setup config doctor shell-init tmux-init agent-init refresh version" -- "$cur"))
+    COMPREPLY=($(compgen -W "new move resume send cd base attach popup signal ls rm prune close setup config doctor shell-init tmux-init agent-init refresh version" -- "$cur"))
     return
   fi
   if [[ "$cur" == -* ]]; then
     COMPREPLY=($(compgen -W "$(command treewright __complete flags "${COMP_WORDS[1]}" 2>/dev/null)" -- "$cur"))
     return
   fi
+  # --prompt-file takes a path, and treewright knows nothing about the caller's
+  # filesystem: the shell's own file completer is the only sensible candidate
+  # list, so the flag's value is answered before the command's arguments are.
+  if [[ "${COMP_WORDS[COMP_CWORD-1]}" == --prompt-file ]]; then
+    COMPREPLY=($(compgen -f -- "$cur"))
+    return
+  fi
   local candidates=""
   case "${COMP_WORDS[1]}" in
-    new)
+    new|move)
       candidates="$(command treewright __complete prefixes 2>/dev/null)"
       # A branch prefix is half a word — the slug is typed straight onto it — so the
       # space bash appends would have to be deleted again. compopt arrived in bash 4;
@@ -38,7 +45,7 @@ _treewright_completions() {
       type compopt >/dev/null 2>&1 && compopt -o nospace
       ;;
     rm)                          candidates="$(command treewright __complete slugs 2>/dev/null)" ;;
-    resume|cd)                   candidates="$(command treewright __complete targets 2>/dev/null)" ;;
+    resume|cd|send|close)        candidates="$(command treewright __complete targets 2>/dev/null)" ;;
     ls|prune|base|config|attach|refresh) candidates="$(command treewright __complete repos 2>/dev/null)" ;;
     shell-init)                  candidates="$(command treewright __complete shells 2>/dev/null)" ;;
     signal)                      candidates="$(command treewright __complete states 2>/dev/null)" ;;

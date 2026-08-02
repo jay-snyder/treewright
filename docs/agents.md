@@ -222,46 +222,68 @@ worktree is clean and unpushed, and the `rm` guards refuse it precisely when it
 would stop being cheap — the guide can recommend it without a caveat about
 losing work, because the CLI already holds that line.
 
-**Two more sections are one subject: getting instructions to an agent when
-`--prompt` will not carry them.** A brief long enough to be worth writing is
-quoted into a tmux command line that has a ceiling on it, so it is refused; and a
-prompt aimed at a window that is already open is dropped with a warning. Both
-leave an agent driving treewright holding text that reached nobody, and the guide
-answered neither.
+### Procedure belongs in the binary, not in the guide
 
-The first answer is a file in `/tmp` and a one-line prompt naming it, taught as
-what a real handoff looks like rather than as what you do once the limit bites —
-the ceiling is why it is necessary, not why it is right: a file can be re-read
-after a compaction and outlives the session that wrote it. **Where the file goes
-is named because both plausible alternatives fail invisibly.** A `BRIEF.md` in
-the worktree that was just created arrives as an untracked file in the diff a
-maintainer reviews, and `.git/treewright/` — the tidy-looking one — stays out of
-`git status`, which is exactly why nothing removes it and nobody sees it again;
-`startPostCreate` cleans up its own marker and treewright cleans nothing else
-there. That second one has now been chosen by two different agents driving
-treewright, which is the bar the teardown and handoff rules were written to: a
-choice readers get wrong twice is one the guide makes for them.
+An audit put roughly a hundred of the guide's two hundred and forty lines in one
+category: *procedure*. Ordered command sequences with a distinct silent failure
+at each step, written out as prose for an agent to follow. Two of them lost work
+when it did not.
 
-The second answer is `tmux send-keys` into the window, and it is taught as tmux
-because treewright has no verb for it — the guide already hands the reader a raw
-`tmux kill-window`, so this is the same vocabulary rather than a new one. Four
-details are load-bearing and each of them fails quietly: `-l` or the words are
-parsed as key names, `Enter` as its own call or it arrives as five characters,
-`capture-pane` first or a blind keystroke answers a question with options that
-nobody read, and one line only, since Enter submits and a newline posts the rest
-as further turns. That last constraint is the file-pointer pattern again from the
-other end — one line naming a file is what fits both routes. `waiting` is the
-state it exists for, that agent being blocked on a person by definition; the
-cautions are that a window is somebody else's session, to be sent instructions
-rather than keystrokes that drive their UI, and that a window a person is typing
-in is one to leave alone.
+Prose is the wrong container for that, and the two rules above say why in the
+strongest terms available — those paragraphs exist because an agent read the
+section covering its case and did the other thing anyway. A sequence an agent can
+deviate from is a sequence an agent will deviate from, however carefully it is
+worded, and the fix is not better wording. Four sections became commands:
 
-It also gives the botched handoff above a second way out, and the guide says so
-rather than leaving two paragraphs to disagree: the idle agent `new` left in a
-window can be typed at, so "the worktree has to be removed and remade" is now
-the recommendation while the worktree is empty rather than the only route.
-Reaching the agent in place is what still works once the worktree holds
-something `rm` would rightly refuse to throw away.
+- **The long brief** — a file in `/tmp` and a sentence pointing at it — is
+  `--prompt-file`. Twenty-five lines of where to put the file and what to say
+  about it were a path decision and a template, both of which a binary can hold.
+- **Moving work out of the base checkout** is `treewright move`. Six commands in
+  a strict order, where the order was the safety and `git clean -fd` was the
+  improvisation to expect.
+- **Reaching an agent in an open window** is `treewright send`. Four mechanical
+  rules the prose could only ask for, in the one place the whole guide stepped
+  outside the binary and taught raw `tmux`.
+- **Which window is your own, and which ends its session**, is two fields in
+  `ls --json` rather than a `tmux display-message` and some arithmetic.
+
+**And one rule was deleted rather than moved.** The guide told an agent to read
+the base row's `unpushed` before `new` and push first — which `warnIfBaseIsAhead`
+had been doing all along and better, comparing the base branch against origin's
+rather than against the checkout's working state, and offering the cherry-pick. A
+rule asking an agent to do by hand what the tool already does on its own is worse
+than no rule: it is one more thing to get right for no gain, and it goes stale
+silently the day the tool's own version improves.
+
+What stays in the guide is the judgment each of those was carrying.
+
+For the brief, **when the file is deleted**. Placement no longer needs teaching,
+there being nothing to construct — but treewright neither copies the file nor
+removes it, and a temporary directory swept eventually is not cleanup. The two
+alternatives the old prose warned against are worth recording here, since they
+are what agents actually chose: a `BRIEF.md` in the worktree just created arrives
+as an untracked file in the diff a maintainer reviews, and `.git/treewright/` —
+the tidy-looking one, picked by two different agents — stays out of `git status`,
+which is exactly why nothing would ever remove it and nobody would ever see it
+again.
+
+For the move, **that it is not to be done by hand**, and the shape of why: until
+the work is somewhere else the main checkout is the only copy of it. The `git
+stash` warning stays too, that being the shortcut a reader proposes next.
+
+For reaching an open window, **whose session it is**. `send` refuses what the
+prose could not — the caller's own window, and one held open after its agent died
+— so what is left is that `waiting` is the state this exists for, that a window is
+somebody else's session and takes instructions rather than keystrokes driving
+their UI, and that a window a person is typing in is one to leave alone. See
+"Typing at the window" in [`tmux.md`](tmux.md).
+
+`send` also gives the botched handoff above a second way out, and the guide says
+so rather than leaving two paragraphs to disagree: the idle agent `new` left in a
+window can be typed at, so "the worktree has to be removed and remade" is the
+recommendation while the worktree is empty rather than the only route. Reaching
+the agent in place is what still works once the worktree holds something `rm`
+would rightly refuse to throw away.
 
 **The manifest's version is not treewright's.** A skills-directory plugin is
 discovered in place rather than copied into a cache, so nothing compares
@@ -434,8 +456,46 @@ Three rules, each load-bearing:
   the caller is an agent, which for `--prompt` is the common case — the flag
   exists to hand work to an agent, and the thing typing it is increasingly
   another one. The file route needs neither, works for a person as well, and is
-  what the claude module's guide teaches, so the CLI and the skill now name the
-  same way out.
+  now `--prompt-file` rather than a sentence to compose.
+
+### `--prompt-file`, and why the sentence is treewright's
+
+The file route was taught before it was built: twenty-five lines of the claude
+module's guide spelling out where to put the brief, what sentence to point at it
+with, and which two obvious homes fail invisibly. All of that is a path decision
+and a template, and both belong in the binary — prose is something an agent can
+read carefully and still deviate from, where a flag is not.
+
+So `--prompt-file <path>` takes the file and builds the prompt:
+`read <path> in full — it is your complete brief`. The wording lives in one
+place, `promptPointer`, because it is the whole of what the flag adds and
+because it has to survive being read by an agent that will act on it — "in full"
+is what stops a reader skimming the first heading and starting work.
+
+Three things it does that the taught version could not be relied on to:
+
+- **The path is made absolute.** The command runs in the new worktree, so a
+  relative path resolved there names a file that is not in it. A reader typing
+  `--prompt-file brief.md` from the main checkout gets the file they meant.
+- **The file is checked before anything is created** — missing, a directory, or
+  empty — beside `fillPrompt`'s own refusals and for the same reason: a bad
+  invocation should not leave a half-made worktree behind an error about a flag.
+  Empty is on that list because an agent sent to read nothing has nothing to go
+  on and no way to say so.
+- **It fills one setting with `--prompt`, and passing both is an error.** Any
+  precedence we picked would be a rule to learn, in the one place where the cost
+  of guessing wrong is an agent working from the wrong instructions.
+
+The ceiling is a consequence rather than the point. A pointer is short whatever
+the file holds, so it never approaches `checkCommandFits`'s limit — but the file
+is worth it well before then, since it can be re-read after a compaction and
+outlives the session that wrote it.
+
+**treewright neither copies the file nor deletes it**, and the help says so.
+The path travels in the agent's command line, so the file has to be there when
+the window opens and for as long as the agent may want it again; deleting it
+once the work has landed stays the caller's, which is the one part of the old
+prose that survives into the guide.
 
 **A prompt that reached no agent is warned about.** The command carrying it
 runs only in a window that was actually created, and `resume` mostly finds

@@ -181,10 +181,21 @@ func heldOpenOnFailure(command string) string {
 		"fi\n" +
 		"printf '\\n\"%s\" exited %s — this window is kept so the output above stays readable\\n'" +
 		" " + shellQuote(abbreviated(command)) + ` "$tw_status"` + "\n" +
-		"printf 'press Enter to close it\\n'\n" +
+		"printf '" + heldOpenNotice + "\\n'\n" +
 		"read -r tw_done\n" +
 		`exit "$tw_status"` + "\n"
 }
+
+// heldOpenNotice is the last thing a held-open window prints before it blocks
+// on Enter, and so the last line such a window shows for as long as it stands.
+//
+// It is a constant because it is read as well as written. `send` captures a
+// pane before typing into it, and a window in this state has a shell in it
+// rather than an agent — where the message would be text nobody reads and the
+// Enter after it would close the window, taking with it the output the wrapper
+// exists to preserve. Recognizing it costs nothing, the capture having been
+// taken anyway.
+const heldOpenNotice = "press Enter to close it"
 
 // maxNamedCommand caps the copy of the command a held-open window prints above
 // its "press Enter", in runes.

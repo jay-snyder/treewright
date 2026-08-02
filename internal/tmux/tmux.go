@@ -97,6 +97,19 @@ type Window struct {
 	// questions, and the window whose pane has wandered into another worktree's
 	// directory is exactly the case that tells them apart.
 	Worktree string
+
+	// SessionWindows is how many windows the session holding this one has, which
+	// is what LastInSession reads.
+	//
+	// It rides in the pane listing rather than being asked per window, because
+	// the callers ask it of a whole table at once: `ls --json` over a dozen
+	// worktrees would otherwise pay a dozen extra round trips to the server for
+	// a number every one of those panes was already able to report.
+	//
+	// Only Windows fills it. A window fresh from NewWindow reports 0, and
+	// nothing asks — the question is about a session as it stands, and the
+	// answer for a window created a moment ago is one nobody is waiting on.
+	SessionWindows int
 }
 
 // Available reports whether tmux is installed. Every operation here needs it, and
@@ -215,15 +228,20 @@ const (
 )
 
 // paneFormat lists a pane as window id, session, window name, the worktree its
-// window was opened on, the agent state recorded on it, then path.
+// window was opened on, the agent state recorded on it, how many windows its
+// session holds, then path.
 //
 // The fields are tab-separated and the path comes last, because both a window
 // name and a path may contain spaces: splitting on a space is only unambiguous
-// for the id. Splitting into a fixed six parts leaves any tab in a path — rare,
+// for the id. Splitting into a fixed seven parts leaves any tab in a path — rare,
 // but possible — inside the path where it belongs. The stamped worktree is a path
 // too, which is why stamp declines to write one holding a tab; the agent state is
-// a word from signal's closed vocabulary and can hold neither.
-const paneFormat = "#{window_id}\t#{session_name}\t#{window_name}\t#{" + worktreeOption + "}\t#{" + AgentStateOption + "}\t#{pane_current_path}"
+// a word from signal's closed vocabulary and the window count is a number, and
+// neither can hold one.
+//
+// The window count is here rather than asked per window because this listing is
+// gathered once for a whole table. See Window.SessionWindows.
+const paneFormat = "#{window_id}\t#{session_name}\t#{window_name}\t#{" + worktreeOption + "}\t#{" + AgentStateOption + "}\t#{session_windows}\t#{pane_current_path}"
 
 // Windows maps each pane's working directory to the window holding it, across
 // every session on the server. It is what stops `resume` from opening a second
@@ -281,23 +299,28 @@ func parsePanes(out, prefer string) map[string]Window {
 	}
 
 	for line := range strings.SplitSeq(out, "\n") {
-		fields := strings.SplitN(line, "\t", 6)
-		if len(fields) != 6 {
+		fields := strings.SplitN(line, "\t", 7)
+		if len(fields) != 7 {
 			continue
 		}
+		// A count that does not parse is left at zero, which reads as "not the
+		// last window": the only thing it feeds is a caveat about ending a
+		// session, and saying nothing is the right way to be wrong about that.
+		windows, _ := strconv.Atoi(fields[5])
 		w := Window{
 			ID:      fields[0],
 			Session: fields[1],
 			// The waiting marker comes off here, once, so the name every consumer
 			// sees is the one underneath treewright's own punctuation.
-			Name:     strings.TrimPrefix(fields[2], WaitingMarker),
-			State:    fields[4],
-			Worktree: fields[3],
+			Name:           strings.TrimPrefix(fields[2], WaitingMarker),
+			State:          fields[4],
+			Worktree:       fields[3],
+			SessionWindows: windows,
 		}
 		if w.ID == "" {
 			continue
 		}
-		stake(fields[5], w)
+		stake(fields[6], w)
 		// A window treewright opened answers for its own worktree wherever its pane
 		// is standing, so cd-ing a pane out of the directory no longer orphans the
 		// worktree's window and has a second one opened beside it.
@@ -370,6 +393,11 @@ func newWindow(s Spec, args []string) (Window, error) {
 // treewright may do to its own windows but not to one the user happened to open
 // on a worktree's directory, such as decorating the name.
 func (w Window) Stamped() bool { return w.Worktree != "" }
+
+// LastInSession reports that this is the only window in its session, so that
+// closing it ends the session too — which moves an attached client to another
+// session or detaches it altogether. Worth saying before it happens.
+func (w Window) LastInSession() bool { return w.SessionWindows == 1 }
 
 // rank scores how strong w's claim on dir is. A window treewright opened on this
 // very worktree says so; a window treewright did not open says nothing; and a
@@ -777,15 +805,70 @@ func popupArgs(client, dir, command string, width, height int) []string {
 }
 
 // KillWindow closes a window by id.
+//
+// Nothing spells this command for a person to run any more. It used to be
+// printed — by `rm` with nobody to prompt, and by `send` for a window whose
+// agent had died — and a printed `tmux kill-window -t @3` is run from a shell
+// holding none of treewright's environment, so under TREEWRIGHT_TMUX_LABEL it
+// reached the default server and closed whatever @3 was there, silently and
+// with exit 0. `treewright close` is the verb that replaced it, and it comes
+// through here like every other tmux call.
 func KillWindow(id string) error {
 	_, err := run("kill-window", "-t", id)
 	return err
 }
 
-// LastInSession reports whether a window is the only one in its session, so that
-// closing it ends the session too — which moves an attached client to another
-// session or detaches it altogether. Worth saying before it happens.
-func LastInSession(id string) bool {
-	out, err := run("display-message", "-p", "-t", id, "#{session_windows}")
-	return err == nil && out == "1"
+// Send types one line into a window and submits it, as someone at that window's
+// keyboard would. It is how a message reaches an agent whose window is already
+// open, that agent being an ordinary TUI on an ordinary tty.
+//
+// Two calls, and both details are load-bearing in the same direction — tmux
+// reads its arguments as key names unless told otherwise. Without -l a message
+// beginning "Enter the amount" arrives as a keypress and three words; with -l on
+// the submit, Enter arrives as five characters. Each failure is silent, and each
+// puts something in somebody's session that they did not send.
+//
+// "--" ends the flags, so a message that starts with a dash is a message rather
+// than an option tmux does not have.
+//
+// One line is the caller's to enforce: Enter is what submits, so a newline in
+// the text posts the rest of it as further turns. Nothing here can tell whether
+// that was meant, which is why cmdSend refuses it rather than this splitting it.
+func Send(id, text string) error {
+	if _, err := run("send-keys", "-t", id, "-l", "--", text); err != nil {
+		return err
+	}
+	_, err := run("send-keys", "-t", id, "Enter")
+	return err
+}
+
+// Capture returns the last lines of what a window's pane is showing.
+//
+// It is what makes "look before you type" possible: an agent sitting on a
+// question with options takes the next keystrokes as the answer to it, so a
+// message sent blind can pick an option nobody read. Reading the pane changes
+// nothing and costs one tmux call.
+//
+// Only the visible pane is captured, not its scrollback, since the question is
+// what the window is showing now.
+func Capture(id string, lines int) (string, error) {
+	out, err := run("capture-pane", "-p", "-t", id)
+	if err != nil {
+		return "", err
+	}
+	return lastLines(out, lines), nil
+}
+
+// lastLines keeps the final n lines of a capture, dropping the blank ones a
+// pane's unused bottom half contributes. Split out because it is the only part
+// of Capture worth testing, and it needs no server to test.
+func lastLines(out string, n int) string {
+	all := strings.Split(out, "\n")
+	for len(all) > 0 && strings.TrimSpace(all[len(all)-1]) == "" {
+		all = all[:len(all)-1]
+	}
+	if len(all) > n {
+		all = all[len(all)-n:]
+	}
+	return strings.Join(all, "\n")
 }

@@ -435,6 +435,106 @@ func TestLsReportsTheOpenWindow(t *testing.T) {
 	}
 }
 
+// TestLsSaysWhichWindowIsYoursAndWhichEndsItsSession covers the two fields a
+// consumer working out what to close cannot answer for itself.
+//
+// Both used to be homework handed to whoever read the listing: which id is your
+// own meant a `tmux display-message` of their own to compare against, and
+// whether a window is the last in its session had no answer short of counting.
+// They are facts treewright already holds, and an agent asked to tear a worktree
+// down is exactly the reader who gets them wrong.
+func TestLsSaysWhichWindowIsYoursAndWhichEndsItsSession(t *testing.T) {
+	requireTmux(t)
+	f := newFixture(t, "command = 'sleep 300'\n")
+	mine := f.Worktree("eng-1")
+	alone := f.Worktree("eng-2")
+
+	// proj holds two windows, so closing either leaves the session standing.
+	startSession(t, "proj", "MAIN", f.MainDir)
+	openWindowOn(t, "proj", "ENG-1", mine.Dir)
+	// A session of one, which is the case worth warning about.
+	startSession(t, "solo", "ENG-2", alone.Dir)
+
+	// Standing in the worktree's own window, as an agent running there is.
+	insideSession(t, "proj")
+	t.Setenv("TMUX_PANE", paneIn(t, "proj", "ENG-1"))
+
+	rows := windowRows(t, f)
+	if got := rows["eng-1"]; !got.WindowIsCurrent {
+		t.Errorf("row = %+v, want the window this command is running in marked", got)
+	}
+	if got := rows["eng-1"]; got.WindowLastInSession {
+		t.Errorf("row = %+v, want a window with company not claimed to end its session", got)
+	}
+	// Every other row is somebody else's, including the base checkout's window.
+	for slug, row := range rows {
+		if slug != "eng-1" && row.WindowIsCurrent {
+			t.Errorf("row %s = %+v, want only one window to be the caller's own", slug, row)
+		}
+	}
+	if got := rows["eng-2"]; !got.WindowLastInSession {
+		t.Errorf("row = %+v, want the lone window in session solo flagged", got)
+	}
+}
+
+// TestLsClaimsNoWindowIsYoursOutsideTmux is the empty-string trap: outside tmux
+// there is no current window, and every row with no window open carries an empty
+// id — so a bare comparison would report every one of them as the caller's own.
+func TestLsClaimsNoWindowIsYoursOutsideTmux(t *testing.T) {
+	f := newFixture(t, "command = 'sleep 300'\n")
+	f.Worktree("eng-1")
+
+	for slug, row := range windowRows(t, f) {
+		if row.WindowIsCurrent {
+			t.Errorf("row %s = %+v, want no window claimed outside tmux", slug, row)
+		}
+		if row.WindowLastInSession {
+			t.Errorf("row %s = %+v, want no session claimed for a window that is not open", slug, row)
+		}
+	}
+}
+
+// windowRow is the window half of the ls schema, keyed by slug — with the base
+// checkout under "base", which has none of its own.
+type windowRow struct {
+	Slug                string `json:"slug"`
+	Base                bool   `json:"base"`
+	WindowID            string `json:"window_id"`
+	WindowIsCurrent     bool   `json:"window_is_current"`
+	WindowLastInSession bool   `json:"window_last_in_session"`
+}
+
+func windowRows(t *testing.T, f *fixture) map[string]windowRow {
+	t.Helper()
+	r := f.exec("ls", "--json")
+	if r.err != nil {
+		t.Fatalf("ls --json: %v\n%s", r.err, r.both())
+	}
+	var rows []windowRow
+	if err := json.Unmarshal([]byte(r.stdout), &rows); err != nil {
+		t.Fatalf("output is not valid JSON: %v\n%s", err, r.stdout)
+	}
+	byslug := make(map[string]windowRow, len(rows))
+	for _, row := range rows {
+		if row.Base {
+			byslug[baseName] = row
+			continue
+		}
+		byslug[row.Slug] = row
+	}
+	return byslug
+}
+
+// paneIn names a pane of a window, for a test that has to stand in one.
+func paneIn(t *testing.T, session, window string) string {
+	t.Helper()
+	out, err := tmuxctl(t, "list-panes", "-t", windowIDNamed(t, session, window), "-F", "#{pane_id}")
+	if err != nil {
+		t.Fatalf("find a pane in %s: %v\n%s", window, err, out)
+	}
+	return strings.Split(out, "\n")[0]
+}
+
 // TestTheWorktreesWindowIsFoundHoweverWindowsAreArranged covers the reported bug
 // end to end. Two windows stand in one worktree — the worktree's own, and a base
 // window whose shell followed a `treewright cd` into it — and which one treewright

@@ -288,6 +288,68 @@ means for the worktree just made, and names the two ways out: push and recreate,
 or cherry-pick the commits over. It is the branch that is compared, not whatever
 the checkout has out — that is `base`'s question, and it asks it separately.
 
+## Moving work that was started in the wrong place
+
+Typing in the main checkout and then realizing the change wants a branch of its
+own is ordinary. What makes it dangerous is that the work is uncommitted: until
+it is somewhere else, the base checkout is the only copy of it, and the sequence
+that moves it has a verification gate in the middle whose entire purpose is to
+be passed before anything is thrown away.
+
+That sequence lived in the claude module's guide as six commands in a strict
+order, and the order *was* the safety. Prose cannot hold that. An agent
+improvising anywhere in it loses work, and the improvisation to expect is
+`git clean -fd` for the last step — which reads as "delete the untracked files"
+and means "delete every untracked file", including the ones this move never
+touched and any ignored file sitting inside an untracked directory. So it is
+`tw move <slug>`, and the order is in the binary.
+
+**The base checkout is the last thing touched and never the first.** What runs,
+in order: list the untracked files, mark them intent-to-add so they reach a
+diff at all, write `git diff HEAD --binary` to `.git/treewright/move-<slug>.patch`,
+put the index straight back, make the worktree exactly as `new` does, apply
+with `--3way`, check the result, and only then clear the checkout the work came
+from. Every failure before that check leaves the checkout as it was found, says
+so in those words, and names the patch — which is a second copy of the work and
+the way in by hand.
+
+Four details carry more weight than they look:
+
+- **The index goes back immediately**, not at the end. From the moment the patch
+  is written the checkout is byte for byte what it was, so every later failure
+  is honest without a cleanup path of its own to get wrong.
+- **It goes back by path.** A bare `git reset` would also unstage whatever the
+  user had staged themselves, which is theirs and none of a move's business.
+  `git reset -- <the untracked files>` undoes exactly the intent-to-add entries
+  treewright wrote.
+- **The check is `git diff HEAD --stat`, not `git diff`.** `--3way` applies
+  through the index, so the work arrives staged and a plain `diff` has nothing
+  to show — which reads exactly like a patch that never applied. Verifying with
+  the wrong command is worse than not verifying: it is a gate that opens on
+  failure.
+- **What gets deleted is read from the diff, not from the untracked listing.**
+  `git diff HEAD --name-only --diff-filter=A` is every path the patch creates,
+  which includes a file the user had already `git add`ed — one the untracked
+  listing does not mention and which would otherwise survive as a second copy.
+
+Files git ignores stay where they are. They are what `carry_files` copies into
+every worktree, so a move that swept them up would take the `.env` out of the
+checkout every future worktree is carried from. Empty directories are left
+behind too, where a deleted file was the last thing in one: removing directories
+is precisely the reach that makes `clean -fd` dangerous, and an empty directory
+costs a reader nothing.
+
+**`git stash` is not the shortcut it looks like**, and this is the note for
+whoever proposes it next: one stash stack is shared by every worktree of a
+repository. A `pop` in the wrong checkout is a keystroke away, and the work is
+then in neither place anybody expected — a failure with no error message in it.
+A patch file is worse to type and cannot be popped anywhere by accident.
+
+**The window opens last**, after the work has landed, so the agent's first sight
+of the worktree is the work already in it rather than an empty checkout it is
+being asked to carry on with. `--keep` leaves the base checkout alone on success
+too, for when the work is wanted in both places.
+
 ## Output contract
 
 stdout carries the answer and nothing else, so any command can be piped:
@@ -295,6 +357,7 @@ stdout carries the answer and nothing else, so any command can be piped:
 | Command | stdout |
 |---|---|
 | `new` | the new worktree's path — `cd "$(tw new eng-1)"` works |
+| `move` | the same, printed once the work has arrived — until then there is no honest answer to where it went |
 | `cd` | the chosen worktree's path, so `cd "$(tw cd eng-1)"` works unaided |
 | `rm` | the removed worktree's path |
 | `prune` | the paths it removed, or would remove |
@@ -305,6 +368,8 @@ stdout carries the answer and nothing else, so any command can be piped:
 | `setup --refresh` | the config file's path, or the config itself with `--dry-run` |
 | `refresh` | nothing — what it did is a report, and the answer is the state it left behind |
 | `agent-init` | the plugin directory it installed into, or the plugin's files with `--print` — with what it wrote, and where else it could go, on stderr |
+| `send` | nothing — there is no answer, only something done; what the window was showing and what was typed go to stderr |
+| `close` | nothing — there is no answer, only a window that is gone; what it closed and what that cost go to stderr |
 | `signal` | nothing — the answer is the stamp on the window, and out of scope it is silent on stderr too |
 
 Progress, warnings, prompts, and errors go to stderr, prefixed `warning:` or
@@ -416,6 +481,24 @@ described with three fields, because they are consumed differently: `window` is
 the name a human reads, `window_id` is what `tmux kill-window -t` takes, and
 `window_session` is what `tmux attach -t` takes. All three are empty strings when
 no window is open.
+
+Two booleans go with them, and both exist because they were being worked out by
+hand. `window_is_current` marks the window the command is running in — the one
+whose closing ends the session doing the reporting, and the one an agent must
+not take down before it has finished answering. Reading that off the listing
+used to mean a `tmux display-message -p '#{window_id}'` of your own and a
+comparison, which is a fact treewright already has. `window_last_in_session`
+says that closing the window ends its session with it, which had no answer short
+of counting. Both are false when no window is open, and `window_is_current` is
+false outside tmux, where there is no such window — spelled explicitly, because
+the empty current window would otherwise match every row's empty `window_id`.
+
+**Neither costs a tmux call per row.** `#{session_windows}` rides in the same
+`list-panes` pass that fills the rest, so a table of a dozen worktrees still
+costs one round trip; the current window is one question about the caller, asked
+once. The per-window `display-message` that used to answer the second of them,
+for `rm`'s one window, is gone — `Window.LastInSession` reads the count the
+listing already carried.
 
 ## Statuses
 
@@ -648,6 +731,51 @@ unless you pass `--yes` to `rm`, because a window may still have a session
 running in it; with nobody to prompt — a script, an agent — both print the
 `tmux kill-window` to run instead.
 
+**What they name is `treewright close <slug>`, not a `tmux kill-window`.** The
+raw line was the last place driving treewright meant typing tmux, and it failed
+in the way that is hardest to notice. It is run from a shell holding none of
+treewright's environment, so under `TREEWRIGHT_TMUX_LABEL` a bare
+`tmux kill-window -t @3` looks in the *default* server — where `@3` is some
+other window entirely. tmux closes it and exits 0. The window that was meant to
+close stays open, one nobody asked about is gone, and nothing anywhere says so:
+a wrong session name fails loudly, a wrong server does not.
+
+`close` closes the window on a worktree and nothing else — the worktree, the
+branch and the work in them are `rm`'s business. **It works after the worktree
+has been deleted**, which is mostly what it is for: the window is found by the
+`@treewright_worktree` path recorded on it, and that record outlives the
+directory, so the same lookup answers before and after. The path is computed
+from the slug rather than looked up among the worktrees for the same reason. A
+prefix resolves while the worktree is still there and there is nothing to match
+against once it is gone, so a removed one is named in full.
+
+**Everything it says, it says before the window goes.** Closing a session's last
+window can detach the client that would have read the report, and closing the
+caller's own window kills the pane treewright is running in — there is no
+afterwards to report from. Both are said rather than refused: the second is a
+real thing to want, and the agent guide asks for exactly it as the last step of
+a teardown.
+
+**An agent still working is warned about, wherever a window is closed.** The
+agent is the window's command, so there is no detaching from this and coming
+back — the work stops and the session goes with it. That is the one thing about
+a window treewright knows and the caller may not, since the state comes from the
+agent's own hooks rather than from anything visible in the window's name, and it
+is exactly the "something may still be running in it" that stops `rm` and
+`prune` closing a window unasked in the first place. So `rm --yes` says it too,
+and `rm`'s own prompt puts it above the question, where it is the caveat most
+likely to change the answer.
+
+It warns rather than refuses. The caller asked for this, and treewright is in no
+position to judge whether what the agent is doing still matters; a refusal would
+need a `--force` to get past, which is a flag people learn to pass by reflex and
+then pass everywhere. What a warning buys is the loss being on the record at the
+moment it happens rather than discovered later.
+
+Only `working` warns. `waiting` is an agent blocked on a person and `done` is
+one with nothing in flight — those are the states an ordinary teardown closes,
+and a warning that fires on the ordinary case is one that stops being read.
+
 Closing a session's last window ends the session, which moves an attached client
 elsewhere or detaches it, so the prompt says when that is what is about to
 happen. Normally it is not: the base window outlives every worktree.
@@ -675,6 +803,7 @@ What it writes, in full:
 | `<config dir>/<name>.toml` | The registry *is* the configuration; there is no treewright without it. One directory, `rm -r` and it is gone. |
 | `<main_dir>/.git/treewright/post-create-*` | A background step's log and failure marker, inside the repository's own `.git`, which goes when the repository does. |
 | `<main_dir>/.git/treewright/no-agent-yet-*` | The note that a worktree has never had an agent in it, beside that log and gone the same way. It says what it is for in its own first line, since a marker nobody can read is a marker nobody can delete. |
+| `<main_dir>/.git/treewright/move-*.patch` | The uncommitted work `move` is carrying, written before anything is created and deleted once it has landed. What is left behind is left after a failure, deliberately: it is a second copy of work that exists in one place, and the way back in by hand. |
 | `<main_dir>/.claude/skills/treewright/` | The agent plugin, written by `agent-init` — inside the repository, in a directory treewright named and nothing else writes to. `rm -r` and it is gone, and `claude plugin disable treewright@skills-dir` stops it loading without deleting anything. |
 | `~/.claude/skills/treewright/` | The same plugin, when `agent-init --global` is asked for it. The only thing on this list outside a repository besides the registry, and the flag *is* the consent: it is not written unless it is named. |
 | The worktrees themselves | What the tool is for, and `rm` takes each one back. |

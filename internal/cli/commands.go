@@ -21,8 +21,8 @@ import (
 // ---- new -------------------------------------------------------------------
 
 func cmdNew(env *Env, args []string) error {
-	var prompt string
-	positional, err := parseArgs("new", args, nil, map[string]*string{"-p": &prompt, "--prompt": &prompt}, 2)
+	var prompt, promptFile string
+	positional, err := parseArgs("new", args, nil, promptValues(&prompt, &promptFile), 2)
 	if err != nil {
 		return err
 	}
@@ -41,27 +41,59 @@ func cmdNew(env *Env, args []string) error {
 	}
 	// Resolved before anything is created: a prompt the command cannot take is
 	// this invocation being wrong, and finding that out after the worktree
-	// exists would leave a half-made one behind an error about a flag.
+	// exists would leave a half-made one behind an error about a flag. The
+	// brief in a file is read for the same reason at the same point.
+	prompt, err = resolvePrompt("new", prompt, promptFile)
+	if err != nil {
+		return err
+	}
 	command, err := fillPrompt(cfg.Command, "command", prompt)
 	if err != nil {
 		return err
 	}
 
-	// The prefix reaches the branch and stops there. The directory, the window
-	// name, and every later resume or rm are the slug alone: which kind of work
-	// this is matters while the branch is being made, and afterwards git holds the
-	// answer — so carrying it into the slug would only lengthen every row of the
-	// table and every name the user has to type back.
+	dir, branch, err := createWorktree(env, cfg, prefix, slug)
+	if err != nil {
+		return err
+	}
+
+	// The worktree path is this command's answer, so it goes to stdout and
+	// nowhere else: `cd "$(treewright new foo)"` is meant to work.
+	fmt.Fprintln(env.Stdout, dir)
+
+	openWorktreeWindow(env, cfg, worktreeWindow{
+		Slug: slug, Branch: branch, Dir: dir,
+		Name: cfg.WindowName(slug, override), Command: command, Prompt: prompt,
+	})
+	return nil
+}
+
+// createWorktree makes the branch and the worktree, and gives the worktree
+// everything a fresh one starts with: the carried files, the background setup,
+// and the note that no agent has run in it yet.
+//
+// Split out for `move`, which wants the whole of this and then has work of its
+// own to do before a window should open. The window is deliberately not part of
+// it — `new` opens one as its last act, while `move` has a patch to land first,
+// and an agent arriving before the work does is exactly the confusion the
+// command exists to prevent.
+//
+// The prefix reaches the branch and stops there. The directory, the window
+// name, and every later resume or rm are the slug alone: which kind of work
+// this is matters while the branch is being made, and afterwards git holds the
+// answer — so carrying it into the slug would only lengthen every row of the
+// table and every name the user has to type back.
+func createWorktree(env *Env, cfg *config.Config, prefix, slug string) (dir, branch string, err error) {
 	repo := repoFor(cfg)
-	dir := cfg.DirFor(slug)
-	branch := prefix + slug
+	dir = cfg.DirFor(slug)
+	branch = prefix + slug
 
 	// Checked before anything is reported, because git's own refusal arrives
 	// several steps in — after "reusing existing branch" has already been printed
 	// — and says "already exists" about a path rather than naming the command
 	// that opens what is already there.
 	if _, err := os.Stat(dir); err == nil {
-		return fmt.Errorf("worktree %s already exists%s", slug, asFields(
+		return "", "", fmt.Errorf("worktree %s already exists%s", slug, asFields(
 			field("path", dir),
 			field("open it with", env.copyable(env.Argv0+" resume "+slug)),
 		))
@@ -71,7 +103,7 @@ func cmdNew(env *Env, args []string) error {
 	case repo.BranchExists(branch):
 		env.progressf("reusing existing branch %s", branch)
 		if err := repo.AddWorktree(dir, branch); err != nil {
-			return err
+			return "", "", err
 		}
 	default:
 		// Refresh the base branch so the fork point is the latest commit, not
@@ -79,17 +111,17 @@ func cmdNew(env *Env, args []string) error {
 		if err := repo.Fetch("origin", cfg.BaseBranch); err == nil {
 			env.progressf("creating branch %s off origin/%s", branch, cfg.BaseBranch)
 			if err := repo.AddWorktreeNewBranch(dir, branch, "origin/"+cfg.BaseBranch); err != nil {
-				return err
+				return "", "", err
 			}
 			warnIfBaseIsAhead(env, repo, cfg)
 		} else if repo.BranchExists(cfg.BaseBranch) {
 			// Offline: a local base branch is a stale but usable fork point.
 			env.warnf("origin unreachable — forking from the local %s instead\nit may be behind what is on origin", cfg.BaseBranch)
 			if err := repo.AddWorktreeNewBranch(dir, branch, cfg.BaseBranch); err != nil {
-				return err
+				return "", "", err
 			}
 		} else {
-			return fmt.Errorf("no %s ref available; refusing to guess a base", cfg.BaseBranch)
+			return "", "", fmt.Errorf("no %s ref available; refusing to guess a base", cfg.BaseBranch)
 		}
 	}
 
@@ -98,33 +130,46 @@ func cmdNew(env *Env, args []string) error {
 		env.warnf("post_create did not start: %v", err)
 	}
 	// True from the moment the worktree exists until a window has run the
-	// command in it, which is the window opened below — and stays true when that
-	// window never opens, which is the state `resume` needs to recognize.
+	// command in it — and stays true when that window never opens, which is the
+	// state `resume` needs to recognize.
 	markNoAgentYet(env, cfg, slug)
+	return dir, branch, nil
+}
 
-	// The worktree path is this command's answer, so it goes to stdout and
-	// nowhere else: `cd "$(treewright new foo)"` is meant to work.
-	fmt.Fprintln(env.Stdout, dir)
+// worktreeWindow is what a freshly made worktree needs a window for: the spec
+// tmux is given, plus the prompt, which is not tmux's business but decides
+// whether there is anything to warn about afterwards.
+type worktreeWindow struct {
+	Slug    string
+	Branch  string
+	Dir     string
+	Name    string
+	Command string
+	Prompt  string
+}
 
-	// Reported rather than returned: the worktree exists, the branch exists, and
-	// the path is already on stdout, so `cd "$(treewright new eng-1)"` must not fail
-	// because tmux could not be made to open a window. resume and base do return
-	// it, a window being the whole of what they were asked for.
+// openWorktreeWindow opens the window on a worktree that has just been created,
+// and reports rather than fails.
+//
+// The worktree exists, the branch exists, and its path is already on stdout by
+// the time this runs, so `cd "$(treewright new eng-1)"` must not fail because
+// tmux could not be made to open a window. resume and base do return that
+// error, a window being the whole of what they were asked for.
+func openWorktreeWindow(env *Env, cfg *config.Config, w worktreeWindow) {
 	created, err := openWindow(env, cfg, tmux.Spec{
-		Dir:     dir,
-		Name:    cfg.WindowName(slug, override),
-		Command: command,
-		Slug:    slug,
-		Branch:  branch,
+		Dir:     w.Dir,
+		Name:    w.Name,
+		Command: w.Command,
+		Slug:    w.Slug,
+		Branch:  w.Branch,
 	})
 	if err != nil {
 		env.warnf("%v", err)
 	}
-	warnIfPromptUndelivered(env, prompt, created, err)
+	warnIfPromptUndelivered(env, w.Prompt, created, err)
 	if created {
-		clearNoAgentYet(cfg, slug)
+		clearNoAgentYet(cfg, w.Slug)
 	}
-	return nil
 }
 
 // warnIfBaseIsAhead says so when the base branch holds commits origin has not
@@ -561,7 +606,7 @@ func cmdRm(env *Env, args []string) error {
 	if wdErr == nil && insideDir(wd, dir) {
 		escapeDeletedDir(env, cfg.MainDir, dir)
 	}
-	offerWindowClose(env, staleWindow, yes)
+	offerWindowClose(env, slug, staleWindow, yes)
 	return nil
 }
 
@@ -587,7 +632,7 @@ func escapeDeletedDir(env *Env, mainDir, goneDir string) {
 // No client is needed to close a window, so this runs outside tmux too: a worktree
 // torn down from a plain shell should not leave a window behind in the session
 // waiting to be attached to.
-func offerWindowClose(env *Env, window tmux.Window, assumeYes bool) {
+func offerWindowClose(env *Env, slug string, window tmux.Window, assumeYes bool) {
 	if window.ID == "" {
 		return
 	}
@@ -600,11 +645,16 @@ func offerWindowClose(env *Env, window tmux.Window, assumeYes bool) {
 	// the session goes, and an attached client goes with it — and a reader
 	// weighing that should not have to find it in the middle of the question.
 	last := ""
-	if tmux.LastInSession(window.ID) {
+	if window.LastInSession() {
 		last = fmt.Sprintf("it is the last in session %s, which ends with it", window.Session)
 	}
 
 	if assumeYes {
+		// --yes answered "close the window", which is not the same as "tell me
+		// nothing about what was in it" — the whole reason a window is not closed
+		// unasked is that something may still be running in it, and here treewright
+		// knows that something was.
+		warnIfAgentWorking(env, window)
 		_ = tmux.KillWindow(window.ID)
 		env.progressf("closed its tmux window %s%s", window.Name, under(last))
 		return
@@ -614,17 +664,23 @@ func offerWindowClose(env *Env, window tmux.Window, assumeYes bool) {
 	if err != nil {
 		// Nobody to ask — treewright was run by a script or an agent. Say what to
 		// run rather than closing a window unasked, since something may still be
-		// running in it.
+		// running in it. `close` still finds the window afterwards: it is found by
+		// the directory treewright recorded on it, and that record outlives the
+		// directory this command has just deleted.
 		env.progressf("tmux window %s now points at a deleted directory%s%s",
 			window.Name, under(last),
-			asFields(field("close it with", env.copyable("tmux kill-window -t "+window.ID))))
+			asFields(field("close it with", closeHint(env, slug))))
 		return
 	}
 	defer tty.Close()
 
-	// Above the question rather than through progressf, because the caveat and
+	// Above the question rather than through progressf, because the caveats and
 	// the question have to arrive together on the same terminal, and stderr may
-	// have been sent somewhere else entirely.
+	// have been sent somewhere else entirely. A working agent is the caveat most
+	// likely to change the answer, so it goes first.
+	if window.State == stateWorking {
+		fmt.Fprintf(tty, "its agent says it is working, and closing the window stops it\n")
+	}
 	if last != "" {
 		fmt.Fprintf(tty, "%s\n", last)
 	}
@@ -699,7 +755,7 @@ func cmdLs(env *Env, args []string) error {
 		// An array, never a message: a caller parsing this needs valid JSON
 		// whether or not there is anything to report, and the base row is there
 		// in every repository this command can answer about.
-		return writeJSON(env, worktreesJSON(infos, windows))
+		return writeJSON(env, worktreesJSON(infos, windows, tmux.CurrentWindow()))
 	}
 	if len(infos) == 0 {
 		env.progressf("no worktrees for %s", repo.Name())
@@ -788,7 +844,7 @@ func cmdPrune(env *Env, args []string) error {
 	// worktrees", which is not the same as "close my windows" — one of them may
 	// have a session still running in it.
 	for _, wt := range targets {
-		offerWindowClose(env, windows[wt.Dir], false)
+		offerWindowClose(env, wt.Slug, windows[wt.Dir], false)
 	}
 	return nil
 }
@@ -796,8 +852,8 @@ func cmdPrune(env *Env, args []string) error {
 // ---- resume ----------------------------------------------------------------
 
 func cmdResume(env *Env, args []string) error {
-	var prompt string
-	positional, err := parseArgs("resume", args, nil, map[string]*string{"-p": &prompt, "--prompt": &prompt}, 1)
+	var prompt, promptFile string
+	positional, err := parseArgs("resume", args, nil, promptValues(&prompt, &promptFile), 1)
 	if err != nil {
 		return err
 	}
@@ -805,8 +861,13 @@ func cmdResume(env *Env, args []string) error {
 	if err != nil {
 		return err
 	}
-	// Before the menu, so a resume_command that cannot take the prompt is
-	// refused before anyone has picked a row to send it to.
+	// Before the menu, so a brief that is not there and a resume_command that
+	// cannot take the prompt are both refused before anyone has picked a row to
+	// send it to.
+	prompt, err = resolvePrompt("resume", prompt, promptFile)
+	if err != nil {
+		return err
+	}
 	command, err := fillPrompt(cfg.ResumeCommand, "resume_command", prompt)
 	if err != nil {
 		return err

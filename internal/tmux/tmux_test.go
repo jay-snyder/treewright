@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -27,8 +28,18 @@ func stamped(id, session, name, worktree, dir string) string {
 
 // signaled renders a pane whose window also carries an agent state, the way one
 // looks after `treewright signal` has run in its worktree.
+//
+// Its session holds two windows, which is the ordinary case and the one that
+// matters least: nothing about resolving a directory to a window depends on the
+// count, and the one thing that does — whether closing it ends the session —
+// has a test of its own below.
 func signaled(id, session, name, worktree, state, dir string) string {
-	return strings.Join([]string{id, session, name, worktree, state, dir}, "\t")
+	return inSession(2, id, session, name, worktree, state, dir)
+}
+
+// inSession renders a pane whose session holds a given number of windows.
+func inSession(windows int, id, session, name, worktree, state, dir string) string {
+	return strings.Join([]string{id, session, name, worktree, state, strconv.Itoa(windows), dir}, "\t")
 }
 
 func TestParsePanes(t *testing.T) {
@@ -43,7 +54,7 @@ func TestParsePanes(t *testing.T) {
 			out:    pane("@3", "myrepo", "ENG-1", "/Users/x/code/repo"),
 			prefer: "myrepo",
 			want: map[string]Window{
-				"/Users/x/code/repo": {ID: "@3", Session: "myrepo", Name: "ENG-1"},
+				"/Users/x/code/repo": {ID: "@3", Session: "myrepo", Name: "ENG-1", SessionWindows: 2},
 			},
 		},
 		{
@@ -55,7 +66,7 @@ func TestParsePanes(t *testing.T) {
 			out:    pane("@7", "my repo", "WIN NAME", "/Users/x/my code/repo-foo"),
 			prefer: "my repo",
 			want: map[string]Window{
-				"/Users/x/my code/repo-foo": {ID: "@7", Session: "my repo", Name: "WIN NAME"},
+				"/Users/x/my code/repo-foo": {ID: "@7", Session: "my repo", Name: "WIN NAME", SessionWindows: 2},
 			},
 		},
 		{
@@ -65,7 +76,7 @@ func TestParsePanes(t *testing.T) {
 			out:    pane("@1", "s", "W", "/a\tb"),
 			prefer: "s",
 			want: map[string]Window{
-				"/a\tb": {ID: "@1", Session: "s", Name: "W"},
+				"/a\tb": {ID: "@1", Session: "s", Name: "W", SessionWindows: 2},
 			},
 		},
 		{
@@ -73,8 +84,8 @@ func TestParsePanes(t *testing.T) {
 			out:    pane("@1", "s", "A", "/a") + "\n" + pane("@2", "s", "B", "/b"),
 			prefer: "s",
 			want: map[string]Window{
-				"/a": {ID: "@1", Session: "s", Name: "A"},
-				"/b": {ID: "@2", Session: "s", Name: "B"},
+				"/a": {ID: "@1", Session: "s", Name: "A", SessionWindows: 2},
+				"/b": {ID: "@2", Session: "s", Name: "B", SessionWindows: 2},
 			},
 		},
 		{
@@ -85,7 +96,7 @@ func TestParsePanes(t *testing.T) {
 			out:    pane("@2", "s", "SECOND", "/shared") + "\n" + pane("@1", "s", "FIRST", "/shared"),
 			prefer: "s",
 			want: map[string]Window{
-				"/shared": {ID: "@1", Session: "s", Name: "FIRST"},
+				"/shared": {ID: "@1", Session: "s", Name: "FIRST", SessionWindows: 2},
 			},
 		},
 		{
@@ -95,7 +106,7 @@ func TestParsePanes(t *testing.T) {
 			out:    pane("@9", "s", "NINTH", "/shared") + "\n" + pane("@10", "s", "TENTH", "/shared"),
 			prefer: "s",
 			want: map[string]Window{
-				"/shared": {ID: "@9", Session: "s", Name: "NINTH"},
+				"/shared": {ID: "@9", Session: "s", Name: "NINTH", SessionWindows: 2},
 			},
 		},
 		{
@@ -106,7 +117,7 @@ func TestParsePanes(t *testing.T) {
 			out:    pane("@1", "elsewhere", "STRAY", "/shared") + "\n" + pane("@2", "myrepo", "MINE", "/shared"),
 			prefer: "myrepo",
 			want: map[string]Window{
-				"/shared": {ID: "@2", Session: "myrepo", Name: "MINE"},
+				"/shared": {ID: "@2", Session: "myrepo", Name: "MINE", SessionWindows: 2},
 			},
 		},
 		{
@@ -119,7 +130,7 @@ func TestParsePanes(t *testing.T) {
 				stamped("@2", "myrepo", "ENG-1", "/wt/eng-1", "/wt/eng-1"),
 			prefer: "myrepo",
 			want: map[string]Window{
-				"/wt/eng-1": {ID: "@2", Session: "myrepo", Name: "ENG-1", Worktree: "/wt/eng-1"},
+				"/wt/eng-1": {ID: "@2", Session: "myrepo", Name: "ENG-1", Worktree: "/wt/eng-1", SessionWindows: 2},
 			},
 		},
 		{
@@ -130,7 +141,7 @@ func TestParsePanes(t *testing.T) {
 				stamped("@2", "elsewhere", "ENG-1", "/wt/eng-1", "/wt/eng-1"),
 			prefer: "myrepo",
 			want: map[string]Window{
-				"/wt/eng-1": {ID: "@2", Session: "elsewhere", Name: "ENG-1", Worktree: "/wt/eng-1"},
+				"/wt/eng-1": {ID: "@2", Session: "elsewhere", Name: "ENG-1", Worktree: "/wt/eng-1", SessionWindows: 2},
 			},
 		},
 		{
@@ -140,8 +151,8 @@ func TestParsePanes(t *testing.T) {
 			out:    stamped("@2", "myrepo", "ENG-1", "/wt/eng-1", "/somewhere/else"),
 			prefer: "myrepo",
 			want: map[string]Window{
-				"/wt/eng-1":       {ID: "@2", Session: "myrepo", Name: "ENG-1", Worktree: "/wt/eng-1"},
-				"/somewhere/else": {ID: "@2", Session: "myrepo", Name: "ENG-1", Worktree: "/wt/eng-1"},
+				"/wt/eng-1":       {ID: "@2", Session: "myrepo", Name: "ENG-1", Worktree: "/wt/eng-1", SessionWindows: 2},
+				"/somewhere/else": {ID: "@2", Session: "myrepo", Name: "ENG-1", Worktree: "/wt/eng-1", SessionWindows: 2},
 			},
 		},
 		{
@@ -153,8 +164,8 @@ func TestParsePanes(t *testing.T) {
 				pane("@5", "myrepo", "VISITOR", "/wt/eng-1"),
 			prefer: "myrepo",
 			want: map[string]Window{
-				"/wt/eng-1": {ID: "@5", Session: "myrepo", Name: "VISITOR"},
-				"/wt/eng-2": {ID: "@1", Session: "myrepo", Name: "ENG-2", Worktree: "/wt/eng-2"},
+				"/wt/eng-1": {ID: "@5", Session: "myrepo", Name: "VISITOR", SessionWindows: 2},
+				"/wt/eng-2": {ID: "@1", Session: "myrepo", Name: "ENG-2", Worktree: "/wt/eng-2", SessionWindows: 2},
 			},
 		},
 		{
@@ -164,7 +175,7 @@ func TestParsePanes(t *testing.T) {
 			out:    pane("@9", "someone-else", "HAND-MADE", "/shared"),
 			prefer: "myrepo",
 			want: map[string]Window{
-				"/shared": {ID: "@9", Session: "someone-else", Name: "HAND-MADE"},
+				"/shared": {ID: "@9", Session: "someone-else", Name: "HAND-MADE", SessionWindows: 2},
 			},
 		},
 		{
@@ -172,8 +183,8 @@ func TestParsePanes(t *testing.T) {
 			out:    pane("@1", "s", "A", "/a") + "\nnotabs\n" + pane("@2", "s", "B", "") + "\n" + pane("@3", "s", "C", "/b"),
 			prefer: "s",
 			want: map[string]Window{
-				"/a": {ID: "@1", Session: "s", Name: "A"},
-				"/b": {ID: "@3", Session: "s", Name: "C"},
+				"/a": {ID: "@1", Session: "s", Name: "A", SessionWindows: 2},
+				"/b": {ID: "@3", Session: "s", Name: "C", SessionWindows: 2},
 			},
 		},
 		{
@@ -183,7 +194,7 @@ func TestParsePanes(t *testing.T) {
 			out:    signaled("@2", "myrepo", "ENG-1", "/wt/eng-1", "waiting", "/wt/eng-1"),
 			prefer: "myrepo",
 			want: map[string]Window{
-				"/wt/eng-1": {ID: "@2", Session: "myrepo", Name: "ENG-1", State: "waiting", Worktree: "/wt/eng-1"},
+				"/wt/eng-1": {ID: "@2", Session: "myrepo", Name: "ENG-1", State: "waiting", Worktree: "/wt/eng-1", SessionWindows: 2},
 			},
 		},
 		{
@@ -194,7 +205,29 @@ func TestParsePanes(t *testing.T) {
 			out:    signaled("@2", "myrepo", "!ENG-1", "/wt/eng-1", "waiting", "/wt/eng-1"),
 			prefer: "myrepo",
 			want: map[string]Window{
-				"/wt/eng-1": {ID: "@2", Session: "myrepo", Name: "ENG-1", State: "waiting", Worktree: "/wt/eng-1"},
+				"/wt/eng-1": {ID: "@2", Session: "myrepo", Name: "ENG-1", State: "waiting", Worktree: "/wt/eng-1", SessionWindows: 2},
+			},
+		},
+		{
+			// The window count rides the same listing, so a table of a dozen
+			// worktrees can say which of their windows would take a session
+			// down with it without a round trip per row.
+			name:   "a lone window reports the session it would end",
+			out:    inSession(1, "@2", "myrepo", "ENG-1", "/wt/eng-1", "", "/wt/eng-1"),
+			prefer: "myrepo",
+			want: map[string]Window{
+				"/wt/eng-1": {ID: "@2", Session: "myrepo", Name: "ENG-1", Worktree: "/wt/eng-1", SessionWindows: 1},
+			},
+		},
+		{
+			// tmux always answers with a number; a listing that somehow does not
+			// leaves the count at zero, which reads as "not the last window".
+			// Saying nothing is the right way to be wrong about a caveat.
+			name:   "an unreadable count is not a claim",
+			out:    inSession(0, "@2", "myrepo", "ENG-1", "/wt/eng-1", "", "/wt/eng-1"),
+			prefer: "myrepo",
+			want: map[string]Window{
+				"/wt/eng-1": {ID: "@2", Session: "myrepo", Name: "ENG-1", Worktree: "/wt/eng-1"},
 			},
 		},
 		{
@@ -439,5 +472,38 @@ func TestAttachArgs(t *testing.T) {
 	t.Setenv("TREEWRIGHT_TMUX_LABEL", "work")
 	if got, want := strings.Join(AttachArgs("api"), " "), "-L work attach-session -t =api"; got != want {
 		t.Errorf("AttachArgs under a label = %q, want %q", got, want)
+	}
+}
+
+// TestLastLines covers what Capture does to a pane's contents before anyone
+// reads them: a pane is mostly empty below whatever is running in it, and a
+// tail that counted those blank rows would report twenty lines of nothing about
+// a window that is asking a question.
+func TestLastLines(t *testing.T) {
+	tests := []struct {
+		name string
+		out  string
+		n    int
+		want string
+	}{
+		{"shorter than the tail", "one\ntwo", 20, "one\ntwo"},
+		{"cut to the last lines", "one\ntwo\nthree\nfour", 2, "three\nfour"},
+		{
+			// The case it exists for: a question at the top of an otherwise
+			// empty pane still reaches the reader.
+			name: "the empty bottom of a pane does not count",
+			out:  "overwrite the file? y/n\n\n   \n\n",
+			n:    2,
+			want: "overwrite the file? y/n",
+		},
+		{"blank lines between content are kept", "one\n\ntwo", 3, "one\n\ntwo"},
+		{"nothing at all", "", 20, ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := lastLines(tc.out, tc.n); got != tc.want {
+				t.Errorf("lastLines(%q, %d) = %q, want %q", tc.out, tc.n, got, tc.want)
+			}
+		})
 	}
 }
