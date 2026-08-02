@@ -130,6 +130,44 @@ value, so an omitted key defaults and a key set to `""` stays empty. A
 never-matching regexp was the alternative — undiscoverable, and RE2 has no
 negative lookahead to write one with.
 
+### An empty command, and the one key that overrules it
+
+The command keys have the same shape and reached it later. `tmux.Spec` has
+always documented a blank command as "leaves a shell", and `newWindow` omits a
+blank rather than passing an empty string — so the plumbing for a window with no
+agent in it was there the whole time, and no config could ask for it. `Load`
+defaulted on the value, so `command = ""` came back as `claude {prompt}`, and
+`treewright config` — the command whose entire subject is the gap between a file
+and its behavior — reported that value with the FROM column blank, meaning *the
+file's own*. About a file that said no such thing.
+
+Both command keys now default on `!Explicit(...)`, so `command = ""` opens the
+window on a shell and only a file that never mentions the key takes `claude`.
+The half-deleted-line worry that argued for the old collapse does not survive
+contact with the failure it produces: a window holding a shell is visible the
+moment it opens, where a wrong `ticket_pattern` is invisible for weeks.
+
+**`agent` is the exception, deliberately.** It fills a blank command however the
+blank got there, so `agent = "claude"` with `command = ""` runs claude, and a
+repository that wants the shell removes the agent key too. The alternative —
+carry claude's settings and plugin into every worktree, then open a shell — is a
+combination nobody asked for, and supporting it would make one key's empty value
+mean two different things depending on whether another key is present.
+
+That exception costs one piece of bookkeeping. Once the module has filled a
+blank, an explicit `""` and an absent key are the same value under two different
+answers from `Explicit`, so `setup --refresh` cannot tell whether to write the
+line back. `Config.AgentFilled` records the fill for exactly that reader:
+a value the module supplied follows treewright's changes to that module, and the
+identical string written into the file stops following them — the
+default-becomes-a-setting trap every other key here is guarded against.
+
+The old generated config carried the other half of this. "Remove this key for a
+window with no agent in it," it said about `agent`, which was false: removing it
+stopped the carry and the module's defaults, and left `DefaultCommand`, which is
+`claude {prompt}`. You got claude either way. It now says to set `command = ""`
+as well, which is the thing that is actually true.
+
 **The fallback spent characters saying characters were missing.** `rewrite-css` is
 eleven characters and arrived as `REWRITE-CS...` — thirteen, to save one. So
 `shorten` now keeps a shortened name only when it is genuinely narrower than what
@@ -874,12 +912,21 @@ re-derived them would quietly undo the ones that disagree with what treewright
 would guess today. What moves is the version, the commentary, and any key the
 generator has since learned to write.
 
-Two details in the rewrite are load-bearing. The prefixes come back under
-whichever of the two spellings the file used, since no config may set both. And
-`ticket_pattern` is written on whether the key was *there* rather than on whether
-it holds anything — `ticket_pattern = ""` is how a repository that tracks no
-tickets turns the search off, and a refresh that dropped it for looking empty
-would turn every window name in that repository back into a ticket hunt.
+Three details in the rewrite are load-bearing. The prefixes come back under
+whichever of the two spellings the file used, since no config may set both —
+and their commentary claims no provenance, because none is on record: whether a
+single prefix began as origin evidence or as an email guess was never written
+down, and a rewrite that re-emitted the guess's paragraph would assert facts
+about a git email this run never consulted. An explicit `branch_prefix = ""`
+survives as the live line it is, for the same reason `ticket_pattern` does:
+that key is written on whether it was *there* rather than on whether it holds
+anything — `ticket_pattern = ""` is how a repository that tracks no tickets
+turns the search off, and a refresh that dropped it for looking empty would
+turn every window name in that repository back into a ticket hunt. And every
+key with a default is read back through `Explicit`, `base_branch` included: a
+file that never set one gets the commented default back, never a live line,
+because a default written into the file as a setting is one that stops
+following treewright's own changes.
 
 Which config applies, in order: an explicit name; the config whose `main_dir` is
 the repository you are standing in; the only config, when the registry holds
@@ -937,7 +984,11 @@ makes a temp file, passes its path in `$TREEWRIGHT_EVAL_FILE`, and sources it
 after treewright exits. Two commands write to it — `cd`, and `rm` when your shell
 is standing in the directory being deleted. Everything must still behave
 correctly when the file is never sourced, which is why those commands also print
-the `cd` to run.
+the `cd` to run. An eval file that exists and cannot be written — a swept
+tmpdir, a full disk — is the same failure with a cause worth naming, so it is
+reported as a warning with the same by-hand line under it; both halves live in
+one helper, `moveShell`, so a new caller cannot keep the emit and forget the
+fallback.
 
 The shims are emitted by the binary rather than installed as files, so they can
 never drift out of sync with it — the same approach fzf, zoxide, direnv, and

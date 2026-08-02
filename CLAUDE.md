@@ -92,7 +92,8 @@ by default), revive, godot, gofumpt, funcorder's constructor rule — and the li
 left out are listed in `.golangci.yaml` with the reason, each grounded in Go's own
 guidance rather than in this repo's habits. Three exemptions exist, all narrow and
 all written where they apply: `//nolint:nilerr` on completion's four
-returns, `//nolint:usetesting` on the three tmux socket directories, and errcheck's
+returns, `//nolint:usetesting` on `testenv.PrivateTmuxServer`'s socket directory
+(the one place every tmux-driving test gets its isolation from), and errcheck's
 standard exclusion of the `fmt.Fprint` family. `nolintlint` requires every one of
 them to name its linter and say why, so a bare `//nolint` will not pass.
 
@@ -203,9 +204,10 @@ point them at buffers.
 `env.Argv0` (`tw`, usually). Anything destined for a *file* a program reads —
 tmux.conf lines, shell startup evals, help prose — spells out `treewright`.
 
-**Everything works without the shell integration.** `emitEval` is a no-op when
-`TREEWRIGHT_EVAL_FILE` is unset, so every caller must also print what to run by
-hand.
+**Everything works without the shell integration.** A shell command may never
+run — no integration loaded, or an eval file that cannot be written — so the
+by-hand line and the failure report belong beside the emit, which is what
+`moveShell` in `eval.go` owns. Don't call `appendEval` directly from a command.
 
 **tmux session targets are exact.** tmux matches session names as prefixes, so
 every session target goes through `exact()` → `=name`. Window targets are window
@@ -245,6 +247,17 @@ rather than a precedence rule. `post_create` deliberately does *not* follow that
 pattern — it is one key taking either a string or a list, via
 `config.Commands.UnmarshalTOML`, so there is no second key to set as well. Don't
 "make it consistent" by adding one.
+
+**An empty `command` is a setting too, and the agent key is its one exception.**
+`command = ""` opens the window on a shell — `tmux.Spec` has always honored a
+blank that way, and it is the only way a repo asks for a window with no agent in
+it — so `Load` defaults both command keys on `!Explicit(...)` as it does
+`ticket_pattern`. The exception is `agent`, which fills a blank command however
+the blank got there: `agent = "claude"` plus `command = ""` runs claude, and a
+repo that wants the shell drops the agent key as well. That fill is *recorded*
+(`Config.AgentFilled`), because once it has happened an explicit blank and an
+absent key are the same value — and `setup --refresh` has to tell them apart or
+it writes the module's own command back as a setting that stops following it.
 
 **An empty `ticket_pattern` is a setting, not a missing one.** `Load` defaults it
 on `!Explicit("ticket_pattern")` rather than on `== ""`, because `""` is how a

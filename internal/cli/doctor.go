@@ -79,11 +79,11 @@ type report struct {
 	failed   bool
 }
 
-// groupHeadings are the sections, in the order they are printed. The install
-// checks come first because a broken one of those breaks every repository, and
-// then a section per config — which is what took "proj: " off the front of
-// every line that concerned proj. Repeated down a column it was noise; said
-// once above the rows it covers, it is the thing they have in common.
+// installGroup heads the install checks' section. It comes first because a
+// broken installation breaks every repository, and after it comes a section per
+// config — which is what took "proj: " off the front of every line that
+// concerned proj. Repeated down a column it was noise; said once above the rows
+// it covers, it is the thing they have in common.
 const installGroup = "installation"
 
 // in opens a section. Every finding added after it belongs to that section,
@@ -175,7 +175,7 @@ func cmdDoctor(env *Env, args []string) error {
 	var r report
 	r.in(installGroup)
 	checkTmux(&r)
-	checkTmuxIntegration(&r)
+	checkTmuxIntegration(env, &r)
 	checkShellIntegration(env, &r)
 	checkRelease(env, &r)
 	names := checkRegistry(env, &r)
@@ -183,12 +183,14 @@ func cmdDoctor(env *Env, args []string) error {
 	// A section per config, each holding everything about that repository —
 	// which is why the session check, previously a pass of its own after every
 	// config, now runs inside the loop. Only the clash it looks for spans two
-	// configs, and that is reported after them all.
+	// configs, and that is reported after them all. The config is loaded once,
+	// here, and handed down: checkSession used to re-run the load checkConfig
+	// had just done, coupled to it only by "a failure was already reported".
 	sessions := make(map[string][]string)
 	for _, name := range names {
 		r.in(name)
-		checkConfig(env, &r, name)
-		checkSession(&r, name, sessions)
+		cfg := checkConfig(env, &r, name)
+		checkSession(&r, cfg, sessions)
 	}
 	r.in(installGroup)
 	checkSharedSessions(&r, sessions)
@@ -221,9 +223,11 @@ func checkTmux(r *report) {
 	case session != "":
 		r.addf(levelOK, "tmux session", "attached to %s", session)
 	case tmux.Inside():
-		// $TMUX is set but the server behind it did not answer, which is what a
-		// stale environment inherited from a dead session looks like.
-		r.addf(levelWarn, "tmux session", "$TMUX is set but its server does not answer\nwindows may open on another server")
+		// $TMUX is set but which session this is cannot be told: a stale
+		// environment inherited from a dead session, or one scrubbed of the
+		// $TMUX_PANE the question is asked through. CurrentSession refuses to
+		// guess in either case, and so does this finding.
+		r.addf(levelWarn, "tmux session", "$TMUX is set but which session this is cannot be told\na stale environment from a dead session looks like this\nwindows may open on another server")
 	default:
 		// Not a fault: treewright is often run from a plain shell, and windows are
 		// still opened, in the repository's own session, to attach to afterwards.
@@ -238,7 +242,7 @@ func checkTmux(r *report) {
 // It matters most in the case it is hardest to notice — a window running an agent
 // has no shell in it, so without a binding there is no way to reach treewright from
 // inside a worktree at all.
-func checkTmuxIntegration(r *report) {
+func checkTmuxIntegration(env *Env, r *report) {
 	if !tmux.Available() {
 		return // already reported as a failure by checkTmux
 	}
@@ -266,7 +270,7 @@ func checkTmuxIntegration(r *report) {
 		// same answer.
 		r.addf(levelWarn, "tmux integration", "loaded, but not by this treewright\n"+
 			"the keys work — what the upgrade changed about them is not in the server\n"+
-			"reload it:  treewright refresh")
+			"reload it:  %s refresh", env.Argv0)
 	default:
 		// Three lines because there are three things here: what is wrong, what it
 		// costs, and the line that fixes it. The line to paste goes last, where a
@@ -279,17 +283,14 @@ func checkTmuxIntegration(r *report) {
 }
 
 // checkSession reports which session a repository's windows go to, recording
-// the ownership that checkSharedSessions then looks across.
-func checkSession(r *report, name string, owners map[string][]string) {
-	if !tmux.Available() {
+// the ownership that checkSharedSessions then looks across. A nil cfg is a
+// config that would not load, which checkConfig has already reported.
+func checkSession(r *report, cfg *config.Config, owners map[string][]string) {
+	if cfg == nil || !tmux.Available() {
 		return
 	}
-	cfg, err := config.Load(filepath.Join(config.Dir(), name+".toml"))
-	if err != nil {
-		return // already reported by checkConfig
-	}
 	session := sessionFor(cfg)
-	owners[session] = append(owners[session], name)
+	owners[session] = append(owners[session], cfg.Name)
 	if tmux.HasSession(session) {
 		r.addf(levelOK, "tmux session", "%s, running", session)
 		return
@@ -343,8 +344,7 @@ func checkShellIntegration(env *Env, r *report) {
 			// same. treewright cannot do it from here, a process having no way to
 			// define a function in its parent.
 			r.addf(levelWarn, "shell integration", "loaded, but not by this treewright\n"+
-				"the wrapper in this shell is the one it started with\n"+
-				"open a new terminal, or re-run the line in your startup file")
+				"the wrapper in this shell is the one it started with\n"+staleShellAdvice)
 		}
 		return
 	}
@@ -379,8 +379,7 @@ func checkShellIntegration(env *Env, r *report) {
 func checkRelease(env *Env, r *report) {
 	switch state, latest := checkForNewerRelease(env.Version); state {
 	case releaseBehind:
-		r.addf(levelWarn, "release", "treewright %s is out, and this is %s\n%s",
-			latest, env.Version, releaseUpgradeAdvice())
+		r.addf(levelWarn, "release", "%s", releaseBehindNotice(latest, env.Version, releaseUpgradeAdvice()))
 	case releaseCurrent:
 		r.addf(levelOK, "release", "%s, the latest", latest)
 	case releaseIncomparable:
@@ -422,11 +421,14 @@ func checkRegistry(env *Env, r *report) []string {
 	return names
 }
 
-func checkConfig(env *Env, r *report, name string) {
+// checkConfig inspects one config, returning what it loaded — nil for a file
+// that would not load, after reporting it — so the caller can hand the same
+// parse to the session check rather than paying for a second one.
+func checkConfig(env *Env, r *report, name string) *config.Config {
 	cfg, err := config.Load(filepath.Join(config.Dir(), name+".toml"))
 	if err != nil {
 		r.addf(levelFail, "config", "%v", err)
-		return
+		return nil
 	}
 	checkConfigVersion(env, r, cfg)
 
@@ -435,12 +437,12 @@ func checkConfig(env *Env, r *report, name string) {
 		// The likeliest config fault by far: a repository that was moved or
 		// renamed after being registered.
 		r.addf(levelFail, "main_dir", "%s does not exist", cfg.MainDir)
-		return
+		return cfg
 	}
 	gitMain, err := repo.MainDir()
 	if err != nil {
 		r.addf(levelFail, "main_dir", "%s is not a git repository", cfg.MainDir)
-		return
+		return cfg
 	}
 	if gitMain != cfg.MainDir {
 		// Worktrees are matched by path prefix against git's own spelling, so a
@@ -449,7 +451,7 @@ func checkConfig(env *Env, r *report, name string) {
 		// make one along a single line — so they are stacked in a column.
 		r.addf(levelFail, "main_dir", "the config and git disagree about where the repo is%s",
 			asFields(field("config says", cfg.MainDir), field("git says", gitMain)))
-		return
+		return cfg
 	}
 	r.addf(levelOK, "main_dir", "%s", cfg.MainDir)
 
@@ -484,7 +486,13 @@ func checkConfig(env *Env, r *report, name string) {
 	} {
 		words := strings.Fields(setting.command)
 		if len(words) == 0 {
-			r.addf(levelWarn, setting.label, "blank — the window would open running nothing")
+			// A setting rather than a fault: a blank command opens the window
+			// on a shell, which is how a repository asks for a window with no
+			// agent in it. It is still said, unlike the ordinary command that
+			// merely works, because what follows from it — an AGENT column
+			// that never fills and no state ever reported — is otherwise a
+			// silence somebody eventually files as a bug.
+			r.addf(levelOK, setting.label, "blank — the window opens a shell, and no agent reports state")
 			continue
 		}
 		if _, err := exec.LookPath(words[0]); err != nil {
@@ -493,6 +501,7 @@ func checkConfig(env *Env, r *report, name string) {
 	}
 
 	checkAgentWiring(env, r, cfg)
+	return cfg
 }
 
 // checkConfigVersion reports a config file written for a different revision of
@@ -578,14 +587,14 @@ func checkAgentWiring(env *Env, r *report, cfg *config.Config) {
 		// Code runs hooks from every scope it loads — so this is not "no
 		// wiring". It is wiring treewright cannot keep current, which is the
 		// whole reason the plugin exists.
-		r.addf(levelWarn, "agent", "the hooks in %s are a pasted copy\ntreewright cannot keep them up to date\nreplace them:  treewright agent-init %s",
-			pasted, module.Name)
+		r.addf(levelWarn, "agent", "the hooks in %s are a pasted copy\ntreewright cannot keep them up to date\nreplace them:  %s agent-init %s",
+			pasted, env.Argv0, module.Name)
 	case project == pluginAbsent && user == pluginAbsent:
-		r.addf(levelWarn, "agent", "%s is not wired to report state\nthe AGENT column of ls stays empty\ninstall the plugin:  treewright agent-init %s",
-			module.Name, module.Name)
+		r.addf(levelWarn, "agent", "%s is not wired to report state\nthe AGENT column of ls stays empty\ninstall the plugin:  %s agent-init %s",
+			module.Name, env.Argv0, module.Name)
 	case project == pluginStale || user == pluginStale:
-		r.addf(levelWarn, "agent", "the %s plugin is not what this treewright would write\nbring it up to date:  treewright agent-init %s",
-			module.Name, module.Name)
+		r.addf(levelWarn, "agent", "the %s plugin is not what this treewright would write\nbring it up to date:  %s agent-init %s",
+			module.Name, env.Argv0, module.Name)
 	case project == pluginCurrent && cfg.Agent == "" && !carriesPlugin(module, cfg):
 		r.addf(levelWarn, "agent", "the %s plugin in %s reaches no worktree\nadd to the config:  agent = %q",
 			module.Name, module.ProjectPlugin, module.Name)

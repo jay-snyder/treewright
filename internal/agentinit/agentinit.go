@@ -148,6 +148,12 @@ func (a Agent) LocalState() []string {
 // The layout lives here rather than in the command for the same reason the hook
 // mapping does: it is a fact about one agent. A second module ships a different
 // tree and this writes it unchanged.
+//
+// Every file is written 0o644. That is a limitation, not a policy: a plugin's
+// bin/ entries are meant to be executables on the agent's PATH, and a module
+// that ships one will need a mode on PluginFile before what this installs can
+// run. Nothing ships one today, and saying so here is the whole of the support
+// until something does.
 func (a Agent) Install(dir string) ([]string, error) {
 	var written []string
 	for _, f := range a.Plugin {

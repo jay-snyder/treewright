@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"errors"
 	"os"
 	"path/filepath"
@@ -350,9 +351,12 @@ func TestSetupDetectsAnInstalledAgent(t *testing.T) {
 func TestDoctorWarnsWhenTheAgentReportsNoState(t *testing.T) {
 	f := agentFixture(t, "agent = 'claude'\n")
 
-	out, _ := f.run("doctor")
-	if !strings.Contains(out, "not wired to report state") || !strings.Contains(out, "agent-init claude") {
-		t.Errorf("doctor = %q, want the missing wiring named with its fix", out)
+	found := findings(t, f)
+	if got := has(t, found, "not wired to report state"); got != "warn" {
+		t.Errorf("finding = %q, want a warning about the missing wiring\nall: %v", got, found)
+	}
+	if got := has(t, found, "agent-init claude"); got == "" {
+		t.Errorf("no finding names the fix\nall: %v", found)
 	}
 }
 
@@ -364,20 +368,19 @@ func TestDoctorNamesTheCarryTrap(t *testing.T) {
 	f := agentFixture(t, "")
 	f.mustRun("agent-init", "claude")
 
-	out, _ := f.run("doctor")
-	if !strings.Contains(out, "reaches no worktree") {
-		t.Errorf("doctor = %q, want the trap named", out)
+	if got := has(t, findings(t, f), "reaches no worktree"); got != "warn" {
+		t.Errorf("finding = %q, want the trap warned about", got)
 	}
 
 	// The agent key is the fix, and doctor stops warning once it is taken: the
 	// automatic carry leaves the trap nowhere to occur.
 	f.setConfig("main_dir = '" + f.MainDir + "'\nagent = 'claude'\n")
-	out, _ = f.run("doctor")
-	if strings.Contains(out, "reaches no worktree") {
-		t.Errorf("doctor = %q, want the trap gone under the agent key", out)
+	found := findings(t, f)
+	if got := has(t, found, "reaches no worktree"); got != "" {
+		t.Errorf("finding = %q, want the trap gone under the agent key\nall: %v", got, found)
 	}
-	if !strings.Contains(out, "reports state through its plugin") {
-		t.Errorf("doctor = %q, want the wired state reported ok", out)
+	if got := has(t, found, "reports state through its plugin"); got != "ok" {
+		t.Errorf("finding = %q, want the wired state reported ok\nall: %v", got, found)
 	}
 }
 
@@ -390,16 +393,15 @@ func TestDoctorNamesAPluginNothingIgnores(t *testing.T) {
 	f := agentFixture(t, "agent = 'claude'\n")
 	f.mustRun("agent-init", "claude")
 
-	out, _ := f.run("doctor")
-	if !strings.Contains(flat(out), "git neither ignores nor tracks .claude/skills/treewright") {
-		t.Errorf("doctor = %q, want the unignored plugin named", out)
+	if got := has(t, findings(t, f), "git neither ignores nor tracks .claude/skills/treewright"); got != "warn" {
+		t.Errorf("finding = %q, want the unignored plugin warned about", got)
 	}
 
 	// Ignoring it is one way out, and it is the user's own edit — treewright
 	// writes to no .gitignore, so what doctor offers is a line to paste.
 	f.Write(f.MainDir, ".gitignore", ".env\n.claude/skills/treewright/\n")
-	if out, _ := f.run("doctor"); strings.Contains(out, "neither ignores nor tracks") {
-		t.Errorf("doctor = %q, want the warning gone once the plugin is ignored", out)
+	if got := has(t, findings(t, f), "neither ignores nor tracks"); got != "" {
+		t.Errorf("finding = %q, want the warning gone once the plugin is ignored", got)
 	}
 
 	// Committing it is the other, and a real choice: a team can decide everyone
@@ -407,8 +409,8 @@ func TestDoctorNamesAPluginNothingIgnores(t *testing.T) {
 	f.Write(f.MainDir, ".gitignore", ".env\n")
 	f.Git(f.MainDir, "add", ".claude/skills/treewright")
 	f.Git(f.MainDir, "commit", "--quiet", "-m", "wire treewright up for everyone")
-	if out, _ := f.run("doctor"); strings.Contains(out, "neither ignores nor tracks") {
-		t.Errorf("doctor = %q, want the warning gone once the plugin is committed", out)
+	if got := has(t, findings(t, f), "neither ignores nor tracks"); got != "" {
+		t.Errorf("finding = %q, want the warning gone once the plugin is committed", got)
 	}
 }
 
@@ -419,23 +421,16 @@ func TestDoctorNamesAPluginNothingIgnores(t *testing.T) {
 func TestDoctorNoticesAPluginAnOlderTreewrightWrote(t *testing.T) {
 	f := agentFixture(t, "agent = 'claude'\n")
 	f.mustRun("agent-init", "claude")
+	stalePlugin(t, f.MainDir)
 
-	hooks := filepath.Join(f.MainDir, ".claude", "skills", "treewright", "hooks", "hooks.json")
-	old := `{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"treewright signal finished"}]}]}}`
-	if err := os.WriteFile(hooks, []byte(old), 0o644); err != nil {
-		t.Fatalf("write the older wiring: %v", err)
-	}
-
-	out, _ := f.run("doctor")
-	if !strings.Contains(out, "not what this treewright would write") {
-		t.Errorf("doctor = %q, want the stale plugin named", out)
+	if got := has(t, findings(t, f), "not what this treewright would write"); got != "warn" {
+		t.Errorf("finding = %q, want the stale plugin warned about", got)
 	}
 
 	// And the fix is the command it names, which is the point of naming it.
 	f.mustRun("agent-init", "claude")
-	out, _ = f.run("doctor")
-	if strings.Contains(out, "not what this treewright would write") {
-		t.Errorf("doctor = %q, want the warning gone after the rerun", out)
+	if got := has(t, findings(t, f), "not what this treewright would write"); got != "" {
+		t.Errorf("finding = %q, want the warning gone after the rerun", got)
 	}
 }
 
@@ -453,16 +448,40 @@ func TestDoctorNamesHooksLeftInASettingsFile(t *testing.T) {
 		t.Fatalf("write settings: %v", err)
 	}
 
-	out, _ := f.run("doctor")
-	if !strings.Contains(out, "are a pasted copy") || !strings.Contains(out, "cannot keep them up to date") {
-		t.Errorf("doctor = %q, want the paste named as the thing the plugin replaces", out)
+	found := findings(t, f)
+	if got := has(t, found, "are a pasted copy"); got != "warn" {
+		t.Errorf("finding = %q, want the paste warned about as the thing the plugin replaces\nall: %v", got, found)
+	}
+	if got := has(t, found, "cannot keep them up to date"); got != "warn" {
+		t.Errorf("finding = %q, want the cost of the paste in the same warning\nall: %v", got, found)
 	}
 
 	// Once the plugin is installed the two run side by side, which is worth
 	// saying: the pasted half is frozen wherever it was written.
 	f.mustRun("agent-init", "claude")
-	out, _ = f.run("doctor")
-	if !strings.Contains(out, "run alongside the plugin's") {
-		t.Errorf("doctor = %q, want the duplicate wiring named", out)
+	if got := has(t, findings(t, f), "run alongside the plugin's"); got != "warn" {
+		t.Errorf("finding = %q, want the duplicate wiring warned about", got)
+	}
+}
+
+// TestDoctorSpeaksTheNameTheUserTyped holds the typed hints to the argv0
+// invariant: anything a person is told to type answers in the name they use,
+// and four of doctor's hints hardcoded the canonical one. The file-destined
+// lines — the tmux.conf run-shell and the startup-file eval — stay spelled
+// treewright on purpose, being read by programs rather than typed.
+func TestDoctorSpeaksTheNameTheUserTyped(t *testing.T) {
+	agentFixture(t, "agent = 'claude'\n")
+
+	var out, errOut bytes.Buffer
+	// The error is not the subject: a machine without tmux fails the tmux check
+	// and the typed hints are printed either way.
+	_ = Run(Env{Args: []string{"doctor"}, Argv0: "tw", Stdout: &out, Stderr: &errOut})
+
+	report := flat(out.String())
+	if !strings.Contains(report, "install the plugin: tw agent-init claude") {
+		t.Errorf("doctor = %q, want the agent-init hint spelled with the name the user typed", report)
+	}
+	if strings.Contains(report, "treewright agent-init") {
+		t.Errorf("doctor spells a typed hint with the canonical name:\n%s", out.String())
 	}
 }

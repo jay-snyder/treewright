@@ -296,7 +296,7 @@ branch_prefix  = "john/"              # branch is <prefix><slug> (default: none)
 # branch_prefixes = ["feature/", "bug/"]   # or several — pick one: `tw new bug/eng-1`
 carry_files    = ["apps/api/.env"]    # files a fresh worktree needs and doesn't have
 agent          = "claude"             # fills in the two commands, carries its settings and wiring
-command        = "claude {prompt}"    # what the window launches; {prompt} takes --prompt's text
+command        = "claude {prompt}"    # what the window launches; "" for a shell and no agent
 resume_command = "claude --continue {prompt}"
 post_create    = "npm install"        # background setup after `new`; a list runs in order
 ticket_pattern = '(?i)^(eng-[0-9]+)'  # names the window; "" if you don't track work by ticket
@@ -420,8 +420,10 @@ one, or name a window outright with `tw new dark-mode-toggle DARKMODE`.
 No, though that's what it was built for, and it shows. The defaults launch
 `claude`, and the tmux key bindings exist because a window running an agent has
 no shell in it to type into. But `command` is just a shell command. Set it to
-`nvim`, or `$SHELL` for a plain prompt, and you've got a worktree and tmux
-manager with no AI in it anywhere.
+`nvim`, or to `""` for a window holding nothing but your shell, and you've got a
+worktree and tmux manager with no AI in it anywhere. Drop the `agent` key too if
+you have one: it supplies a command when yours is blank, which is the one place
+an empty setting doesn't win.
 
 ### Will it mess with my existing tmux setup?
 

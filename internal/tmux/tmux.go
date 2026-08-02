@@ -143,12 +143,19 @@ func run(args ...string) (string, error) {
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		if msg := strings.TrimSpace(stderr.String()); msg != "" {
-			return "", fmt.Errorf("tmux %s: %s (%w)", strings.Join(full, " "), msg, err)
-		}
-		return "", fmt.Errorf("tmux %s: %w", strings.Join(full, " "), err)
+		return "", wrapExecErr(full, &stderr, err)
 	}
 	return strings.TrimSpace(stdout.String()), nil
+}
+
+// wrapExecErr shapes a failed tmux invocation into one error: the command, what
+// tmux said on stderr when it said anything, and the exec error underneath —
+// without the stderr a failure reads only as "exit status 1".
+func wrapExecErr(full []string, stderr *bytes.Buffer, err error) error {
+	if msg := strings.TrimSpace(stderr.String()); msg != "" {
+		return fmt.Errorf("tmux %s: %s (%w)", strings.Join(full, " "), msg, err)
+	}
+	return fmt.Errorf("tmux %s: %w", strings.Join(full, " "), err)
 }
 
 // exact renders a session name as a target tmux will match whole rather than as
@@ -227,21 +234,25 @@ const (
 	WaitingMarker = "!"
 )
 
-// paneFormat lists a pane as window id, session, window name, the worktree its
+// paneFormat lists a pane as window name, window id, session, the worktree its
 // window was opened on, the agent state recorded on it, how many windows its
 // session holds, then path.
 //
-// The fields are tab-separated and the path comes last, because both a window
-// name and a path may contain spaces: splitting on a space is only unambiguous
-// for the id. Splitting into a fixed seven parts leaves any tab in a path — rare,
-// but possible — inside the path where it belongs. The stamped worktree is a path
-// too, which is why stamp declines to write one holding a tab; the agent state is
-// a word from signal's closed vocabulary and the window count is a number, and
-// neither can hold one.
+// The fields are tab-separated, and exactly two of them are free text tmux
+// cannot be told to escape: the window name, which rename-window lets a user
+// put anything into — a tab included — and the pane's path. So the two bracket
+// the listing, one at each end, and between them sit only fields that cannot
+// hold a tab: the id and the count are tmux's own spellings of a number, the
+// state is a word from signal's closed vocabulary, and the stamped worktree is
+// a path too — which is why stamp declines to write one holding a tab. A fixed
+// left-to-right split used to put the name in the middle, where one tab shifted
+// the worktree, the state and the path each a field over; splitPaneLine now
+// anchors on the shape of the fixed fields instead, so a tab at either end
+// stays in the field it belongs to.
 //
 // The window count is here rather than asked per window because this listing is
 // gathered once for a whole table. See Window.SessionWindows.
-const paneFormat = "#{window_id}\t#{session_name}\t#{window_name}\t#{" + worktreeOption + "}\t#{" + AgentStateOption + "}\t#{session_windows}\t#{pane_current_path}"
+const paneFormat = "#{window_name}\t#{window_id}\t#{session_name}\t#{" + worktreeOption + "}\t#{" + AgentStateOption + "}\t#{session_windows}\t#{pane_current_path}"
 
 // Windows maps each pane's working directory to the window holding it, across
 // every session on the server. It is what stops `resume` from opening a second
@@ -299,28 +310,11 @@ func parsePanes(out, prefer string) map[string]Window {
 	}
 
 	for line := range strings.SplitSeq(out, "\n") {
-		fields := strings.SplitN(line, "\t", 7)
-		if len(fields) != 7 {
+		w, path, ok := splitPaneLine(line)
+		if !ok {
 			continue
 		}
-		// A count that does not parse is left at zero, which reads as "not the
-		// last window": the only thing it feeds is a caveat about ending a
-		// session, and saying nothing is the right way to be wrong about that.
-		windows, _ := strconv.Atoi(fields[5])
-		w := Window{
-			ID:      fields[0],
-			Session: fields[1],
-			// The waiting marker comes off here, once, so the name every consumer
-			// sees is the one underneath treewright's own punctuation.
-			Name:           strings.TrimPrefix(fields[2], WaitingMarker),
-			State:          fields[4],
-			Worktree:       fields[3],
-			SessionWindows: windows,
-		}
-		if w.ID == "" {
-			continue
-		}
-		stake(fields[6], w)
+		stake(path, w)
 		// A window treewright opened answers for its own worktree wherever its pane
 		// is standing, so cd-ing a pane out of the directory no longer orphans the
 		// worktree's window and has a second one opened beside it.
@@ -331,6 +325,61 @@ func parsePanes(out, prefer string) map[string]Window {
 		return nil
 	}
 	return best
+}
+
+// splitPaneLine reads one line of the pane listing back into a window and its
+// pane's path.
+//
+// The name and the path are the two fields a tab cannot be kept out of, and
+// paneFormat puts them at the two ends with the five tabless fields between.
+// Neither end can be split off by counting, since either may have added tabs of
+// its own — so the fixed run is found by its shape instead: a window id is "@"
+// then digits and the window count four fields later is digits, a pair nothing
+// in a name matches by accident without also faking the three fields between.
+// Everything before that run is the name, everything after it the path. A line
+// no anchor fits is skipped whole, which reads as "no such window" — the honest
+// answer for a line that cannot be trusted field by field, where the old fixed
+// split answered with the worktree, state and path each one field over.
+func splitPaneLine(line string) (w Window, path string, ok bool) {
+	fields := strings.Split(line, "\t")
+	for idx := 1; idx <= len(fields)-6; idx++ {
+		if !isWindowID(fields[idx]) || !allDigits(fields[idx+4]) {
+			continue
+		}
+		// The count is digits by the check above, so Atoi cannot fail short of
+		// overflow — and zero reads as "not the last window", which is the right
+		// way to be wrong about the one caveat it feeds.
+		windows, _ := strconv.Atoi(fields[idx+4])
+		return Window{
+			ID:      fields[idx],
+			Session: fields[idx+1],
+			// The waiting marker comes off here, once, so the name every consumer
+			// sees is the one underneath treewright's own punctuation.
+			Name:           strings.TrimPrefix(strings.Join(fields[:idx], "\t"), WaitingMarker),
+			Worktree:       fields[idx+2],
+			State:          fields[idx+3],
+			SessionWindows: windows,
+		}, strings.Join(fields[idx+5:], "\t"), true
+	}
+	return Window{}, "", false
+}
+
+// isWindowID reports that a field is a tmux window id — "@" then digits, the
+// only spelling tmux uses.
+func isWindowID(s string) bool {
+	return len(s) > 1 && s[0] == '@' && allDigits(s[1:])
+}
+
+func allDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // NewSession creates a repository's session, detached, holding one window. The
@@ -485,8 +534,9 @@ func stamp(id, option, value string) {
 	_, _ = run("set-window-option", "-t", id, option, value)
 }
 
-// CurrentSession names the session the calling client is attached to, or "" when
-// there is no client to ask.
+// CurrentSession names the session the calling client is attached to, or ""
+// when treewright cannot tell — outside tmux, or without a $TMUX_PANE to ask
+// through.
 //
 // The caller's own pane is what gets asked, through the $TMUX_PANE every pane
 // carries, rather than tmux being left to work out who is calling. Untargeted,
@@ -495,19 +545,23 @@ func stamp(id, option, value string) {
 // case that matters here: another session created or touched a moment ago is the
 // one tmux names, so "am I already in this session?" comes back yes about a
 // session the client is not in, and the move that should have happened does not.
+// A missing $TMUX_PANE is therefore answered with "" rather than with that
+// guess, as CurrentWindow answers it: the callers use this to skip a
+// switch-client, and "" makes them attempt the move and find out for certain
+// instead of skipping it on a name tmux guessed.
 func CurrentSession() string {
 	if !Inside() {
 		return ""
 	}
-	args := []string{"display-message", "-p", "#{session_name}"}
-	if pane := os.Getenv("TMUX_PANE"); pane != "" {
-		args = []string{"display-message", "-p", "-t", pane, "#{session_name}"}
+	pane := os.Getenv("TMUX_PANE")
+	if pane == "" {
+		return ""
 	}
-	name, err := run(args...)
+	name, err := run("display-message", "-p", "-t", pane, "#{session_name}")
 	if err != nil {
 		// A $TMUX_PANE left over from a pane that has closed. Reporting no session
-		// is right: the caller then tries to move a client and finds out for
-		// certain, rather than acting on a name tmux guessed.
+		// is right for the same reason: the caller then tries to move a client and
+		// finds out for certain, rather than acting on a name tmux guessed.
 		return ""
 	}
 	return name
@@ -776,10 +830,10 @@ func Popup(client, dir, command string, width, height int) error {
 	// tmux's own refusals are different and worth keeping: no client to draw on,
 	// a size it will not take. Those arrive with a message on stderr, where the
 	// inner command's exit status arrives with nothing.
-	if msg := strings.TrimSpace(stderr.String()); msg != "" {
-		return fmt.Errorf("tmux %s: %s (%w)", strings.Join(full, " "), msg, err)
+	if strings.TrimSpace(stderr.String()) == "" {
+		return nil
 	}
-	return nil
+	return wrapExecErr(full, &stderr, err)
 }
 
 // popupArgs builds that command line. Split out because opening a popup needs a

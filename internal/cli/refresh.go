@@ -139,7 +139,12 @@ func pluginCheckouts(env *Env, cfg *config.Config, module agentinit.Agent) []che
 	if inRepo {
 		managed, err := repoFor(cfg).Managed()
 		if err != nil {
-			env.warnf("could not list the worktrees of %q, so only the main checkout was refreshed%s",
+			// Scoped to the worktrees, because that is all this failure costs:
+			// the main checkout is already on the list, and the user-level copy
+			// is still appended below. "only the main checkout was refreshed"
+			// claimed both a completion that had not happened yet and an
+			// exclusivity that was not true.
+			env.warnf("could not list the worktrees of %q, so their plugin copies stay as they are%s",
 				cfg.Name, asFields(field("error", err.Error())))
 		}
 		carried := cfg.Agent == module.Name || carriesPlugin(module, cfg)
@@ -244,5 +249,11 @@ func reportStaleShell(env *Env) {
 	}
 	env.progressf("your shell still holds the wrapper an older treewright emitted\n" +
 		"nothing here can replace a function in the shell that loaded it\n" +
-		"open a new terminal, or re-run the line in your startup file")
+		staleShellAdvice)
 }
+
+// staleShellAdvice is the way out of a wrapper an older treewright emitted,
+// spelled once for the two commands that meet one — doctor and refresh. No
+// process can define a function in its parent, so this sentence is the whole of
+// the fix in either place.
+const staleShellAdvice = "open a new terminal, or re-run the line in your startup file"

@@ -186,13 +186,25 @@ func TestColorMarksTheSeverityAndTheCopyablePart(t *testing.T) {
 		t.Errorf("stderr = %q, want the command present whether or not it is colored", stderr.String())
 	}
 
-	// And with color on, the severity and the copyable span are what carry it.
-	// colorPrefix is asked directly, since ColorEnabled needs a terminal that a
-	// test has no business inventing.
+	// os.Stdout under `go test` is not a terminal either, so this is still the
+	// off path — what it pins is that the prefix survives it intact.
 	if got := colorPrefix(os.Stdout, warningPrefix, ui.Yellow); got != warningPrefix {
-		// os.Stdout under `go test` is not a terminal either, so this is still
-		// the off path — what it pins is that the prefix survives it intact.
 		t.Errorf("colorPrefix = %q, want %q unchanged with color off", got, warningPrefix)
+	}
+}
+
+// TestPaintedPrefixKeepsItsSpaceOutsideTheColor drives the on branch, which no
+// writer a test can make ever reaches — every buffer reads as a pipe, so
+// paintPrefix takes the decision as an argument. The space has to end up
+// outside the escape codes: a colored run ending in a space is a colored
+// space, and the one place it shows is a terminal that draws backgrounds.
+func TestPaintedPrefixKeepsItsSpaceOutsideTheColor(t *testing.T) {
+	got := paintPrefix(warningPrefix, ui.Yellow, true)
+	if want := ui.Yellow.Apply("warning:", true) + " "; got != want {
+		t.Errorf("paintPrefix on = %q, want %q — the word colored, the space bare", got, want)
+	}
+	if got := paintPrefix(warningPrefix, ui.Yellow, false); got != warningPrefix {
+		t.Errorf("paintPrefix off = %q, want the prefix untouched", got)
 	}
 }
 

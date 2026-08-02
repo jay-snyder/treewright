@@ -2,7 +2,6 @@ package tmux
 
 import (
 	"maps"
-	"os"
 	"os/exec"
 	"slices"
 	"strconv"
@@ -37,9 +36,11 @@ func signaled(id, session, name, worktree, state, dir string) string {
 	return inSession(2, id, session, name, worktree, state, dir)
 }
 
-// inSession renders a pane whose session holds a given number of windows.
+// inSession renders a pane whose session holds a given number of windows, in
+// paneFormat's own order: the two free-text fields at the ends, the fixed ones
+// between.
 func inSession(windows int, id, session, name, worktree, state, dir string) string {
-	return strings.Join([]string{id, session, name, worktree, state, strconv.Itoa(windows), dir}, "\t")
+	return strings.Join([]string{name, id, session, worktree, state, strconv.Itoa(windows), dir}, "\t")
 }
 
 func TestParsePanes(t *testing.T) {
@@ -70,13 +71,48 @@ func TestParsePanes(t *testing.T) {
 			},
 		},
 		{
-			// A tab inside a path stays in the path: the split takes four fields
-			// at most, and the path is the last of them.
+			// A tab inside a path stays in the path: the path closes the listing,
+			// and everything after the fixed fields is read as one path.
 			name:   "tab inside a path",
 			out:    pane("@1", "s", "W", "/a\tb"),
 			prefer: "s",
 			want: map[string]Window{
 				"/a\tb": {ID: "@1", Session: "s", Name: "W", SessionWindows: 2},
+			},
+		},
+		{
+			// A tab inside a window name stays in the name. rename-window puts one
+			// there with no help from treewright, and a fixed left-to-right split
+			// used to read the name's second half as the worktree and everything
+			// after it one field over — the worktree stopped mapping to its own
+			// window, and `resume` opened a duplicate beside the live agent.
+			name:   "tab inside a window name",
+			out:    stamped("@2", "myrepo", "MY\tNAME", "/wt/eng-1", "/wt/eng-1"),
+			prefer: "myrepo",
+			want: map[string]Window{
+				"/wt/eng-1": {ID: "@2", Session: "myrepo", Name: "MY\tNAME", Worktree: "/wt/eng-1", SessionWindows: 2},
+			},
+		},
+		{
+			// Both ends at once: the free-text fields bracket the fixed ones, so
+			// neither's tabs can reach the other's field.
+			name:   "tabs in the name and the path together",
+			out:    stamped("@2", "myrepo", "A\tB", "/wt/eng-1", "/odd\tdir"),
+			prefer: "myrepo",
+			want: map[string]Window{
+				"/odd\tdir": {ID: "@2", Session: "myrepo", Name: "A\tB", Worktree: "/wt/eng-1", SessionWindows: 2},
+				"/wt/eng-1": {ID: "@2", Session: "myrepo", Name: "A\tB", Worktree: "/wt/eng-1", SessionWindows: 2},
+			},
+		},
+		{
+			// A name that looks like a window id must not be mistaken for the
+			// anchor: the field four after it has to be the window count, and for
+			// a name it is the state, which is never digits.
+			name:   "a window named like a window id",
+			out:    pane("@5", "s", "@9", "/a"),
+			prefer: "s",
+			want: map[string]Window{
+				"/a": {ID: "@5", Session: "s", Name: "@9", SessionWindows: 2},
 			},
 		},
 		{
@@ -429,19 +465,8 @@ func TestPopupArgs(t *testing.T) {
 // this also pins the other half — that tmux's own refusals are still reported.
 func TestPopupIgnoresTheInnerCommandsExitStatus(t *testing.T) {
 	testenv.RequireTool(t, "tmux")
-	//nolint:usetesting // t.TempDir gives a path too long for a unix socket on macOS
-	dir, err := os.MkdirTemp("/tmp", "tmx")
-	if err != nil {
-		t.Fatalf("make a tmux socket directory: %v", err)
-	}
-	t.Setenv("TMUX_TMPDIR", dir)
+	label := testenv.PrivateTmuxServer(t)
 	t.Setenv("TMUX", "")
-	label := strings.ReplaceAll(t.Name(), "/", "-")
-	t.Setenv("TREEWRIGHT_TMUX_LABEL", label)
-	t.Cleanup(func() {
-		_ = exec.Command("tmux", "-L", label, "kill-server").Run()
-		_ = os.RemoveAll(dir)
-	})
 	if out, err := exec.Command("tmux", "-L", label, "-f", "/dev/null",
 		"new-session", "-d", "-s", "probe", "-c", "/tmp", "sleep 300").CombinedOutput(); err != nil {
 		testenv.Unavailablef(t, "cannot start a tmux server here: %v\n%s", err, out)
@@ -449,12 +474,37 @@ func TestPopupIgnoresTheInnerCommandsExitStatus(t *testing.T) {
 
 	// No client is attached, so tmux declines to draw — and says why, which is
 	// exactly the case that must still surface.
-	err = Popup("", "/tmp", "true", 40, 10)
+	err := Popup("", "/tmp", "true", 40, 10)
 	if err == nil {
 		t.Fatal("Popup returned nil when tmux itself refused; its message would be lost")
 	}
 	if !strings.Contains(err.Error(), "no current client") {
 		t.Errorf("err = %v, want tmux's own complaint passed through", err)
+	}
+}
+
+// TestCurrentSessionRefusesToGuessWithoutAPane is the regression test for the
+// fallback CurrentSession's own comment condemns. With $TMUX set and
+// $TMUX_PANE missing, it ran display-message untargeted — which answers about
+// the most recently active session, the caller's own only by coincidence — and
+// a false match there makes Focus skip a switch-client it should have
+// attempted. A live server with a session to name wrongly is what makes the
+// old behavior observable.
+func TestCurrentSessionRefusesToGuessWithoutAPane(t *testing.T) {
+	testenv.RequireTool(t, "tmux")
+	label := testenv.PrivateTmuxServer(t)
+	if out, err := exec.Command("tmux", "-L", label, "-f", "/dev/null",
+		"new-session", "-d", "-s", "busy", "-c", "/tmp", "sleep 300").CombinedOutput(); err != nil {
+		testenv.Unavailablef(t, "cannot start a tmux server here: %v\n%s", err, out)
+	}
+
+	// $TMUX claims a client; $TMUX_PANE, the one way to ask about the caller
+	// rather than about whoever was active last, is gone.
+	t.Setenv("TMUX", "/tmp/gone,1,0")
+	t.Setenv("TMUX_PANE", "")
+
+	if got := CurrentSession(); got != "" {
+		t.Errorf("CurrentSession() = %q, want \"\" — an untargeted guess would name whichever session was active last", got)
 	}
 }
 

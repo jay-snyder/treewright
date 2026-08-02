@@ -42,12 +42,20 @@ func runEnvIn(dir string, extraEnv []string, args ...string) (string, error) {
 	err := cmd.Run()
 	out := strings.TrimSpace(stdout.String())
 	if err != nil {
-		if msg := strings.TrimSpace(stderr.String()); msg != "" {
-			return out, fmt.Errorf("git %s: %s (%w)", strings.Join(args, " "), msg, err)
-		}
-		return out, fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
+		return out, wrapExecErr("git "+strings.Join(args, " "), &stderr, err)
 	}
 	return out, nil
+}
+
+// wrapExecErr shapes a failed git invocation into one error: the command as the
+// caller spelled it, what git said on stderr when it said anything, and the
+// exec error underneath — without the stderr a failure reads only as "exit
+// status 128".
+func wrapExecErr(command string, stderr *bytes.Buffer, err error) error {
+	if msg := strings.TrimSpace(stderr.String()); msg != "" {
+		return fmt.Errorf("%s: %s (%w)", command, msg, err)
+	}
+	return fmt.Errorf("%s: %w", command, err)
 }
 
 func (r Repo) run(args ...string) (string, error) { return runIn(r.Dir, args...) }
@@ -651,10 +659,7 @@ func WritePatch(dir, path string) error {
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
 		_ = f.Close()
-		if msg := strings.TrimSpace(stderr.String()); msg != "" {
-			return fmt.Errorf("git diff HEAD: %s (%w)", msg, err)
-		}
-		return fmt.Errorf("git diff HEAD: %w", err)
+		return wrapExecErr("git diff HEAD", &stderr, err)
 	}
 	return f.Close()
 }

@@ -63,7 +63,14 @@ func continuationFor(prefix string) string { return strings.Repeat(" ", len(pref
 // escape codes — a colored run ending in a space is a colored space, and the
 // one place it shows is a terminal that draws backgrounds.
 func colorPrefix(w io.Writer, prefix string, c ui.Color) string {
-	if !ui.ColorEnabled(w) {
+	return paintPrefix(prefix, c, ui.ColorEnabled(w))
+}
+
+// paintPrefix is colorPrefix with the decision handed in, because the painting
+// is otherwise only reachable on a real terminal — which a test has no business
+// inventing.
+func paintPrefix(prefix string, c ui.Color, on bool) string {
+	if !on {
 		return prefix
 	}
 	word, rest, spaced := strings.Cut(prefix, " ")

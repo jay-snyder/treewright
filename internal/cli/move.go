@@ -42,27 +42,13 @@ func cmdMove(env *Env, args []string) error {
 	if err != nil {
 		return err
 	}
-	slug, override := at(positional, 0), at(positional, 1)
-	if slug == "" {
-		return usageErrorf("move", "a slug is required")
-	}
-
-	cfg, err := resolveConfig("")
+	// The whole opening is `new`'s, on purpose: same refusals, same order, all
+	// of it before anything exists — see planWorktree.
+	plan, err := planWorktree(env, "move", positional, prompt, promptFile)
 	if err != nil {
 		return err
 	}
-	prefix, slug := splitPrefix(env, cfg, slug)
-	if err := validateSlug(cfg, slug); err != nil {
-		return err
-	}
-	prompt, err = resolvePrompt("move", prompt, promptFile)
-	if err != nil {
-		return err
-	}
-	command, err := fillPrompt(cfg.Command, "command", prompt)
-	if err != nil {
-		return err
-	}
+	cfg, slug := plan.cfg, plan.slug
 
 	base := cfg.MainDir
 	if git.DirtyFiles(base) == 0 {
@@ -75,7 +61,7 @@ func cmdMove(env *Env, args []string) error {
 		return err
 	}
 
-	dir, branch, err := createWorktree(env, cfg, prefix, slug)
+	dir, branch, err := createWorktree(env, cfg, plan.prefix, slug)
 	if err != nil {
 		return leftInPlace(err, patch)
 	}
@@ -123,10 +109,7 @@ func cmdMove(env *Env, args []string) error {
 	// Last, so the agent's first sight of the worktree is the work already in
 	// it. A window opened before the patch landed would put an agent in an empty
 	// checkout being asked to carry on with something not there yet.
-	openWorktreeWindow(env, cfg, worktreeWindow{
-		Slug: slug, Branch: branch, Dir: dir,
-		Name: cfg.WindowName(slug, override), Command: command, Prompt: prompt,
-	})
+	plan.openWindow(env, dir, branch)
 	return nil
 }
 

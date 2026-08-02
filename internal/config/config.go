@@ -88,6 +88,12 @@ type Config struct {
 	// merely defaulted — including when the two happen to coincide.
 	explicit map[string]bool `toml:"-"`
 
+	// agentFilled holds the keys the agent module supplied because the file
+	// left them blank. See AgentFilled: it is the one thing `setup --refresh`
+	// cannot work out from the value, an explicit blank and an absent key
+	// arriving here looking identical once a module has filled them.
+	agentFilled map[string]bool `toml:"-"`
+
 	// MainDir is the repository's main checkout. Required. Managed worktrees
 	// are its siblings, named "<MainDir>-<slug>".
 	MainDir string `toml:"main_dir"`
@@ -128,12 +134,19 @@ type Config struct {
 	// adds files git ignores not at all.
 	CarryFiles []string `toml:"carry_files"`
 
-	// Command is what to launch in the new tmux window. Defaults to "claude".
+	// Command is what to launch in the new tmux window. Defaults to
+	// DefaultCommand, "claude {prompt}".
+	//
+	// Empty is a setting rather than an omission: `command = ""` opens the
+	// window on a shell and is the only way a repository can ask for a window
+	// with no agent in it. Only a file that never mentions the key takes the
+	// default. See Load, where the agent key's one exception to that lives.
 	Command string `toml:"command"`
 
 	// ResumeCommand is what `treewright resume` launches. It is separate from
 	// Command because resuming is usually a different invocation, and the two
-	// default independently: setting Command alone does not change this.
+	// default independently: setting Command alone does not change this. Empty
+	// means what it means for Command.
 	ResumeCommand string `toml:"resume_command"`
 
 	// PostCreate is the optional setup to run in a new worktree after it is
@@ -267,6 +280,7 @@ func Load(path string) (*Config, error) {
 	for _, k := range md.Keys() {
 		c.explicit[k.String()] = true
 	}
+	c.agentFilled = make(map[string]bool, 2)
 
 	c.Name = strings.TrimSuffix(filepath.Base(path), ".toml")
 	if strings.TrimSpace(c.MainDir) == "" {
@@ -323,21 +337,45 @@ func Load(path string) (*Config, error) {
 			return nil, fmt.Errorf("%s: unknown agent %q (built-in modules: %s)",
 				filepath.Base(path), c.Agent, strings.Join(agentinit.Names(), ", "))
 		}
+		// The one place an explicit empty does not win. A blank command is
+		// filled by the module whether the file wrote the blank or left the
+		// key out, because `agent = "claude"` with `command = ""` — carry
+		// claude's files, then open a shell — is a combination nobody asks
+		// for, and supporting it would make one key's empty value mean two
+		// different things depending on whether another key is present. A
+		// repository that wants the shell drops the agent key too.
+		//
+		// Recorded rather than merely done: once the module has filled it, an
+		// explicit blank and an absent key are indistinguishable by value, and
+		// `setup --refresh` has to tell them apart to avoid writing the
+		// module's own command back as a setting. See AgentFilled.
 		if c.Command == "" {
-			c.Command = module.Command
+			c.Command, c.agentFilled["command"] = module.Command, true
 		}
 		if c.ResumeCommand == "" {
-			c.ResumeCommand = module.ResumeCommand
+			c.ResumeCommand, c.agentFilled["resume_command"] = module.ResumeCommand, true
 		}
 	}
 
 	if c.BaseBranch == "" {
 		c.BaseBranch = DefaultBaseBranch
 	}
-	if c.Command == "" {
+	// Read through Explicit rather than off the value, for the reason
+	// ticket_pattern is ten lines down: here an empty string is a decision and
+	// not an omission. `command = ""` opens the window on a shell — tmux.Spec
+	// has always honored a blank command that way — and it is the only way a
+	// repository can ask for a window with no agent in it. Before this, the
+	// value alone decided, so the blank collapsed into the default and
+	// `treewright config` reported "claude {prompt}" as the file's own value
+	// about a file that said no such thing.
+	//
+	// The value is still tested alongside, so that a module fill above is not
+	// undone: with an agent named and no command key, Explicit is false and
+	// the blank is already gone.
+	if c.Command == "" && !c.Explicit("command") {
 		c.Command = DefaultCommand
 	}
-	if c.ResumeCommand == "" {
+	if c.ResumeCommand == "" && !c.Explicit("resume_command") {
 		c.ResumeCommand = DefaultResumeCommand
 	}
 	// Read through explicit rather than off the value, because here an empty
@@ -374,7 +412,14 @@ func Resolve(name, repoMainDir string) (*Config, error) {
 	if name != "" {
 		path := filepath.Join(Dir(), name+".toml")
 		if _, err := os.Stat(path); err != nil {
-			return nil, fmt.Errorf("no config %q in %s (have: %s)", name, Dir(), strings.Join(names, ", "))
+			// Only a missing file means "no config". Anything else — a
+			// permissions problem, usually — is a file that is there and cannot
+			// be read, and "no config" would send its owner to setup for a
+			// registration they already have.
+			if os.IsNotExist(err) {
+				return nil, fmt.Errorf("no config %q in %s (have: %s)", name, Dir(), strings.Join(names, ", "))
+			}
+			return nil, fmt.Errorf("config %q: %w", name, err)
 		}
 		return Load(path)
 	}
@@ -424,6 +469,20 @@ func (c *Config) Path() string { return filepath.Join(Dir(), c.Name+".toml") }
 // Explicit reports whether the file set a key itself, as opposed to leaving it
 // to its default. Keys are the TOML spellings, e.g. "base_branch".
 func (c *Config) Explicit(key string) bool { return c.explicit[key] }
+
+// AgentFilled reports that the agent module supplied a setting's value because
+// the file left it blank, as opposed to the file choosing that value itself.
+// Keys are the TOML spellings: "command" and "resume_command", the only two a
+// module fills.
+//
+// It exists for `setup --refresh`, which must not write a module's own command
+// back as a live setting. The value a module supplies follows treewright's
+// changes to that module; the identical string written into the file stops
+// following them, which is the same default-becomes-a-setting trap every other
+// key here is guarded against. Explicit alone cannot answer it — once the
+// module has filled a blank, `command = ""` and no command key at all are the
+// same value under two different answers from Explicit.
+func (c *Config) AgentFilled(key string) bool { return c.agentFilled[key] }
 
 // DirFor returns the worktree directory a slug maps to.
 func (c *Config) DirFor(slug string) string { return c.MainDir + "-" + slug }

@@ -3,6 +3,7 @@ package cli
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -238,6 +239,14 @@ func goBin() string {
 		return ""
 	}
 	return filepath.Join(home, "go", "bin")
+}
+
+// releaseBehindNotice is the finding a newer release produces, spelled once for
+// its two readers: doctor's report and version --check say the same sentence,
+// differing only in the advice line — plain for a table cell, copyable for a
+// message — which the caller supplies.
+func releaseBehindNotice(latest, current, advice string) string {
+	return fmt.Sprintf("treewright %s is out, and this is %s\n%s", latest, current, advice)
 }
 
 // upgradeFallback is what the advice says where the install route is not

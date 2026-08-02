@@ -137,7 +137,7 @@ func cmdAgentInit(env *Env, args []string) error {
 	cfg, err := resolveConfig("")
 	if err != nil {
 		return fmt.Errorf("%w%s", err, asFields(
-			field("or cover every repository", env.Argv0+" agent-init "+agent.Name+" --global"),
+			field("or cover every repository", env.copyable(env.Argv0+" agent-init "+agent.Name+" --global")),
 		))
 	}
 	return installAgentPlugin(env, agent, filepath.Join(cfg.MainDir, filepath.FromSlash(agent.ProjectPlugin)), cfg)

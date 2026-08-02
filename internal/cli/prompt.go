@@ -82,8 +82,12 @@ func resolvePrompt(cmd, prompt, promptFile string) (string, error) {
 	}
 	info, err := os.Stat(path)
 	switch {
-	case err != nil:
+	case os.IsNotExist(err):
 		return "", fmt.Errorf("no file at %s\nthe prompt is one line telling the agent to read it, so nothing was created", path)
+	case err != nil:
+		// The file may well be there — unreadable is not missing — and "no file"
+		// would send the reader to re-create one that exists.
+		return "", fmt.Errorf("could not read --prompt-file %s: %w\nnothing was created", path, err)
 	case info.IsDir():
 		return "", fmt.Errorf("%s is a directory, not a brief\nthe prompt is one line telling the agent to read it, so nothing was created", path)
 	case info.Size() == 0:
@@ -132,6 +136,15 @@ func fillPrompt(command, key, prompt string) (string, error) {
 // about an arbitrary agent's CLI; the error names the setting and shows where
 // the text should go, which turns the guess into the user's own line.
 func fillTemplate(command, key, prompt string) (string, error) {
+	// A blank template is the setting that opens a window on a shell, so there
+	// is no agent standing there to be handed anything. It gets its own
+	// refusal because the general one below would tell the reader to write a
+	// {prompt} into the very key they deliberately emptied — advice that
+	// undoes the configuration to fix the invocation.
+	if strings.TrimSpace(command) == "" && prompt != "" {
+		return "", fmt.Errorf("%s is blank, so the window opens a shell and there is no agent to hand a prompt to\nset %s to what should run there, with %s where the text belongs",
+			key, key, promptPlaceholder)
+	}
 	if !strings.Contains(command, promptPlaceholder) {
 		if prompt == "" {
 			return command, nil

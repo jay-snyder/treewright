@@ -699,6 +699,76 @@ func TestLoadKeepsAnEmptyTicketPatternEmpty(t *testing.T) {
 	}
 }
 
+// TestLoadKeepsAnEmptyCommandEmpty is ticket_pattern's rule applied to the two
+// command keys, with the agent module's one exception to it.
+//
+// `command = ""` opens the window on a shell, and is the only way a repository
+// can ask for a window with no agent in it. Defaulting off the value alone
+// collapsed that into "claude {prompt}", so the setting could not be
+// expressed and `treewright config` reported the default as the file's own
+// value. What is deliberately *not* changed is the agent key: it fills a blank
+// command however the blank got there, so a repository that wants the shell
+// removes that key too.
+func TestLoadKeepsAnEmptyCommandEmpty(t *testing.T) {
+	dir := registry(t, map[string]string{
+		"shell":       "main_dir = '/tmp/repo'\ncommand = ''\nresume_command = ''\n",
+		"unset":       "main_dir = '/tmp/repo'\n",
+		"named":       "main_dir = '/tmp/repo'\ncommand = 'nvim'\n",
+		"agentblank":  "main_dir = '/tmp/repo'\nagent = 'claude'\ncommand = ''\n",
+		"agentunset":  "main_dir = '/tmp/repo'\nagent = 'claude'\n",
+		"whitespace":  "main_dir = '/tmp/repo'\ncommand = '   '\n",
+		"agentnamed":  "main_dir = '/tmp/repo'\nagent = 'claude'\ncommand = 'nvim'\n",
+		"resumeshell": "main_dir = '/tmp/repo'\nresume_command = ''\n",
+	})
+	load := func(name string) *Config {
+		t.Helper()
+		c, err := Load(filepath.Join(dir, name+".toml"))
+		if err != nil {
+			t.Fatalf("Load(%s): %v", name, err)
+		}
+		return c
+	}
+
+	for _, tc := range []struct{ name, command, why string }{
+		{"shell", "", "an explicit blank is the setting that opens a shell"},
+		{"unset", DefaultCommand, "a file that never mentions the key takes the default"},
+		{"named", "nvim", "a named command is its own"},
+		{"agentblank", DefaultCommand, "the agent key fills a blank command however the blank got there"},
+		{"agentunset", DefaultCommand, "the module supplies the default for an absent key"},
+		{"agentnamed", "nvim", "an explicit command still beats the module's"},
+		{"whitespace", "   ", "whitespace is kept as written; tmux trims it to the same shell"},
+	} {
+		if got := load(tc.name).Command; got != tc.command {
+			t.Errorf("%s: command = %q, want %q — %s", tc.name, got, tc.command, tc.why)
+		}
+	}
+
+	// resume_command follows the same rule on its own, the two defaulting
+	// independently as they always have.
+	if got := load("resumeshell").ResumeCommand; got != "" {
+		t.Errorf("resume_command = '' loaded as %q, want it left empty", got)
+	}
+	if got := load("resumeshell").Command; got != DefaultCommand {
+		t.Errorf("command = %q with only resume_command blanked, want the default untouched", got)
+	}
+
+	// The bit refresh reads. A module that filled a blank must be
+	// distinguishable from a file that chose the same string, or a rewrite
+	// pins the module's own default into the file as a setting.
+	if !load("agentblank").AgentFilled("command") {
+		t.Error("AgentFilled(command) = false where the module filled an explicit blank")
+	}
+	if !load("agentunset").AgentFilled("command") {
+		t.Error("AgentFilled(command) = false where the module filled an absent key")
+	}
+	if load("agentnamed").AgentFilled("command") {
+		t.Error("AgentFilled(command) = true for a command the file named itself")
+	}
+	if load("shell").AgentFilled("command") {
+		t.Error("AgentFilled(command) = true with no agent key at all")
+	}
+}
+
 func TestDirFor(t *testing.T) {
 	c := &Config{MainDir: "/home/u/code/myrepo", BranchPrefix: "alice/"}
 	if got, want := c.DirFor("proj-1"), "/home/u/code/myrepo-proj-1"; got != want {

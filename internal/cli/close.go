@@ -102,6 +102,12 @@ func closeTarget(env *Env, cfg *config.Config, slug string) (name, dir string) {
 	return slug, cfg.DirFor(slug)
 }
 
+// agentWorkingNote is the caveat about closing a window whose agent says it is
+// working, as a format taking the window's name. A constant because it is said
+// in two registers — warnIfAgentWorking prints it as a warning, and rm's prompt
+// writes it to the tty above its question — and the two must stay one sentence.
+const agentWorkingNote = "the agent in %s says it is working\nit is the window's command, so closing the window stops it"
+
 // warnIfAgentWorking says so before a window closes with an agent still working
 // in it.
 //
@@ -126,7 +132,7 @@ func warnIfAgentWorking(env *Env, window tmux.Window) {
 	if window.State != stateWorking {
 		return
 	}
-	env.warnf("the agent in %s says it is working\nit is the window's command, so closing the window stops it", window.Name)
+	env.warnf(agentWorkingNote, window.Name)
 }
 
 // closeCosts lists what closing this window will take with it, one per line.
@@ -138,8 +144,8 @@ func warnIfAgentWorking(env *Env, window tmux.Window) {
 // asks for, made visible at the moment it applies.
 func closeCosts(window tmux.Window) []string {
 	var costs []string
-	if window.LastInSession() {
-		costs = append(costs, fmt.Sprintf("it is the last in session %s, which ends with it", window.Session))
+	if note := lastInSessionNote(window); note != "" {
+		costs = append(costs, note)
 	}
 	if window.ID == tmux.CurrentWindow() {
 		costs = append(costs, "it is the window this command is running in, so nothing after this runs")

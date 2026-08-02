@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -129,6 +130,24 @@ func TestMoveLeavesTheFilesItDidNotTake(t *testing.T) {
 
 // TestMoveRefusesACleanCheckout: there is nothing to move, and the error names
 // the command that was meant instead.
+// TestMoveWithABadSlugShowsItsOwnHelp is the regression test for validateSlug
+// hardcoding "new" in its refusals: a bad slug typed at move rendered new's
+// usage, sending the reader to another command's flags and arguments.
+func TestMoveWithABadSlugShowsItsOwnHelp(t *testing.T) {
+	f := newFixture(t, "")
+
+	r := f.exec("move", "bad..slug")
+	if !errors.Is(r.err, ErrUsage) {
+		t.Fatalf("err = %v, want ErrUsage", r.err)
+	}
+	if !strings.Contains(r.stderr, "usage: treewright move") {
+		t.Errorf("stderr = %q, want move's own usage rendered", r.stderr)
+	}
+	if strings.Contains(r.stderr, "usage: treewright new") {
+		t.Errorf("stderr renders new's help for a move gone wrong:\n%s", r.stderr)
+	}
+}
+
 func TestMoveRefusesACleanCheckout(t *testing.T) {
 	f := newFixture(t, "")
 
