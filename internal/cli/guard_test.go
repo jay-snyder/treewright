@@ -288,7 +288,10 @@ func TestTheGuardsRefusalNamesTheWayOn(t *testing.T) {
 			t.Errorf("the refusal never says %q:\n%s", want, message)
 		}
 	}
-	if !strings.Contains(flattened, "git -C "+wt+" commit") {
+	// Both ends of the command, asserted apart: a checkout deep enough to push
+	// the verb past the cut is the case abbreviatedCall exists for, and macOS
+	// runners have one by default.
+	if !strings.Contains(flattened, "git -C") || !strings.Contains(flattened, "commit") {
 		t.Errorf("the refusal never names what it refused:\n%s", message)
 	}
 
@@ -313,8 +316,7 @@ func TestTheGuardsRefusalNamesTheWayOn(t *testing.T) {
 }
 
 // TestTheGuardNamesALongCommandWithoutRepeatingIt keeps a refusal the size of a
-// message rather than the size of what it refused — the same reasoning that put
-// `abbreviated` in the held-open wrapper.
+// message rather than the size of what it refused.
 func TestTheGuardNamesALongCommandWithoutRepeatingIt(t *testing.T) {
 	f := guardFixture(t)
 	command := "git -C " + f.DirFor("alpha") + " commit -m '" + strings.Repeat("x", 4000) + "'"
@@ -325,6 +327,38 @@ func TestTheGuardNamesALongCommandWithoutRepeatingIt(t *testing.T) {
 	}
 	if !strings.Contains(message, "…") {
 		t.Errorf("the command was not marked as cut:\n%s", message)
+	}
+}
+
+// TestALongCallKeepsBothItsEnds is the property the refusal's usefulness rests
+// on. A worktree path is the front of nearly every command the guard refuses,
+// so a cut that only kept the front would keep only the path — which the
+// message prints in full on the next line anyway — and drop the verb.
+func TestALongCallKeepsBothItsEnds(t *testing.T) {
+	deep := "/private/var/folders/df/djsxfhc17x95674wsm_g8s980000gn/T/" +
+		"TestTheGuardsRefusalNamesTheWayOn3954581900/001/a-really-quite-deeply-nested/repo-alpha"
+	call := "git -C " + deep + " commit -m 'fix the null user'"
+
+	got := abbreviatedCall(call)
+	if len([]rune(got)) > maxRefusedCall+1 {
+		t.Errorf("kept %d runes, want no more than %d:\n%s", len([]rune(got)), maxRefusedCall+1, got)
+	}
+	if !strings.HasPrefix(got, "git -C /private/var") {
+		t.Errorf("the head is gone, so the call cannot be recognized:\n%s", got)
+	}
+	if !strings.HasSuffix(got, "commit -m 'fix the null user'") {
+		t.Errorf("the tail is gone, so the refusal never says what was refused:\n%s", got)
+	}
+
+	// A call that fits is left exactly as it was typed.
+	short := "git -C /w/repo-alpha commit -m done"
+	if got := abbreviatedCall(short); got != short {
+		t.Errorf("abbreviatedCall(%q) = %q, want it untouched", short, got)
+	}
+
+	// Only the first line, and said to be cut, when there is more than one.
+	if got := abbreviatedCall("git commit -m done\ngit push"); got != "git commit -m done …" {
+		t.Errorf("a multi-line call = %q, want the first line marked as cut", got)
 	}
 }
 

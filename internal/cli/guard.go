@@ -274,7 +274,7 @@ func (s guardScope) reaches(call hookCall) (guardFinding, bool) {
 // the message says how to proceed either way.
 func (s guardScope) reachesInCommand(command string) (guardFinding, bool) {
 	found := func(slug, dir string) (guardFinding, bool) {
-		return guardFinding{slug: slug, dir: dir, what: abbreviated(command)}, true
+		return guardFinding{slug: slug, dir: dir, what: abbreviatedCall(command)}, true
 	}
 
 	at := s.here
@@ -331,6 +331,42 @@ func (s guardScope) reachesInCommand(command string) (guardFinding, bool) {
 		}
 	}
 	return guardFinding{}, false
+}
+
+// maxRefusedCall caps the copy of a tool call the refusal names, in runes.
+//
+// Wider than the held-open wrapper's `abbreviated`, because the two lines pay
+// for different things. That one is shell-quoted into a script tmux measures,
+// so its budget is bytes on the wire and eighty of them is generous; this one
+// is only ever read, so what it costs is a line and a half of terminal, next to
+// a `worktree` field already free to run as long as the path does.
+const maxRefusedCall = 160
+
+// abbreviatedCall names a tool call in one field, cutting the middle out of one
+// too long to print.
+//
+// The middle rather than the tail, and that is the whole of the decision. A
+// tail cut spends its budget front-first, which on `git -C <path> commit` is
+// the directory — the same directory the message names again on the very next
+// line — so a deep enough checkout printed the path twice and the verb never.
+// macOS found it before a person did: a temp directory there is a hundred and
+// fifteen characters before the command has said anything. Keeping both ends
+// keeps the program and what it was going to do, at any path length.
+func abbreviatedCall(call string) string {
+	first, rest, _ := strings.Cut(call, "\n")
+	kept := []rune(first)
+	switch {
+	case len(kept) <= maxRefusedCall && strings.TrimSpace(rest) == "":
+		return first
+	case len(kept) <= maxRefusedCall:
+		// One column rather than three periods, as a window name shortened for
+		// the status line is marked.
+		return first + " …"
+	}
+	// Two thirds from the front: the program and its flags are what identify the
+	// call, where the tail only has to reach back past the last argument.
+	head := maxRefusedCall * 2 / 3
+	return string(kept[:head]) + "…" + string(kept[len(kept)-(maxRefusedCall-head):])
 }
 
 // pathsIn pulls the path-shaped parts out of one word: the word itself, and
