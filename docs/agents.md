@@ -210,6 +210,16 @@ last step of a cleanup rather than an alternative to finishing it: the question
 covers it like any other, and what the session ending buys is an ordering —
 honour the yes after the final message, not instead of it.
 
+That answer had to be hardened once more, because agents kept finding new
+conditions to weigh where the guide had named none: the answer looked obvious,
+or the caveats read like prerequisites, or `--yes` had been reflexively added
+to `rm` — whose only meaning is answering the window question for the person —
+so the binary closed the window and the question never existed to be asked. The
+rule is now stated as unconditional: every removal that leaves a window ends in
+the question, `rm` is driven without `--yes`, and the one removal with nothing
+to ask about is one where treewright itself named no window. Any condition an
+agent may weigh before asking eventually becomes the reason it does not ask.
+
 The handoff rule fails differently, and shows what a stated principle is worth
 on its own. "The work belongs to the agent in that window" was read and then
 ignored twice in one conversation, because a value gives an agent nothing to

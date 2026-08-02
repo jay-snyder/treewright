@@ -190,33 +190,48 @@ prune only takes worktrees that are both merged and clean. The refusals mean
 work that exists nowhere else: do not pass --force on your own judgment —
 surface the refusal and let the person decide.
 
-Removal empties the work's tmux window, and with no tty on this end treewright
-names the command that closes each one rather than asking:
+Do not pass --yes to rm. The only thing rm's --yes answers is this section's
+question: it closes the work's tmux window with nobody asked, and that
+decision is the person's — the question below exists to reach them. prune's
+--yes is not the same flag: it confirms only the removals, and every window
+still gets its question.
+
+Removal leaves the work's tmux window open on a directory that no longer
+exists, and with no tty on this end treewright names the command that closes
+each one rather than asking:
 
     treewright close eng-142
 
-That is not homework to hand back. Put the question to the person with
-AskUserQuestion, and run it yourself if they say yes. Ask with the caveats
-treewright printed above it — an agent that is still `working` in that window
-stops when the window closes, and it is worth saying so in the question rather
-than after the answer — a window that is the last in its session ends the
-session with it, and detaches whoever was attached, which
+**A removed worktree always ends in AskUserQuestion: close its window?** The
+question is the final step of the cleanup, unconditionally — there is nothing
+to weigh first, and a cleanup reported done without it is a cleanup with a step
+missing. Not skipped because the answer seems obvious, not skipped because the
+window is your own, and never traded for the printed command in your summary:
+that command is what you run on a yes, not what you hand back. On a no the
+window stays and the cleanup is still done. prune can remove several worktrees
+in one run, and each window it leaves gets asked about — one AskUserQuestion
+carries them all. The only removal with no question is one where treewright
+named no window, because none was open.
+
+What treewright printed above the command goes in the question rather than
+after the answer: an agent that is still `working` in that window stops when
+the window closes, and a window that is the last in its session ends the
+session with it, and detaches whoever was attached — which
 `window_last_in_session` in the JSON also says. `close` takes the window and
 nothing else; the worktree is already gone by then, and it finds the window
 anyway.
 
-**The window you are running in is asked about like every other one**, and it is
-the case the question exists for. An agent asked to tear down the worktree it is
+**The window you are running in gets the same question**, and it is the case
+the question exists for. An agent asked to tear down the worktree it is
 standing in meets that window every time, so exempting it is an exception that
-swallows the rule: nothing gets asked, and the person is handed back exactly the
-printed command the paragraph above refuses to hand back. `window_is_current`
-says which one is yours.
-
-What being your own window changes is the ordering, not the question. Closing it
-ends this session, so a yes on it is honoured last — after the final message
-rather than instead of it. Report the teardown, say whatever is left to say, and
-then kill the window as the closing action of the turn: it is the final step of
-the cleanup you were asked for, and the session ending is what that step costs.
+swallows the rule: nothing gets asked, and the person is handed back exactly
+the printed command the paragraph above refuses to hand back.
+`window_is_current` says which one is yours, and being yours changes the
+ordering of a yes, never whether you ask. Closing it ends this session, so a
+yes on it is honoured last — after the final message rather than instead of
+it. Report the teardown, say whatever is left to say, and then kill the window
+as the closing action of the turn: it is the final step of the cleanup you
+were asked for, and the session ending is what that step costs.
 
 ## Leave to the machinery
 
