@@ -97,7 +97,25 @@ type Window struct {
 	// questions, and the window whose pane has wandered into another worktree's
 	// directory is exactly the case that tells them apart.
 	Worktree string
+
+	// SessionWindows is how many windows the session holding this one has, which
+	// is what LastInSession reads.
+	//
+	// It rides in the pane listing rather than being asked per window, because
+	// the callers ask it of a whole table at once: `ls --json` over a dozen
+	// worktrees would otherwise pay a dozen extra round trips to the server for
+	// a number every one of those panes was already able to report.
+	//
+	// Only Windows fills it. A window fresh from NewWindow reports 0, and
+	// nothing asks — the question is about a session as it stands, and the
+	// answer for a window created a moment ago is one nobody is waiting on.
+	SessionWindows int
 }
+
+// LastInSession reports that this is the only window in its session, so that
+// closing it ends the session too — which moves an attached client to another
+// session or detaches it altogether. Worth saying before it happens.
+func (w Window) LastInSession() bool { return w.SessionWindows == 1 }
 
 // Available reports whether tmux is installed. Every operation here needs it, and
 // callers fall back to telling the user what to run by hand.
@@ -215,15 +233,20 @@ const (
 )
 
 // paneFormat lists a pane as window id, session, window name, the worktree its
-// window was opened on, the agent state recorded on it, then path.
+// window was opened on, the agent state recorded on it, how many windows its
+// session holds, then path.
 //
 // The fields are tab-separated and the path comes last, because both a window
 // name and a path may contain spaces: splitting on a space is only unambiguous
-// for the id. Splitting into a fixed six parts leaves any tab in a path — rare,
+// for the id. Splitting into a fixed seven parts leaves any tab in a path — rare,
 // but possible — inside the path where it belongs. The stamped worktree is a path
 // too, which is why stamp declines to write one holding a tab; the agent state is
-// a word from signal's closed vocabulary and can hold neither.
-const paneFormat = "#{window_id}\t#{session_name}\t#{window_name}\t#{" + worktreeOption + "}\t#{" + AgentStateOption + "}\t#{pane_current_path}"
+// a word from signal's closed vocabulary and the window count is a number, and
+// neither can hold one.
+//
+// The window count is here rather than asked per window because this listing is
+// gathered once for a whole table. See Window.SessionWindows.
+const paneFormat = "#{window_id}\t#{session_name}\t#{window_name}\t#{" + worktreeOption + "}\t#{" + AgentStateOption + "}\t#{session_windows}\t#{pane_current_path}"
 
 // Windows maps each pane's working directory to the window holding it, across
 // every session on the server. It is what stops `resume` from opening a second
@@ -281,23 +304,28 @@ func parsePanes(out, prefer string) map[string]Window {
 	}
 
 	for line := range strings.SplitSeq(out, "\n") {
-		fields := strings.SplitN(line, "\t", 6)
-		if len(fields) != 6 {
+		fields := strings.SplitN(line, "\t", 7)
+		if len(fields) != 7 {
 			continue
 		}
+		// A count that does not parse is left at zero, which reads as "not the
+		// last window": the only thing it feeds is a caveat about ending a
+		// session, and saying nothing is the right way to be wrong about that.
+		windows, _ := strconv.Atoi(fields[5])
 		w := Window{
 			ID:      fields[0],
 			Session: fields[1],
 			// The waiting marker comes off here, once, so the name every consumer
 			// sees is the one underneath treewright's own punctuation.
-			Name:     strings.TrimPrefix(fields[2], WaitingMarker),
-			State:    fields[4],
-			Worktree: fields[3],
+			Name:           strings.TrimPrefix(fields[2], WaitingMarker),
+			State:          fields[4],
+			Worktree:       fields[3],
+			SessionWindows: windows,
 		}
 		if w.ID == "" {
 			continue
 		}
-		stake(fields[5], w)
+		stake(fields[6], w)
 		// A window treewright opened answers for its own worktree wherever its pane
 		// is standing, so cd-ing a pane out of the directory no longer orphans the
 		// worktree's window and has a second one opened beside it.
@@ -780,12 +808,4 @@ func popupArgs(client, dir, command string, width, height int) []string {
 func KillWindow(id string) error {
 	_, err := run("kill-window", "-t", id)
 	return err
-}
-
-// LastInSession reports whether a window is the only one in its session, so that
-// closing it ends the session too — which moves an attached client to another
-// session or detaches it altogether. Worth saying before it happens.
-func LastInSession(id string) bool {
-	out, err := run("display-message", "-p", "-t", id, "#{session_windows}")
-	return err == nil && out == "1"
 }

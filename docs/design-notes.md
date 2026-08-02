@@ -417,6 +417,24 @@ the name a human reads, `window_id` is what `tmux kill-window -t` takes, and
 `window_session` is what `tmux attach -t` takes. All three are empty strings when
 no window is open.
 
+Two booleans go with them, and both exist because they were being worked out by
+hand. `window_is_current` marks the window the command is running in — the one
+whose closing ends the session doing the reporting, and the one an agent must
+not take down before it has finished answering. Reading that off the listing
+used to mean a `tmux display-message -p '#{window_id}'` of your own and a
+comparison, which is a fact treewright already has. `window_last_in_session`
+says that closing the window ends its session with it, which had no answer short
+of counting. Both are false when no window is open, and `window_is_current` is
+false outside tmux, where there is no such window — spelled explicitly, because
+the empty current window would otherwise match every row's empty `window_id`.
+
+**Neither costs a tmux call per row.** `#{session_windows}` rides in the same
+`list-panes` pass that fills the rest, so a table of a dozen worktrees still
+costs one round trip; the current window is one question about the caller, asked
+once. The per-window `display-message` that used to answer the second of them,
+for `rm`'s one window, is gone — `Window.LastInSession` reads the count the
+listing already carried.
+
 ## Statuses
 
 `ls` reports one status per worktree, in this precedence: `dirty` outranks

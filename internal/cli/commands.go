@@ -647,7 +647,7 @@ func offerWindowClose(env *Env, window tmux.Window, assumeYes bool) {
 	// the session goes, and an attached client goes with it — and a reader
 	// weighing that should not have to find it in the middle of the question.
 	last := ""
-	if tmux.LastInSession(window.ID) {
+	if window.LastInSession() {
 		last = fmt.Sprintf("it is the last in session %s, which ends with it", window.Session)
 	}
 
@@ -746,7 +746,7 @@ func cmdLs(env *Env, args []string) error {
 		// An array, never a message: a caller parsing this needs valid JSON
 		// whether or not there is anything to report, and the base row is there
 		// in every repository this command can answer about.
-		return writeJSON(env, worktreesJSON(infos, windows))
+		return writeJSON(env, worktreesJSON(infos, windows, tmux.CurrentWindow()))
 	}
 	if len(infos) == 0 {
 		env.progressf("no worktrees for %s", repo.Name())
