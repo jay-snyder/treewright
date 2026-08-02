@@ -504,8 +504,11 @@ assertions in `tmuxinit_test.go`.
    command name goes in all three shims under `internal/shellinit/scripts/`
    (zsh's `cmds`, bash's `compgen -W`, and fish's `complete` lines) plus any
    per-flag fish completions.
-4. Add a row to the Commands table in `README.md`, and to the output-contract
-   table in `docs/design-notes.md` if it prints to stdout.
+4. Add a row to the output-contract table in `docs/design-notes.md` if it prints
+   to stdout. `README.md` has no command reference to update — `tw help` is the
+   list, and the README names a command only where it is part of the tour. Add
+   it there if a reader who has not gone looking would otherwise never learn the
+   command exists.
 
 `TestEveryFlagIsDocumented` will fail if a flag is in help but not the parser or
 completion; `TestHelpTextIsCleanlyIndented` will fail on stray whitespace in the
