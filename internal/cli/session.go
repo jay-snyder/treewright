@@ -326,18 +326,3 @@ func attachHint(env *Env, cfg *config.Config, session string) string {
 	}
 	return "tmux " + strings.Join(tmux.AttachArgs(session), " ")
 }
-
-// killWindowHint says how to close a window by hand: what `rm` prints when there
-// is nobody to ask, and what `send` names for a window whose agent has died.
-//
-// It goes through tmux.KillWindowArgs for the reason attachHint goes through
-// AttachArgs, and here the reason bites harder. A line that names the wrong
-// session fails visibly; a line that reaches the wrong *server* does not. Under
-// TREEWRIGHT_TMUX_LABEL a bare `tmux kill-window -t @3` looks in the default
-// server, where @3 is some other window entirely — tmux closes it and exits 0,
-// so the window treewright meant stays open, one nobody asked about is gone,
-// and nothing said so. There is no treewright verb for this yet, which is why
-// it is printed at all.
-func killWindowHint(id string) string {
-	return "tmux " + strings.Join(tmux.KillWindowArgs(id), " ")
-}

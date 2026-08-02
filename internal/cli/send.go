@@ -164,5 +164,5 @@ func refuseHeldOpen(window tmux.Window, pane, name string, env *Env) error {
 		"a message would reach the shell holding it, and the Enter after it would close the window\n"+
 		"close it and start again:  %s",
 		window.Name, asFields(field("window", window.ID)),
-		env.copyable(killWindowHint(window.ID)+" && "+env.Argv0+" resume "+name))
+		env.copyable(env.Argv0+" close "+name+" && "+env.Argv0+" resume "+name))
 }

@@ -258,6 +258,7 @@ move around on you.
 | `tw ls [--json] [repo]` | The table above. Touches nothing |
 | `tw rm [-f] [-y] <slug>` | Delete the worktree, branch, stale remote ref, and window |
 | `tw prune [-y] [repo]` | Delete every merged, clean worktree. Lists them first unless you pass `--yes` |
+| `tw close <slug>` | Close a worktree's tmux window and nothing else. Works after the worktree is gone, which is what `rm` names it for |
 | `tw setup [-n] [--refresh] [name]` | Register the repo you're standing in, or regenerate its config in place |
 | `tw config [repo]` | Show the settings actually in force, defaults and all |
 | `tw doctor` | Check your install and every config you've registered |

@@ -147,6 +147,7 @@ ldflags. Validate config changes with `goreleaser check`.
 | `internal/cli/commands.go` | `new`, `rm`, `ls`, `prune`, `resume`, `cd`, `base`, `attach`. |
 | `internal/cli/move.go` | `move`: uncommitted work out of the base checkout and into a worktree. |
 | `internal/cli/send.go` | `send`: one line typed at the agent in an open window. |
+| `internal/cli/close.go` | `close`: the tmux window on a worktree, gone worktree or not. |
 | `internal/cli/prompt.go` | `{prompt}`, the two flags that fill it, and what `--prompt-file` builds. |
 | `internal/cli/setup.go` | `setup` (config generation, `--refresh`) and `config`. |
 | `internal/cli/refresh.go` | `refresh`: the one post-upgrade action. |
@@ -372,14 +373,23 @@ files and ignored ones inside untracked directories. `git stash` is not
 available to this — one stash stack is shared by every worktree of a repository.
 See "Moving work that was started in the wrong place" in `docs/design-notes.md`.
 
-**A tmux command treewright *prints* carries the server flags.** It is run from
-a shell holding none of treewright's environment, so `tmux.AttachArgs` and
-`tmux.KillWindowArgs` build those lines rather than a call site concatenating
-one. Under `TREEWRIGHT_TMUX_LABEL` a bare `tmux kill-window -t @3` reaches the
-default server, closes whatever `@3` is there, and exits 0 — a wrong session
-name fails loudly, a wrong server does not. `KillWindowArgs` and `KillWindow`
-are built from the same argument list, so the printed line cannot drift from the
-command treewright would have run.
+**treewright never prints a tmux command for someone to run.** `rm`, `prune` and
+`send` name `treewright close <slug>`; the one command still spelled as tmux is
+`attach`'s hint for a session in some *other* repository, and that goes through
+`tmux.AttachArgs` so it carries the server flags. A printed
+`tmux kill-window -t @3` is run from a shell holding none of treewright's
+environment, so under `TREEWRIGHT_TMUX_LABEL` it reached the default server,
+closed whatever `@3` was there and exited 0 — a wrong session name fails loudly,
+a wrong server does not.
+
+**`close` finds a window whose worktree is gone**, which is most of why it
+exists: the lookup is `Windows()[cfg.DirFor(slug)]`, and `@treewright_worktree`
+still holds that path after the directory is deleted. The path is computed from
+the slug rather than resolved among the worktrees for the same reason — a prefix
+resolves only while there is something to match against. Everything it reports
+is reported *before* the window goes: closing the caller's own window kills the
+pane treewright runs in, and closing a session's last window can detach whoever
+would have read it.
 
 **No tmux call lives outside `internal/tmux`, including the ones `send` makes.**
 `Send` is `send-keys -l -- <text>` then `send-keys Enter`, two calls because tmux

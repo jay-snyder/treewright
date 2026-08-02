@@ -369,6 +369,7 @@ stdout carries the answer and nothing else, so any command can be piped:
 | `refresh` | nothing — what it did is a report, and the answer is the state it left behind |
 | `agent-init` | the plugin directory it installed into, or the plugin's files with `--print` — with what it wrote, and where else it could go, on stderr |
 | `send` | nothing — there is no answer, only something done; what the window was showing and what was typed go to stderr |
+| `close` | nothing — there is no answer, only a window that is gone; what it closed and what that cost go to stderr |
 | `signal` | nothing — the answer is the stamp on the window, and out of scope it is silent on stderr too |
 
 Progress, warnings, prompts, and errors go to stderr, prefixed `warning:` or
@@ -730,21 +731,30 @@ unless you pass `--yes` to `rm`, because a window may still have a session
 running in it; with nobody to prompt — a script, an agent — both print the
 `tmux kill-window` to run instead.
 
-**That printed line carries the server flags**, through `tmux.KillWindowArgs`,
-for the reason `attachHint` carries them and with more at stake. It is run from
-a shell holding none of treewright's environment, so under
-`TREEWRIGHT_TMUX_LABEL` a bare `tmux kill-window -t @3` looks in the *default*
-server — where `@3` is some other window entirely. tmux closes it and exits 0.
-The window that was meant to close stays open, one nobody asked about is gone,
-and nothing anywhere says so: a wrong session name fails loudly, a wrong server
-does not. `send` names the same command for a window whose agent has died, and
-gets it from the same place — and both are built from the argument list
-`KillWindow` itself runs, so what is printed cannot drift from what treewright
-would have done.
+**What they name is `treewright close <slug>`, not a `tmux kill-window`.** The
+raw line was the last place driving treewright meant typing tmux, and it failed
+in the way that is hardest to notice. It is run from a shell holding none of
+treewright's environment, so under `TREEWRIGHT_TMUX_LABEL` a bare
+`tmux kill-window -t @3` looks in the *default* server — where `@3` is some
+other window entirely. tmux closes it and exits 0. The window that was meant to
+close stays open, one nobody asked about is gone, and nothing anywhere says so:
+a wrong session name fails loudly, a wrong server does not.
 
-There is no treewright verb for closing a window, which is why this is a printed
-line at all. That is the remaining place where driving treewright means typing
-raw tmux.
+`close` closes the window on a worktree and nothing else — the worktree, the
+branch and the work in them are `rm`'s business. **It works after the worktree
+has been deleted**, which is mostly what it is for: the window is found by the
+`@treewright_worktree` path recorded on it, and that record outlives the
+directory, so the same lookup answers before and after. The path is computed
+from the slug rather than looked up among the worktrees for the same reason. A
+prefix resolves while the worktree is still there and there is nothing to match
+against once it is gone, so a removed one is named in full.
+
+**Everything it says, it says before the window goes.** Closing a session's last
+window can detach the client that would have read the report, and closing the
+caller's own window kills the pane treewright is running in — there is no
+afterwards to report from. Both are said rather than refused: the second is a
+real thing to want, and the agent guide asks for exactly it as the last step of
+a teardown.
 
 Closing a session's last window ends the session, which moves an attached client
 elsewhere or detaches it, so the prompt says when that is what is about to

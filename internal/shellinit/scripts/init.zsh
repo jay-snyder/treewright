@@ -34,6 +34,7 @@ _treewright() {
     'ls:list worktrees with their status'
     'rm:tear down a worktree and its branch'
     'prune:remove every merged, clean worktree'
+    'close:close the tmux window open on a worktree'
     'setup:write a config for the repository you are standing in'
     'config:print the settings in force, defaults included'
     'doctor:check the installation and every registered config'
@@ -63,7 +64,7 @@ _treewright() {
   case "$words[2]" in
     new|move)                    compadd -S '' -- ${(f)"$(command treewright __complete prefixes 2>/dev/null)"} ;;
     rm)                          compadd -- ${(f)"$(command treewright __complete slugs 2>/dev/null)"} ;;
-    resume|cd|send)              compadd -- ${(f)"$(command treewright __complete targets 2>/dev/null)"} ;;
+    resume|cd|send|close)        compadd -- ${(f)"$(command treewright __complete targets 2>/dev/null)"} ;;
     ls|prune|base|config|attach|refresh) compadd -- ${(f)"$(command treewright __complete repos 2>/dev/null)"} ;;
     shell-init)                  compadd -- ${(f)"$(command treewright __complete shells 2>/dev/null)"} ;;
     signal)                      compadd -- ${(f)"$(command treewright __complete states 2>/dev/null)"} ;;

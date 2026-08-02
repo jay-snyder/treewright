@@ -191,12 +191,17 @@ work that exists nowhere else: do not pass --force on your own judgment —
 surface the refusal and let the person decide.
 
 Removal empties the work's tmux window, and with no tty on this end treewright
-prints the command that closes each one rather than asking. That line is not
-homework to hand back: put the question to the person with AskUserQuestion, and
-run the line treewright printed if they say yes. Ask with the caveat treewright
-printed above it — a window that is the last in its session ends the session
-with it, and detaches whoever was attached, which `window_last_in_session` in
-the JSON also says.
+names the command that closes each one rather than asking:
+
+    treewright close eng-142
+
+That is not homework to hand back. Put the question to the person with
+AskUserQuestion, and run it yourself if they say yes. Ask with the caveat
+treewright printed above it — a window that is the last in its session ends the
+session with it, and detaches whoever was attached, which
+`window_last_in_session` in the JSON also says. `close` takes the window and
+nothing else; the worktree is already gone by then, and it finds the window
+anyway.
 
 **The window you are running in is asked about like every other one**, and it is
 the case the question exists for. An agent asked to tear down the worktree it is

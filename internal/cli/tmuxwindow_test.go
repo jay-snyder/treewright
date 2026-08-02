@@ -306,23 +306,3 @@ func TestRmClosesAWindowInAnotherSession(t *testing.T) {
 		t.Errorf("stderr = %q, want the ending session named", r.stderr)
 	}
 }
-
-// TestTheCloseCommandReachesTheRightServer covers the line `rm` hands back when
-// there is nobody to ask — a script, or an agent — and `send` names for a window
-// whose agent has died.
-//
-// Asserted on the helper rather than by driving `rm`, because that branch is
-// only taken when /dev/tty cannot be opened: a suite run from a terminal takes
-// the other one and blocks on the prompt.
-func TestTheCloseCommandReachesTheRightServer(t *testing.T) {
-	t.Setenv("TREEWRIGHT_TMUX_LABEL", "work")
-	if got, want := killWindowHint("@3"), "tmux -L work kill-window -t @3"; got != want {
-		t.Errorf("killWindowHint = %q, want %q", got, want)
-	}
-
-	// And nothing extra on the default server, which is where most people are.
-	t.Setenv("TREEWRIGHT_TMUX_LABEL", "")
-	if got, want := killWindowHint("@3"), "tmux kill-window -t @3"; got != want {
-		t.Errorf("killWindowHint with no label = %q, want %q", got, want)
-	}
-}

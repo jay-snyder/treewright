@@ -804,30 +804,18 @@ func popupArgs(client, dir, command string, width, height int) []string {
 	return append(args, command)
 }
 
-// killWindow is the command that closes a window, without server flags: run
-// prepends those itself, and KillWindowArgs adds them for a line a person runs.
-// Both spellings come from here so they cannot disagree — the printed line has
-// to be the command treewright would have run.
-func killWindow(id string) []string { return []string{"kill-window", "-t", id} }
-
 // KillWindow closes a window by id.
-func KillWindow(id string) error {
-	_, err := run(killWindow(id)...)
-	return err
-}
-
-// KillWindowArgs is that same command as a line for someone else to run, server
-// flags included — what `rm` prints when there is nobody to ask, and what `send`
-// names for a window whose agent has died.
 //
-// The flags are the whole point, for the reason AttachArgs carries them: the
-// line is run from a shell that has none of treewright's environment, and under
-// TREEWRIGHT_TMUX_LABEL a bare `tmux kill-window -t @3` reaches the default
-// server instead. That failure is silent and destructive in the same breath —
-// tmux closes whatever @3 happens to be there and exits 0, so the window that
-// was meant to close stays open and one that was not is gone.
-func KillWindowArgs(id string) []string {
-	return append(serverArgs(), killWindow(id)...)
+// Nothing spells this command for a person to run any more. It used to be
+// printed — by `rm` with nobody to prompt, and by `send` for a window whose
+// agent had died — and a printed `tmux kill-window -t @3` is run from a shell
+// holding none of treewright's environment, so under TREEWRIGHT_TMUX_LABEL it
+// reached the default server and closed whatever @3 was there, silently and
+// with exit 0. `treewright close` is the verb that replaced it, and it comes
+// through here like every other tmux call.
+func KillWindow(id string) error {
+	_, err := run("kill-window", "-t", id)
+	return err
 }
 
 // Send types one line into a window and submits it, as someone at that window's

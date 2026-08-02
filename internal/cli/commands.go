@@ -606,7 +606,7 @@ func cmdRm(env *Env, args []string) error {
 	if wdErr == nil && insideDir(wd, dir) {
 		escapeDeletedDir(env, cfg.MainDir, dir)
 	}
-	offerWindowClose(env, staleWindow, yes)
+	offerWindowClose(env, slug, staleWindow, yes)
 	return nil
 }
 
@@ -632,7 +632,7 @@ func escapeDeletedDir(env *Env, mainDir, goneDir string) {
 // No client is needed to close a window, so this runs outside tmux too: a worktree
 // torn down from a plain shell should not leave a window behind in the session
 // waiting to be attached to.
-func offerWindowClose(env *Env, window tmux.Window, assumeYes bool) {
+func offerWindowClose(env *Env, slug string, window tmux.Window, assumeYes bool) {
 	if window.ID == "" {
 		return
 	}
@@ -659,10 +659,12 @@ func offerWindowClose(env *Env, window tmux.Window, assumeYes bool) {
 	if err != nil {
 		// Nobody to ask — treewright was run by a script or an agent. Say what to
 		// run rather than closing a window unasked, since something may still be
-		// running in it.
+		// running in it. `close` still finds the window afterwards: it is found by
+		// the directory treewright recorded on it, and that record outlives the
+		// directory this command has just deleted.
 		env.progressf("tmux window %s now points at a deleted directory%s%s",
 			window.Name, under(last),
-			asFields(field("close it with", env.copyable(killWindowHint(window.ID)))))
+			asFields(field("close it with", closeHint(env, slug))))
 		return
 	}
 	defer tty.Close()
@@ -833,7 +835,7 @@ func cmdPrune(env *Env, args []string) error {
 	// worktrees", which is not the same as "close my windows" — one of them may
 	// have a session still running in it.
 	for _, wt := range targets {
-		offerWindowClose(env, windows[wt.Dir], false)
+		offerWindowClose(env, wt.Slug, windows[wt.Dir], false)
 	}
 	return nil
 }

@@ -437,6 +437,32 @@ something running in them.`,
 			run: cmdPrune,
 		},
 		{
+			name:    "close",
+			args:    "<slug>",
+			summary: "close the tmux window open on a worktree",
+			long: `Closes the window treewright opened on a worktree, and nothing else —
+the worktree, the branch and any work in them are left alone. "treewright rm" is
+what removes those.
+
+It works after the worktree is gone, which is mostly what it is for. rm and
+prune do not close a window without being asked, since something may still be
+running in it, so with nobody to prompt they name this command instead. The
+window is found by the directory treewright recorded on it, and that record
+outlives the directory.
+
+An unambiguous prefix of a slug is enough while the worktree is still there;
+once it has been removed there is nothing to match against, so name it in full.
+"base" closes the main checkout's window.
+
+Closing a session's last window ends the session, which moves an attached client
+elsewhere or detaches it. That is said rather than refused, as is closing the
+window you are running in — which is a real thing to want, and the last thing
+that happens in that session.
+
+Nothing is printed to stdout: there is no answer here, only something done.`,
+			run: cmdClose,
+		},
+		{
 			name:    "setup",
 			args:    "[-n] [--refresh] [name]",
 			summary: "write a config for the repository you are standing in",
