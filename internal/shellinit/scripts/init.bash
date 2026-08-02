@@ -28,6 +28,13 @@ _treewright_completions() {
     COMPREPLY=($(compgen -W "$(command treewright __complete flags "${COMP_WORDS[1]}" 2>/dev/null)" -- "$cur"))
     return
   fi
+  # --prompt-file takes a path, and treewright knows nothing about the caller's
+  # filesystem: the shell's own file completer is the only sensible candidate
+  # list, so the flag's value is answered before the command's arguments are.
+  if [[ "${COMP_WORDS[COMP_CWORD-1]}" == --prompt-file ]]; then
+    COMPREPLY=($(compgen -f -- "$cur"))
+    return
+  fi
   local candidates=""
   case "${COMP_WORDS[1]}" in
     new)

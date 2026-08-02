@@ -248,7 +248,7 @@ move around on you.
 
 | Command | What it does |
 |---|---|
-| `tw new <slug> [window-name]` | Fork a branch off the latest `origin/<base_branch>`, make the worktree, open a window on it. `--prompt` hands the agent its first instruction |
+| `tw new <slug> [window-name]` | Fork a branch off the latest `origin/<base_branch>`, make the worktree, open a window on it. `--prompt` hands the agent its first instruction, `--prompt-file` points it at a brief too long to type |
 | `tw resume [slug]` | Go back to a worktree's window, or open it again — `--prompt` hands the agent its next instruction. Shows the menu if you don't name one |
 | `tw cd [slug]` | Move your shell into a worktree |
 | `tw base [repo]` | Go to the main checkout's window |

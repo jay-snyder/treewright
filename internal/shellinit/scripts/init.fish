@@ -64,6 +64,9 @@ complete -c treewright -n '__fish_seen_subcommand_from tmux-init' -l resume-key 
 complete -c treewright -n '__fish_seen_subcommand_from tmux-init' -l new-key -r -d 'prefix key that starts a worktree'
 complete -c treewright -n '__fish_seen_subcommand_from new' -s p -l prompt -r -d 'text the agent starts working on'
 complete -c treewright -n '__fish_seen_subcommand_from resume' -s p -l prompt -r -d 'text for the resumed agent'
+# -F is what turns the argument back into a filename completion: the file is on
+# the caller's disk, which treewright knows nothing about.
+complete -c treewright -n '__fish_seen_subcommand_from new resume' -l prompt-file -r -F -d 'a file holding the brief'
 complete -c treewright -n '__fish_seen_subcommand_from agent-init' -l global -d 'install it for every repository instead of this one'
 complete -c treewright -n '__fish_seen_subcommand_from agent-init' -l print -d 'print the plugin files instead of installing them'
 

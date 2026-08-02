@@ -51,6 +51,13 @@ _treewright() {
     compadd -- ${(f)"$(command treewright __complete flags "$words[2]" 2>/dev/null)"}
     return
   fi
+  # --prompt-file takes a path, and treewright knows nothing about the caller's
+  # filesystem: the shell's own file completer is the only sensible candidate
+  # list, so the flag's value is answered before the command's arguments are.
+  if [[ "$words[CURRENT-1]" == --prompt-file ]]; then
+    _files
+    return
+  fi
   case "$words[2]" in
     new)                         compadd -S '' -- ${(f)"$(command treewright __complete prefixes 2>/dev/null)"} ;;
     rm)                          compadd -- ${(f)"$(command treewright __complete slugs 2>/dev/null)"} ;;

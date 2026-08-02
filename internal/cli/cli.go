@@ -154,9 +154,18 @@ working rather than waiting to be told what the work is. The text lands where
 the command template says with {prompt} — the default is "claude {prompt}" —
 shell-quoted as one argument. Without the flag the placeholder simply
 disappears; with the flag and no placeholder to take it, the error says where
-to write one.`,
+to write one.
+
+--prompt-file is the same instruction, for a brief too long to type: the prompt
+becomes one line telling the agent to read that file, so its size never counts
+against the ceiling tmux puts on how long a command it will run. The path is
+made absolute and travels in the agent's command line, so the file has to
+outlive the command — treewright neither copies it nor deletes it, and clearing
+it up once the work has landed is yours. The two flags fill one setting, and
+passing both is an error rather than a precedence rule to learn.`,
 			flags: []flagDoc{
 				{"-p, --prompt", "text the agent starts working on, placed at the command's {prompt}"},
+				{promptFileFlag, "a file holding the brief; the prompt becomes one line naming it"},
 			},
 			run: cmdNew,
 		},
@@ -181,9 +190,15 @@ other row; "treewright base" is the way in that opens it fresh.
 --prompt hands the resumed agent its next instruction, at resume_command's
 {prompt} placeholder. It only reaches an agent the resume actually starts: a
 window that was already open is switched to as usual, with a warning that the
-prompt went undelivered and is worth pasting there.`,
+prompt went undelivered — and "treewright send" is what reaches the agent
+standing in it.
+
+--prompt-file names a file holding the instructions instead, and the prompt
+becomes one line telling the agent to read it. See "treewright help new" for
+what that buys and what it leaves you to clean up.`,
 			flags: []flagDoc{
 				{"-p, --prompt", "text for the resumed agent, placed at resume_command's {prompt}"},
+				{promptFileFlag, "a file holding the brief; the prompt becomes one line naming it"},
 			},
 			run: cmdResume,
 		},

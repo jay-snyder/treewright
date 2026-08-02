@@ -434,8 +434,46 @@ Three rules, each load-bearing:
   the caller is an agent, which for `--prompt` is the common case — the flag
   exists to hand work to an agent, and the thing typing it is increasingly
   another one. The file route needs neither, works for a person as well, and is
-  what the claude module's guide teaches, so the CLI and the skill now name the
-  same way out.
+  now `--prompt-file` rather than a sentence to compose.
+
+### `--prompt-file`, and why the sentence is treewright's
+
+The file route was taught before it was built: twenty-five lines of the claude
+module's guide spelling out where to put the brief, what sentence to point at it
+with, and which two obvious homes fail invisibly. All of that is a path decision
+and a template, and both belong in the binary — prose is something an agent can
+read carefully and still deviate from, where a flag is not.
+
+So `--prompt-file <path>` takes the file and builds the prompt:
+`read <path> in full — it is your complete brief`. The wording lives in one
+place, `promptPointer`, because it is the whole of what the flag adds and
+because it has to survive being read by an agent that will act on it — "in full"
+is what stops a reader skimming the first heading and starting work.
+
+Three things it does that the taught version could not be relied on to:
+
+- **The path is made absolute.** The command runs in the new worktree, so a
+  relative path resolved there names a file that is not in it. A reader typing
+  `--prompt-file brief.md` from the main checkout gets the file they meant.
+- **The file is checked before anything is created** — missing, a directory, or
+  empty — beside `fillPrompt`'s own refusals and for the same reason: a bad
+  invocation should not leave a half-made worktree behind an error about a flag.
+  Empty is on that list because an agent sent to read nothing has nothing to go
+  on and no way to say so.
+- **It fills one setting with `--prompt`, and passing both is an error.** Any
+  precedence we picked would be a rule to learn, in the one place where the cost
+  of guessing wrong is an agent working from the wrong instructions.
+
+The ceiling is a consequence rather than the point. A pointer is short whatever
+the file holds, so it never approaches `checkCommandFits`'s limit — but the file
+is worth it well before then, since it can be re-read after a compaction and
+outlives the session that wrote it.
+
+**treewright neither copies the file nor deletes it**, and the help says so.
+The path travels in the agent's command line, so the file has to be there when
+the window opens and for as long as the agent may want it again; deleting it
+once the work has landed stays the caller's, which is the one part of the old
+prose that survives into the guide.
 
 **A prompt that reached no agent is warned about.** The command carrying it
 runs only in a window that was actually created, and `resume` mostly finds

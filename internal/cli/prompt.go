@@ -2,6 +2,8 @@ package cli
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -13,6 +15,64 @@ import (
 
 // promptPlaceholder is where a command template takes the prompt's text.
 const promptPlaceholder = "{prompt}"
+
+// promptFileFlag is the flag's own spelling, named once because it is parsed by
+// two commands and documented beside each — and because a flag whose name is
+// typed out at four call sites is a flag one of them will eventually misspell.
+const promptFileFlag = "--prompt-file"
+
+// promptPointer is the prompt --prompt-file builds: one line naming the file,
+// and none of the file's own text.
+//
+// Spelled once, here, because it is the whole of what --prompt-file adds. The
+// wording matters more than it looks: the agent receiving it has to understand
+// that the file is the instruction rather than a reference to consult later,
+// and "in full" is what stops a reader skimming the first heading and starting
+// work. It was taught as a sentence to type by hand before it was a flag, and
+// this is that sentence.
+const promptPointer = "read %s in full — it is your complete brief"
+
+// resolvePrompt settles what the agent is told, from --prompt or --prompt-file.
+//
+// The two are one setting with two ways to fill it, and passing both is a wrong
+// invocation rather than a precedence rule to learn. The file is checked here,
+// where fillPrompt's refusals are: before anything is created, so a path that
+// is missing, a directory, or empty is this invocation being wrong rather than
+// a half-made worktree behind an error about a flag.
+//
+// The path is made absolute because it travels in the agent's command line,
+// which runs in the new worktree — a relative path resolved there names a file
+// that is not in it. treewright neither copies the file nor deletes it: it has
+// to outlive the command, and clearing it up once the work has landed stays the
+// caller's.
+//
+// The line it builds is short whatever the file holds, so a brief of any size
+// sidesteps the command-length ceiling checkCommandFits guards. That is a
+// consequence rather than the point — a file can be re-read after a compaction,
+// and it outlives the session that wrote it.
+func resolvePrompt(cmd, prompt, promptFile string) (string, error) {
+	if promptFile == "" {
+		return prompt, nil
+	}
+	if prompt != "" {
+		return "", usageErrorf(cmd, "--prompt and --prompt-file are two ways to fill one setting\npass whichever of them holds the instructions")
+	}
+
+	path, err := filepath.Abs(promptFile)
+	if err != nil {
+		return "", fmt.Errorf("could not resolve --prompt-file %s: %w", promptFile, err)
+	}
+	info, err := os.Stat(path)
+	switch {
+	case err != nil:
+		return "", fmt.Errorf("no file at %s\nthe prompt is one line telling the agent to read it, so nothing was created", path)
+	case info.IsDir():
+		return "", fmt.Errorf("%s is a directory, not a brief\nthe prompt is one line telling the agent to read it, so nothing was created", path)
+	case info.Size() == 0:
+		return "", fmt.Errorf("%s is empty\nan agent sent to read it would have nothing to go on, so nothing was created", path)
+	}
+	return fmt.Sprintf(promptPointer, path), nil
+}
 
 // fillPrompt resolves a command template against the prompt the user gave, and
 // refuses one the result is too long for tmux to run.
