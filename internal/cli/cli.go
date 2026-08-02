@@ -203,6 +203,39 @@ what that buys and what it leaves you to clean up.`,
 			run: cmdResume,
 		},
 		{
+			name:    "send",
+			args:    "[-n] <slug> <message>",
+			summary: "type one line at the agent in a worktree's window",
+			long: `Types a message into the window open on a worktree and presses Enter,
+which is how an agent already running gets its next instruction. --prompt only
+reaches an agent a resume actually starts; this reaches the one standing there.
+
+An unambiguous prefix of a slug is enough, and "base" reaches the main
+checkout's window. There has to be a window open — "treewright resume <slug>"
+is what opens one.
+
+What the window is showing is printed first, every time. An agent sitting on a
+question with options takes the next keystrokes as the answer to it, so a
+message sent blind can pick an option nobody read; reading the pane changes
+nothing and costs one tmux call. --dry-run stops there and sends nothing, which
+is also how you look at a window without having anything to say — the message
+can be left off entirely.
+
+One line only. Enter is what submits, so a message with a line break in it would
+post the rest as further turns: that is refused, and the way through is the one
+--prompt-file takes — put the text in a file and send a line naming it.
+
+The window you are running in is refused too. A message sent to yourself arrives
+in this session ahead of whatever you were answering, and reads afterwards as an
+instruction from somewhere else.
+
+Nothing is printed to stdout: there is no answer here, only something done.`,
+			flags: []flagDoc{
+				{"-n, --dry-run", "show what the window is displaying and send nothing"},
+			},
+			run: cmdSend,
+		},
+		{
 			name:    "cd",
 			args:    "[slug]",
 			summary: "move your shell into a worktree",

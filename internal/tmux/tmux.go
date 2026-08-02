@@ -112,11 +112,6 @@ type Window struct {
 	SessionWindows int
 }
 
-// LastInSession reports that this is the only window in its session, so that
-// closing it ends the session too — which moves an attached client to another
-// session or detaches it altogether. Worth saying before it happens.
-func (w Window) LastInSession() bool { return w.SessionWindows == 1 }
-
 // Available reports whether tmux is installed. Every operation here needs it, and
 // callers fall back to telling the user what to run by hand.
 func Available() bool {
@@ -398,6 +393,11 @@ func newWindow(s Spec, args []string) (Window, error) {
 // treewright may do to its own windows but not to one the user happened to open
 // on a worktree's directory, such as decorating the name.
 func (w Window) Stamped() bool { return w.Worktree != "" }
+
+// LastInSession reports that this is the only window in its session, so that
+// closing it ends the session too — which moves an attached client to another
+// session or detaches it altogether. Worth saying before it happens.
+func (w Window) LastInSession() bool { return w.SessionWindows == 1 }
 
 // rank scores how strong w's claim on dir is. A window treewright opened on this
 // very worktree says so; a window treewright did not open says nothing; and a
@@ -808,4 +808,59 @@ func popupArgs(client, dir, command string, width, height int) []string {
 func KillWindow(id string) error {
 	_, err := run("kill-window", "-t", id)
 	return err
+}
+
+// Send types one line into a window and submits it, as someone at that window's
+// keyboard would. It is how a message reaches an agent whose window is already
+// open, that agent being an ordinary TUI on an ordinary tty.
+//
+// Two calls, and both details are load-bearing in the same direction — tmux
+// reads its arguments as key names unless told otherwise. Without -l a message
+// beginning "Enter the amount" arrives as a keypress and three words; with -l on
+// the submit, Enter arrives as five characters. Each failure is silent, and each
+// puts something in somebody's session that they did not send.
+//
+// "--" ends the flags, so a message that starts with a dash is a message rather
+// than an option tmux does not have.
+//
+// One line is the caller's to enforce: Enter is what submits, so a newline in
+// the text posts the rest of it as further turns. Nothing here can tell whether
+// that was meant, which is why cmdSend refuses it rather than this splitting it.
+func Send(id, text string) error {
+	if _, err := run("send-keys", "-t", id, "-l", "--", text); err != nil {
+		return err
+	}
+	_, err := run("send-keys", "-t", id, "Enter")
+	return err
+}
+
+// Capture returns the last lines of what a window's pane is showing.
+//
+// It is what makes "look before you type" possible: an agent sitting on a
+// question with options takes the next keystrokes as the answer to it, so a
+// message sent blind can pick an option nobody read. Reading the pane changes
+// nothing and costs one tmux call.
+//
+// Only the visible pane is captured, not its scrollback, since the question is
+// what the window is showing now.
+func Capture(id string, lines int) (string, error) {
+	out, err := run("capture-pane", "-p", "-t", id)
+	if err != nil {
+		return "", err
+	}
+	return lastLines(out, lines), nil
+}
+
+// lastLines keeps the final n lines of a capture, dropping the blank ones a
+// pane's unused bottom half contributes. Split out because it is the only part
+// of Capture worth testing, and it needs no server to test.
+func lastLines(out string, n int) string {
+	all := strings.Split(out, "\n")
+	for len(all) > 0 && strings.TrimSpace(all[len(all)-1]) == "" {
+		all = all[:len(all)-1]
+	}
+	if len(all) > n {
+		all = all[len(all)-n:]
+	}
+	return strings.Join(all, "\n")
 }

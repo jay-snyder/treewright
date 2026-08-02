@@ -305,6 +305,7 @@ stdout carries the answer and nothing else, so any command can be piped:
 | `setup --refresh` | the config file's path, or the config itself with `--dry-run` |
 | `refresh` | nothing — what it did is a report, and the answer is the state it left behind |
 | `agent-init` | the plugin directory it installed into, or the plugin's files with `--print` — with what it wrote, and where else it could go, on stderr |
+| `send` | nothing — there is no answer, only something done; what the window was showing and what was typed go to stderr |
 | `signal` | nothing — the answer is the stamp on the window, and out of scope it is silent on stderr too |
 
 Progress, warnings, prompts, and errors go to stderr, prefixed `warning:` or

@@ -250,6 +250,7 @@ move around on you.
 |---|---|
 | `tw new <slug> [window-name]` | Fork a branch off the latest `origin/<base_branch>`, make the worktree, open a window on it. `--prompt` hands the agent its first instruction, `--prompt-file` points it at a brief too long to type |
 | `tw resume [slug]` | Go back to a worktree's window, or open it again — `--prompt` hands the agent its next instruction. Shows the menu if you don't name one |
+| `tw send <slug> <message>` | Type one line at the agent already running in that worktree's window, showing you the pane first. `--dry-run` just looks |
 | `tw cd [slug]` | Move your shell into a worktree |
 | `tw base [repo]` | Go to the main checkout's window |
 | `tw attach [repo]` | Attach this terminal to a repo's tmux session |

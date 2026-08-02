@@ -238,8 +238,8 @@ func cmdComplete(env *Env, args []string) error {
 	switch at(args, 0) {
 	// Two lists, differing by one name, because the commands that ask differ by
 	// what they can do. "slugs" is what rm completes: the worktrees, which are
-	// what it can remove. "targets" is what resume and cd complete: the same
-	// worktrees plus the base checkout, which they can reach and rm cannot.
+	// what it can remove. "targets" is what resume, cd and send complete: the
+	// same worktrees plus the base checkout, which they can reach and rm cannot.
 	// Offering "base" to rm would be completing a word that only ever errors.
 	case "slugs", "targets":
 		cfg, err := resolveConfig("")

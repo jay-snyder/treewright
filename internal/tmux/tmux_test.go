@@ -474,3 +474,36 @@ func TestAttachArgs(t *testing.T) {
 		t.Errorf("AttachArgs under a label = %q, want %q", got, want)
 	}
 }
+
+// TestLastLines covers what Capture does to a pane's contents before anyone
+// reads them: a pane is mostly empty below whatever is running in it, and a
+// tail that counted those blank rows would report twenty lines of nothing about
+// a window that is asking a question.
+func TestLastLines(t *testing.T) {
+	tests := []struct {
+		name string
+		out  string
+		n    int
+		want string
+	}{
+		{"shorter than the tail", "one\ntwo", 20, "one\ntwo"},
+		{"cut to the last lines", "one\ntwo\nthree\nfour", 2, "three\nfour"},
+		{
+			// The case it exists for: a question at the top of an otherwise
+			// empty pane still reaches the reader.
+			name: "the empty bottom of a pane does not count",
+			out:  "overwrite the file? y/n\n\n   \n\n",
+			n:    2,
+			want: "overwrite the file? y/n",
+		},
+		{"blank lines between content are kept", "one\n\ntwo", 3, "one\n\ntwo"},
+		{"nothing at all", "", 20, ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := lastLines(tc.out, tc.n); got != tc.want {
+				t.Errorf("lastLines(%q, %d) = %q, want %q", tc.out, tc.n, got, tc.want)
+			}
+		})
+	}
+}
