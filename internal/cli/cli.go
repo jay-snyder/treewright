@@ -689,9 +689,9 @@ func suggest(name string) string {
 			if len(name) >= 2 && strings.HasPrefix(candidate, name) {
 				return c.name
 			}
-			// Otherwise allow one edit per three characters, so short names are
-			// not matched by anything vaguely similar: "ls" tolerates no typo,
-			// "resume" tolerates two.
+			// Otherwise a base of one edit plus one per three characters, so
+			// short names are not matched by anything vaguely similar: "ls"
+			// tolerates one typo, "resume" three.
 			budget := 1 + len(candidate)/3
 			if d := editDistance(name, candidate); d <= budget && (best == "" || d < bestDist) {
 				best, bestDist = c.name, d

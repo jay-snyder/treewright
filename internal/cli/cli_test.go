@@ -15,7 +15,6 @@ import (
 	"github.com/jay-snyder/treewright/internal/config"
 	"github.com/jay-snyder/treewright/internal/gittest"
 	"github.com/jay-snyder/treewright/internal/testenv"
-	"github.com/jay-snyder/treewright/internal/tmux"
 )
 
 // fixture is a scratch repository plus a config registry pointing at it, so the
@@ -47,7 +46,7 @@ func newFixture(t *testing.T, extraConfig string) *fixture {
 	// a server private to this test. Nothing here can then open a window on, or
 	// kill a window in, the developer's own tmux — and a test that wants to assert
 	// about windows has a server it fully owns.
-	privateTmuxServer(t)
+	testenv.PrivateTmuxServer(t)
 	stubDefaultCommand(t)
 	t.Chdir(repo.MainDir)
 	return f
@@ -77,8 +76,6 @@ func requireTmux(t *testing.T) {
 	testenv.RequireTool(t, "tmux")
 }
 
-// waitForFile polls for a file a background process is expected to create, since
-// neither post_create nor a command running in a tmux window is waited on.
 // flat collapses a message's layout — its line breaks, its continuation indent
 // and the padding that lines a field's values up — so an assertion can be about
 // what a message says rather than about how wide its label column happened to
@@ -91,6 +88,8 @@ func requireTmux(t *testing.T) {
 // and list tests, and the table tests.
 func flat(s string) string { return strings.Join(strings.Fields(s), " ") }
 
+// waitForFile polls for a file a background process is expected to create, since
+// neither post_create nor a command running in a tmux window is waited on.
 func waitForFile(t *testing.T, path, what string) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
@@ -119,37 +118,33 @@ func waitForContent(t *testing.T, path, want, what string) {
 	t.Errorf("%s never wrote %q to %s — it holds %q", what, want, path, body)
 }
 
-// privateTmuxServer points treewright at a tmux server of this test's own, in a
-// socket directory of its own, and takes both away afterwards. The server is not
-// started here: no test pays for one unless it runs a command that opens a window.
-//
-// The directory is under /tmp rather than the test's own temp directory because a
-// unix socket path is limited to little over a hundred characters, and a macOS
-// temp directory path is long enough to approach that by itself.
-//
-// Removing the directory is what cleans up, rather than asking tmux where its
-// socket is: kill-server does not unlink the socket, and a server whose last
-// window has already closed is not there to answer the question.
-func privateTmuxServer(t *testing.T) {
+// hideTmux rebuilds PATH with everything a command needs except tmux, so a test
+// can drive the no-tmux paths on a machine that has it installed. The tools a
+// command shells out to — and the fixture's stubbed claude — come along as
+// symlinks, resolved from the PATH being replaced.
+func hideTmux(t *testing.T) {
 	t.Helper()
-	//nolint:usetesting // t.TempDir gives a path too long for a unix socket on macOS
-	dir, err := os.MkdirTemp("/tmp", "tmx")
-	if err != nil {
-		t.Fatalf("make a tmux socket directory: %v", err)
+	dir := t.TempDir()
+	for _, tool := range []string{"git", "sh", "claude"} {
+		resolved, err := exec.LookPath(tool)
+		if err != nil {
+			t.Fatalf("%s is not on PATH to begin with: %v", tool, err)
+		}
+		if err := os.Symlink(resolved, filepath.Join(dir, tool)); err != nil {
+			t.Fatalf("link %s: %v", tool, err)
+		}
 	}
-	t.Setenv("TMUX_TMPDIR", dir)
+	t.Setenv("PATH", dir)
+}
 
-	// Sanitized for the same reason a session name is: a subtest's name contains
-	// a "/", which tmux would read as a path.
-	label := tmux.SessionName(strings.ReplaceAll(t.Name(), "/", "-"))
-	t.Setenv("TREEWRIGHT_TMUX_LABEL", label)
-
-	// Registered after both Setenvs, so it runs before either is undone and the
-	// kill still finds the server.
-	t.Cleanup(func() {
-		_ = exec.Command("tmux", "-L", label, "kill-server").Run()
-		_ = os.RemoveAll(dir)
-	})
+// noTTY takes the terminal away, so a test can drive the nobody-to-ask path of
+// a window-close offer deterministically — and so the suite can never block a
+// developer's own terminal on a [y/N] no one is there to answer.
+func noTTY(t *testing.T) {
+	t.Helper()
+	prev := openTTY
+	openTTY = func() (*os.File, error) { return nil, errors.New("no tty in tests") }
+	t.Cleanup(func() { openTTY = prev })
 }
 
 // setConfig writes the sole config, named "proj". base_branch and branch_prefix
@@ -417,9 +412,15 @@ func TestNewWarnsWhenTheBaseCheckoutIsAheadOfOrigin(t *testing.T) {
 	}
 
 	// Pushed, there is nothing to say — and nothing is said, since a warning
-	// that appears whatever the state is one nobody reads.
+	// that appears whatever the state is one nobody reads. The error is checked
+	// first: a `new beta` that failed outright would also print no warning, and
+	// the absence check would pass about a worktree that was never made.
 	f.Push(f.MainDir, "main")
-	if r := f.exec("new", "beta"); strings.Contains(r.stderr, "not on origin/main") {
+	r = f.exec("new", "beta")
+	if r.err != nil {
+		t.Fatalf("new beta: %v\n%s", r.err, r.both())
+	}
+	if strings.Contains(r.stderr, "not on origin/main") {
 		t.Errorf("stderr = %q, want silence once the base branch is pushed", r.stderr)
 	}
 }
@@ -782,6 +783,30 @@ func TestRmGuards(t *testing.T) {
 	})
 }
 
+// TestRmInARepositoryWithNoWorktreesPointsAtNew pins the empty half of the
+// not-found error. The list form ended in "have:" with silence under it —
+// asLines contributes nothing for an empty slice, which is right for a list and
+// exactly wrong for a line that promised one — and what the reader needs is not
+// the empty set but the command that starts a first worktree.
+func TestRmInARepositoryWithNoWorktreesPointsAtNew(t *testing.T) {
+	f := newFixture(t, "")
+
+	out, err := f.run("rm", "ghost")
+	if err == nil {
+		t.Fatal("want an error for a worktree that does not exist")
+	}
+	msg := out + err.Error()
+	if strings.Contains(msg, "have:") {
+		t.Errorf("error = %q, want no dangling have: with nothing under it", msg)
+	}
+	if !strings.Contains(msg, "no worktrees at all") {
+		t.Errorf("error = %q, want the empty repository named as the state", msg)
+	}
+	if !strings.Contains(flat(msg), "new ghost") {
+		t.Errorf("error = %q, want new named as the way to a first worktree", msg)
+	}
+}
+
 func TestRmAllowsSquashMergedWithoutForce(t *testing.T) {
 	f := newFixture(t, "")
 	f.mustRun("new", "squashed")
@@ -885,6 +910,37 @@ func TestPruneEmitsCdWhenStandingInAPrunedWorktree(t *testing.T) {
 	}
 	if f.Exists("reaped") {
 		t.Error("worktree was not pruned")
+	}
+}
+
+// TestPruneLeavesTheWindowOfAWorktreeItCouldNotRemove is the regression test
+// for a --yes prune offering every target's window for closing, removed or not.
+// A locked worktree's removal fails, the directory still exists, and an agent
+// may still be working in its window — the one window of the batch nobody
+// should be invited to kill, and the one the old loop still offered.
+func TestPruneLeavesTheWindowOfAWorktreeItCouldNotRemove(t *testing.T) {
+	requireTmux(t)
+	f := newFixture(t, "command = 'sleep 300'\n")
+	noTTY(t)
+
+	f.mustRun("new", "reapable") // both merged and clean, so both are targets
+	f.mustRun("new", "wedged")
+	f.Git(f.MainDir, "worktree", "lock", f.DirFor("wedged"))
+
+	r := f.exec("prune", "-y")
+	if r.err != nil {
+		t.Fatalf("prune: %v\n%s", r.err, r.both())
+	}
+	if !strings.Contains(r.stderr, "could not remove wedged") {
+		t.Fatalf("stderr = %q, want the failed removal reported", r.stderr)
+	}
+	// The removed worktree's window is the one now pointing at nothing, and the
+	// only one whose closing should be brought up.
+	if !strings.Contains(r.stderr, "tmux window REAPABLE now points at a deleted directory") {
+		t.Errorf("stderr = %q, want the removed worktree's window offered", r.stderr)
+	}
+	if strings.Contains(r.stderr, "tmux window WEDGED") {
+		t.Errorf("stderr offers the locked worktree's live window for closing:\n%s", r.stderr)
 	}
 }
 

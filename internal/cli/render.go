@@ -512,6 +512,15 @@ func resolveSlug(env *Env, repo git.Repo, managed []git.Worktree, want string) (
 		env.progressf("%s matches worktree %s", want, prefixed[0].Slug)
 		return prefixed[0], nil
 	case 0:
+		// A repository with no worktrees at all gets its own sentence. The list
+		// form would render "have:" with silence under it — asLines contributes
+		// nothing for an empty slice, which is right for a list and wrong for a
+		// line that promised one — and what the reader needs is not the empty
+		// set but the way to a non-empty one.
+		if len(managed) == 0 {
+			return git.Worktree{}, fmt.Errorf("no worktree %q — %s has no worktrees at all\nstart one with %s",
+				want, repo.Name(), env.copyable(env.Argv0+" new "+want))
+		}
 		return git.Worktree{}, fmt.Errorf("no worktree %q for %s\nhave:%s",
 			want, repo.Name(), asLines(slugsOf(managed)))
 	default:

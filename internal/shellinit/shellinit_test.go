@@ -186,16 +186,6 @@ func TestExternalCommandsResistAliases(t *testing.T) {
 	}
 }
 
-// TestWrapperSurvivesAnRmAlias runs the emitted shim in a real shell that has the
-// alias set, and checks the temp file is cleaned up without a prompt.
-//
-// The shim is written to a file and sourced, rather than pasted into the program,
-// because that is the only shape in which the hazard occurs — and the shape a
-// startup file uses. Both shells expand aliases as they parse a function body, so
-// the alias has to already be in effect when the body is read: sourced after the
-// alias, `rm -f` becomes `rm -i -f`, while the same text inlined into one -c
-// argument is parsed before the alias statement ever runs and expands to nothing.
-// An earlier version of this test inlined it, and so proved nothing.
 // TestShortNameReachesTheBinary proves TREEWRIGHT_ARGV0 travels: the tw wrapper
 // runs the binary as "command treewright", so the variable is the only way the
 // binary can learn which name was typed — and it must be scoped to the one call,
@@ -245,6 +235,16 @@ func TestShortNameReachesTheBinary(t *testing.T) {
 	}
 }
 
+// TestWrapperSurvivesAnRmAlias runs the emitted shim in a real shell that has the
+// alias set, and checks the temp file is cleaned up without a prompt.
+//
+// The shim is written to a file and sourced, rather than pasted into the program,
+// because that is the only shape in which the hazard occurs — and the shape a
+// startup file uses. Both shells expand aliases as they parse a function body, so
+// the alias has to already be in effect when the body is read: sourced after the
+// alias, `rm -f` becomes `rm -i -f`, while the same text inlined into one -c
+// argument is parsed before the alias statement ever runs and expands to nothing.
+// An earlier version of this test inlined it, and so proved nothing.
 func TestWrapperSurvivesAnRmAlias(t *testing.T) {
 	for _, shell := range []string{"zsh", "bash"} {
 		t.Run(shell, func(t *testing.T) {
@@ -317,6 +317,113 @@ func TestWrapperSurvivesAnRmAlias(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestWrapperSurvivesAnEmptyTMPDIR is the regression test for the fish shim
+// treating a defined-but-empty TMPDIR as usable: its temp file then aimed at
+// "/treewright-eval.XXXXXX" in the root, and the failure took every invocation
+// down before the binary ever ran. All three shells get the same run, since
+// ${TMPDIR:-/tmp} has to mean "unset or empty" everywhere.
+func TestWrapperSurvivesAnEmptyTMPDIR(t *testing.T) {
+	for _, shell := range []string{"zsh", "bash", "fish"} {
+		t.Run(shell, func(t *testing.T) {
+			bin, err := exec.LookPath(shell)
+			if err != nil {
+				testenv.Unavailablef(t, "%s is not installed", shell)
+			}
+			script, err := Script(shell)
+			if err != nil {
+				t.Fatalf("Script: %v", err)
+			}
+
+			dir := t.TempDir()
+			shim := filepath.Join(dir, "shim")
+			if err := os.WriteFile(shim, []byte(script), 0o644); err != nil {
+				t.Fatalf("write shim: %v", err)
+			}
+			// A stub treewright that reports whether the eval file was wired up,
+			// which is the wrapper having survived far enough to run it.
+			stub := filepath.Join(dir, "treewright")
+			if err := os.WriteFile(stub, []byte("#!/bin/sh\necho \"evalfile=${TREEWRIGHT_EVAL_FILE:+set}\"\n"), 0o755); err != nil {
+				t.Fatalf("write stub: %v", err)
+			}
+
+			cmd := exec.Command(bin, "-c", "source "+shim+"\ntreewright ls\n")
+			cmd.Env = append(os.Environ(), "PATH="+dir+string(os.PathListSeparator)+os.Getenv("PATH"), "TMPDIR=")
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("%s failed with an empty TMPDIR: %v\n%s", shell, err, out)
+			}
+			if !strings.Contains(string(out), "evalfile=set") {
+				t.Errorf("the binary never ran with an eval file wired up:\n%s", out)
+			}
+		})
+	}
+}
+
+// TestCompletionDescriptionsAgreeAcrossShells holds the zsh and fish command
+// descriptions to each other, the way the command names are already held to the
+// real table. They are hand-copied prose in two dialects — bash carries none —
+// and `move`'s had drifted apart by the time this test was written.
+func TestCompletionDescriptionsAgreeAcrossShells(t *testing.T) {
+	zsh := completionDescriptions(t, "zsh")
+	fish := completionDescriptions(t, "fish")
+	if len(zsh) == 0 || len(fish) == 0 {
+		t.Fatalf("parsed no descriptions (zsh %d, fish %d) — the extraction no longer matches the scripts", len(zsh), len(fish))
+	}
+
+	for name, zdesc := range zsh {
+		fdesc, ok := fish[name]
+		if !ok {
+			t.Errorf("%s is described in zsh and absent from fish's subcommand completions", name)
+			continue
+		}
+		if zdesc != fdesc {
+			t.Errorf("%s is described as %q in zsh and %q in fish — hand-copied prose has to match", name, zdesc, fdesc)
+		}
+	}
+	for name := range fish {
+		if _, ok := zsh[name]; !ok {
+			t.Errorf("%s is described in fish and absent from zsh's command list", name)
+		}
+	}
+}
+
+// completionDescriptions reads a shell's per-command descriptions back out of
+// its emitted script: zsh's 'name:description' entries, and the -d values on
+// fish's subcommand completions.
+func completionDescriptions(t *testing.T, shell string) map[string]string {
+	t.Helper()
+	script, err := Script(shell)
+	if err != nil {
+		t.Fatalf("Script(%q): %v", shell, err)
+	}
+	out := map[string]string{}
+	for line := range strings.SplitSeq(script, "\n") {
+		line = strings.TrimSpace(line)
+		switch shell {
+		case "zsh":
+			if !strings.HasPrefix(line, "'") || !strings.HasSuffix(line, "'") {
+				continue
+			}
+			if name, desc, ok := strings.Cut(strings.Trim(line, "'"), ":"); ok {
+				out[name] = desc
+			}
+		case "fish":
+			if !strings.Contains(line, "__fish_use_subcommand") {
+				continue
+			}
+			_, rest, ok := strings.Cut(line, "-a ")
+			if !ok {
+				continue
+			}
+			name := strings.Fields(rest)[0]
+			if _, desc, ok := strings.Cut(rest, "-d '"); ok {
+				out[name] = strings.TrimSuffix(strings.TrimSpace(desc), "'")
+			}
+		}
+	}
+	return out
 }
 
 // TestEveryScriptExportsWhichTreewrightWroteIt covers the one integration that

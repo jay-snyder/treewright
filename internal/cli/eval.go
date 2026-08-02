@@ -16,19 +16,45 @@ import (
 // The commands written are restricted to what zsh, bash and fish all parse the
 // same way, so one writer serves every shell.
 
-// emitEval appends a shell command for the calling shell to run. It is a no-op
-// without the shell integration, so every caller must still behave correctly
-// when the command never runs.
-func emitEval(env *Env, command string) {
-	if env.EvalFile == "" {
-		return
-	}
-	f, err := os.OpenFile(env.EvalFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+// appendEval appends a shell command to the eval file for the calling shell to
+// run. The caller owns the fallback: without the integration, and when the file
+// cannot be written, the command never runs and something still has to say what
+// to type — which is why the callers go through moveShell rather than here.
+func appendEval(path, command string) error {
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(f, command); err != nil {
+		_ = f.Close()
+		return err
+	}
+	return f.Close()
+}
+
+// moveShell asks the calling shell to cd into dir, and says what to type when
+// nothing will run the command: reason is the first line of that message,
+// naming what did not happen from the caller's side.
+//
+// Both halves live in one function because they are one rule — an eval that may
+// never run must leave a by-hand line behind — and spelled at each call site, a
+// third caller can forget half of it. The half that used to be missing
+// everywhere was the eval file that exists and cannot be written: a swept
+// tmpdir, a full disk. emitEval swallowed that error, both callers printed
+// their fallback only when no integration was loaded at all, and the result was
+// a `cd` that printed a path, moved nothing, and said nothing about why — a
+// failure with no report path, which nothing here is allowed to have.
+func moveShell(env *Env, dir, reason string) {
+	if env.EvalFile != "" {
+		err := appendEval(env.EvalFile, "cd "+shellQuote(dir))
+		if err == nil {
+			return
+		}
+		env.warnf("the shell integration is loaded, but its eval file could not be written\n%v\nyour shell stays where it is%s",
+			err, asFields(field("run", env.copyable("cd "+dir))))
 		return
 	}
-	defer f.Close()
-	fmt.Fprintln(f, command)
+	env.progressf("%s%s", reason, asFields(field("run", env.copyable("cd "+dir))))
 }
 
 // shellQuote wraps s in single quotes so a shell reads it as one literal word.

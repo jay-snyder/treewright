@@ -18,28 +18,17 @@ import (
 // — so a developer's own sessions and key bindings are never touched.
 
 // server starts a tmux server this test owns, and returns a function that runs
-// commands against it.
+// commands against it. Isolation — the private socket directory and label —
+// comes from testenv, as it does for every test that touches a server.
 func server(t *testing.T) func(args ...string) (string, error) {
 	t.Helper()
 	testenv.RequireTool(t, "tmux")
-	// Under /tmp rather than t.TempDir(), because a unix socket path is limited to
-	// little over a hundred characters and a macOS temp path approaches that alone.
-	//nolint:usetesting // t.TempDir gives a path too long for a unix socket on macOS
-	dir, err := os.MkdirTemp("/tmp", "tmx")
-	if err != nil {
-		t.Fatalf("make a tmux socket directory: %v", err)
-	}
-	t.Setenv("TMUX_TMPDIR", dir)
-	label := strings.ReplaceAll(t.Name(), "/", "-")
+	label := testenv.PrivateTmuxServer(t)
 
 	tmux := func(args ...string) (string, error) {
 		out, err := exec.Command("tmux", append([]string{"-L", label}, args...)...).CombinedOutput()
 		return strings.TrimSpace(string(out)), err
 	}
-	t.Cleanup(func() {
-		_, _ = tmux("kill-server")
-		_ = os.RemoveAll(dir)
-	})
 
 	// Key bindings live in a server, so there has to be one to load them into —
 	// and it has to be a stock one. A server reads ~/.tmux.conf as it starts, so

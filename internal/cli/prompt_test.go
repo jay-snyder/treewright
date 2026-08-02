@@ -44,6 +44,30 @@ func TestThePlaceholderVanishesRatherThanEmptying(t *testing.T) {
 	waitForContent(t, marker, "0", "the window's argument count")
 }
 
+// TestNewWithAPromptAndNoTmuxDoesNotClaimAWindowWasOpen covers the pairing no
+// test held: a --prompt on a machine without tmux. No window exists, open or
+// otherwise, and the no-tmux branch already prints the filled command — prompt
+// included — as the recovery; the old warning fired on top of it anyway,
+// telling the user to paste the prompt to an agent in a window that was
+// "already open" when neither existed.
+func TestNewWithAPromptAndNoTmuxDoesNotClaimAWindowWasOpen(t *testing.T) {
+	f := newFixture(t, "")
+	hideTmux(t)
+
+	r := f.exec("new", "eng-9", "--prompt", "fix the rounding")
+	if r.err != nil {
+		t.Fatalf("new: %v\n%s", r.err, r.both())
+	}
+	if strings.Contains(r.stderr, "prompt not delivered") {
+		t.Errorf("stderr warns about a window that was already open, with no tmux installed:\n%s", r.stderr)
+	}
+	// The recovery the no-tmux branch owns: the command to run by hand, with
+	// the prompt already quoted into it.
+	if !strings.Contains(flat(r.stderr), "run claude 'fix the rounding'") {
+		t.Errorf("stderr = %q, want the filled command as the by-hand recovery", flat(r.stderr))
+	}
+}
+
 // TestPromptRefusedWithoutAPlaceholder is the third rule, plus its timing:
 // the refusal comes before anything is created, so a flag mistake does not
 // leave a half-made worktree behind.

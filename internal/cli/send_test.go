@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -103,6 +104,30 @@ func TestSendDryRunReadsWithoutTyping(t *testing.T) {
 // TestSendRefusesALineBreak: Enter is what submits, so the second line and
 // everything after it would post as further turns. treewright cannot tell that
 // from an intention, and by the time anyone sees it, it has happened.
+// TestSendRequiresASlugAndAMessage covers the two usage refusals, which every
+// post-parse refusal here had a test for and these did not: both are wrong
+// invocations, exit 2, and the message one has to name --dry-run — the form
+// that legitimately carries no message, for looking without saying anything.
+func TestSendRequiresASlugAndAMessage(t *testing.T) {
+	f := newFixture(t, "")
+
+	r := f.exec("send")
+	if !errors.Is(r.err, ErrUsage) {
+		t.Errorf("err = %v, want ErrUsage for a send with no slug", r.err)
+	}
+	if !strings.Contains(r.stderr, "a slug is required") {
+		t.Errorf("stderr = %q, want the missing slug named", r.stderr)
+	}
+
+	r = f.exec("send", "eng-1")
+	if !errors.Is(r.err, ErrUsage) {
+		t.Errorf("err = %v, want ErrUsage for a send with no message", r.err)
+	}
+	if !strings.Contains(r.stderr, "a message is required") || !strings.Contains(r.stderr, "--dry-run") {
+		t.Errorf("stderr = %q, want the missing message named and --dry-run offered", r.stderr)
+	}
+}
+
 func TestSendRefusesALineBreak(t *testing.T) {
 	requireTmux(t)
 	config, marker := receives(t)

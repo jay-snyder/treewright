@@ -128,7 +128,8 @@ type Config struct {
 	// adds files git ignores not at all.
 	CarryFiles []string `toml:"carry_files"`
 
-	// Command is what to launch in the new tmux window. Defaults to "claude".
+	// Command is what to launch in the new tmux window. Defaults to
+	// DefaultCommand, "claude {prompt}".
 	Command string `toml:"command"`
 
 	// ResumeCommand is what `treewright resume` launches. It is separate from
@@ -334,6 +335,15 @@ func Load(path string) (*Config, error) {
 	if c.BaseBranch == "" {
 		c.BaseBranch = DefaultBaseBranch
 	}
+	// Defaulted off the value rather than through Explicit, so an explicit
+	// command = "" is collapsed into the default — the collapse ticket_pattern
+	// below avoids. tmux.Spec would honor a blank command by leaving a shell,
+	// but there is no way to ask for that from a config: writing "" gets you the
+	// agent. That stays this way on purpose for now — "" in a command key is far
+	// more often a half-deleted line than a request for a bare shell, and
+	// honoring it would turn the typo into a window that silently runs nothing.
+	// A config that wants a shell is the use case that would flip these, and the
+	// agent-module overrides above, to Explicit.
 	if c.Command == "" {
 		c.Command = DefaultCommand
 	}
@@ -374,7 +384,14 @@ func Resolve(name, repoMainDir string) (*Config, error) {
 	if name != "" {
 		path := filepath.Join(Dir(), name+".toml")
 		if _, err := os.Stat(path); err != nil {
-			return nil, fmt.Errorf("no config %q in %s (have: %s)", name, Dir(), strings.Join(names, ", "))
+			// Only a missing file means "no config". Anything else — a
+			// permissions problem, usually — is a file that is there and cannot
+			// be read, and "no config" would send its owner to setup for a
+			// registration they already have.
+			if os.IsNotExist(err) {
+				return nil, fmt.Errorf("no config %q in %s (have: %s)", name, Dir(), strings.Join(names, ", "))
+			}
+			return nil, fmt.Errorf("config %q: %w", name, err)
 		}
 		return Load(path)
 	}

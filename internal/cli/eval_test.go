@@ -47,13 +47,16 @@ func TestShellQuoteSurvivesEveryShell(t *testing.T) {
 	}
 }
 
-func TestEmitEvalAppends(t *testing.T) {
+func TestAppendEvalAppends(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "evalfile")
-	env := &Env{EvalFile: path}
 
-	emitEval(env, "cd '/one'")
-	emitEval(env, "cd '/two'")
+	if err := appendEval(path, "cd '/one'"); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	if err := appendEval(path, "cd '/two'"); err != nil {
+		t.Fatalf("append: %v", err)
+	}
 
 	got, err := os.ReadFile(path)
 	if err != nil {
@@ -64,18 +67,21 @@ func TestEmitEvalAppends(t *testing.T) {
 	}
 }
 
-// TestEmitEvalWithoutIntegrationIsANoOp covers the invariant every caller depends
-// on: run straight from a shell with no wrapper loaded, emitEval does nothing.
+// TestMoveShellWithoutIntegrationSaysWhatToRun covers the invariant every
+// caller depends on: run straight from a shell with no wrapper loaded, nothing
+// is written anywhere and the by-hand line is printed instead.
 //
 // "Nothing" is asserted rather than assumed, in an empty directory the test then
-// reads back. The previous version of this test called emitEval and checked
+// reads back. An earlier version of this test called the emitter and checked
 // nothing at all, so it passed whatever happened — including the case it was named
 // for, a stray file left behind for someone to wonder about later.
-func TestEmitEvalWithoutIntegrationIsANoOp(t *testing.T) {
+func TestMoveShellWithoutIntegrationSaysWhatToRun(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
+	var stderr strings.Builder
+	env := &Env{EvalFile: "", Stderr: &stderr}
 
-	emitEval(&Env{EvalFile: ""}, "cd '/nowhere'")
+	moveShell(env, "/somewhere", "your shell did not move")
 
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -86,7 +92,32 @@ func TestEmitEvalWithoutIntegrationIsANoOp(t *testing.T) {
 		for _, e := range entries {
 			names = append(names, e.Name())
 		}
-		t.Errorf("with no eval file configured, emitEval wrote %v", names)
+		t.Errorf("with no eval file configured, moveShell wrote %v", names)
+	}
+	if got := stderr.String(); !strings.Contains(got, "cd /somewhere") {
+		t.Errorf("stderr = %q, want the by-hand cd line", got)
+	}
+}
+
+// TestMoveShellReportsAnUnwritableEvalFile pins the failure that used to have
+// no report path: the integration is loaded — $TREEWRIGHT_EVAL_FILE is set —
+// but the file cannot be written, as when a tmpdir has been swept. The shell
+// will not move, so the caller has to hear why and see the line to type.
+func TestMoveShellReportsAnUnwritableEvalFile(t *testing.T) {
+	var stderr strings.Builder
+	env := &Env{
+		EvalFile: filepath.Join(t.TempDir(), "swept", "gone", "evalfile"),
+		Stderr:   &stderr,
+	}
+
+	moveShell(env, "/somewhere", "your shell did not move")
+
+	got := stderr.String()
+	if !strings.Contains(got, "warning:") || !strings.Contains(got, "could not be written") {
+		t.Errorf("stderr = %q, want a warning that the eval file could not be written", got)
+	}
+	if !strings.Contains(got, "cd /somewhere") {
+		t.Errorf("stderr = %q, want the by-hand cd line", got)
 	}
 }
 

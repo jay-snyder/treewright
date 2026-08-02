@@ -9,7 +9,6 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/jay-snyder/treewright/internal/config"
 	"github.com/jay-snyder/treewright/internal/gittest"
@@ -586,16 +585,14 @@ func TestAFailingCommandKeepsItsWindowOpen(t *testing.T) {
 		t.Fatalf("new: %v\n%s", r.err, r.both())
 	}
 
-	// The command has to have run and failed before there is anything to see, and
-	// nothing waits for it, so this is what "the window is still there" means.
-	var pane string
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		pane, _ = tmuxctl(t, "capture-pane", "-p", "-t", windowIDNamed(t, "proj", "BOOM"))
-		if strings.Contains(pane, "press Enter") {
-			break
-		}
-		time.Sleep(20 * time.Millisecond)
+	// The command has to have run and failed before there is anything to see,
+	// and nothing waits for it — so wait for the wrapper's last line, then read
+	// the whole pane it is holding open.
+	id := windowIDNamed(t, "proj", "BOOM")
+	waitForPane(t, id, "press Enter")
+	pane, err := tmuxctl(t, "capture-pane", "-p", "-t", id)
+	if err != nil {
+		t.Fatalf("capture the held-open pane: %v\n%s", err, pane)
 	}
 
 	// What the user came for is the command's own output, which is why the window

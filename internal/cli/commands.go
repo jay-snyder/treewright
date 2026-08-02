@@ -26,33 +26,12 @@ func cmdNew(env *Env, args []string) error {
 	if err != nil {
 		return err
 	}
-	slug, override := at(positional, 0), at(positional, 1)
-	if slug == "" {
-		return usageErrorf("new", "a slug is required")
-	}
-
-	cfg, err := resolveConfig("")
-	if err != nil {
-		return err
-	}
-	prefix, slug := splitPrefix(env, cfg, slug)
-	if err := validateSlug(cfg, slug); err != nil {
-		return err
-	}
-	// Resolved before anything is created: a prompt the command cannot take is
-	// this invocation being wrong, and finding that out after the worktree
-	// exists would leave a half-made one behind an error about a flag. The
-	// brief in a file is read for the same reason at the same point.
-	prompt, err = resolvePrompt("new", prompt, promptFile)
-	if err != nil {
-		return err
-	}
-	command, err := fillPrompt(cfg.Command, "command", prompt)
+	plan, err := planWorktree(env, "new", positional, prompt, promptFile)
 	if err != nil {
 		return err
 	}
 
-	dir, branch, err := createWorktree(env, cfg, prefix, slug)
+	dir, branch, err := createWorktree(env, plan.cfg, plan.prefix, plan.slug)
 	if err != nil {
 		return err
 	}
@@ -61,11 +40,72 @@ func cmdNew(env *Env, args []string) error {
 	// nowhere else: `cd "$(treewright new foo)"` is meant to work.
 	fmt.Fprintln(env.Stdout, dir)
 
-	openWorktreeWindow(env, cfg, worktreeWindow{
-		Slug: slug, Branch: branch, Dir: dir,
-		Name: cfg.WindowName(slug, override), Command: command, Prompt: prompt,
-	})
+	plan.openWindow(env, dir, branch)
 	return nil
+}
+
+// worktreePlan is everything `new` and `move` settle before either creates
+// anything: the config, the prefix and slug the typed name resolves to, and the
+// command with the prompt already in it.
+//
+// The two commands share their whole opening — the same flags, the same
+// refusals, in the same order, ending before a worktree exists — and the order
+// is the point: a prompt the command cannot take, or a slug that will not make
+// a branch name, is this invocation being wrong, and finding that out after the
+// worktree exists would leave a half-made one behind an error about a flag. One
+// function is also what keeps a refusal changed for one command from silently
+// missing the other, which is how validateSlug came to render new's help for a
+// move that went wrong.
+type worktreePlan struct {
+	cfg     *config.Config
+	prefix  string
+	slug    string
+	prompt  string
+	command string
+	window  string // the [window-name] override, "" for the configured name
+}
+
+// planWorktree runs that shared opening for cmd, whose name is what a refusal
+// renders help for.
+func planWorktree(env *Env, cmd string, positional []string, prompt, promptFile string) (worktreePlan, error) {
+	slug, override := at(positional, 0), at(positional, 1)
+	if slug == "" {
+		return worktreePlan{}, usageErrorf(cmd, "a slug is required")
+	}
+
+	cfg, err := resolveConfig("")
+	if err != nil {
+		return worktreePlan{}, err
+	}
+	prefix, slug := splitPrefix(env, cfg, slug)
+	if err := validateSlug(cmd, cfg, slug); err != nil {
+		return worktreePlan{}, err
+	}
+	// Resolved before anything is created: a prompt the command cannot take is
+	// this invocation being wrong, and finding that out after the worktree
+	// exists would leave a half-made one behind an error about a flag. The
+	// brief in a file is read for the same reason at the same point.
+	prompt, err = resolvePrompt(cmd, prompt, promptFile)
+	if err != nil {
+		return worktreePlan{}, err
+	}
+	command, err := fillPrompt(cfg.Command, "command", prompt)
+	if err != nil {
+		return worktreePlan{}, err
+	}
+	return worktreePlan{
+		cfg: cfg, prefix: prefix, slug: slug,
+		prompt: prompt, command: command, window: override,
+	}, nil
+}
+
+// openWindow opens the window on a worktree made from this plan, the closing
+// step the two planners also share.
+func (p worktreePlan) openWindow(env *Env, dir, branch string) {
+	openWorktreeWindow(env, p.cfg, worktreeWindow{
+		Slug: p.slug, Branch: branch, Dir: dir,
+		Name: p.cfg.WindowName(p.slug, p.window), Command: p.command, Prompt: p.prompt,
+	})
 }
 
 // createWorktree makes the branch and the worktree, and gives the worktree
@@ -209,8 +249,14 @@ func warnIfBaseIsAhead(env *Env, repo git.Repo, cfg *config.Config) {
 // found — or one that failed to open — leaves the user believing work was
 // kicked off that nobody is doing. The prompt was typed once and is gone, so
 // the warning names the recovery.
+//
+// Without tmux there is nothing to warn about: no window exists, open or
+// otherwise, and openWindow has already printed the filled command — prompt
+// included — as the thing to run by hand. The old warning fired here anyway,
+// telling the user to paste the prompt to an agent in a window that was "already
+// open" when neither existed.
 func warnIfPromptUndelivered(env *Env, prompt string, created bool, err error) {
-	if prompt == "" || created || err != nil {
+	if prompt == "" || created || err != nil || !tmux.Available() {
 		return
 	}
 	env.warnf("prompt not delivered — the window was already open\npaste it to the agent there")
@@ -223,10 +269,13 @@ func warnIfPromptUndelivered(env *Env, prompt string, created bool, err error) {
 // for both halves of a name: the restatement that refuses a bad slug here is the
 // one that refuses a bad branch prefix when a config is loaded. What stays here is
 // the part that depends on the configuration — a leading word that could have been
-// a prefix — and turning a refusal into a usage error.
-func validateSlug(cfg *config.Config, slug string) error {
+// a prefix — and turning a refusal into a usage error. cmd names the command the
+// usage error renders help for, as resolvePrompt takes it and for the same
+// reason: `move` refuses slugs too, and a refusal that hardcoded "new" answered
+// a botched move with the wrong command's help.
+func validateSlug(cmd string, cfg *config.Config, slug string) error {
 	if slug == "" {
-		return usageErrorf("new", "the slug is empty once the branch prefix is removed")
+		return usageErrorf(cmd, "the slug is empty once the branch prefix is removed")
 	}
 	// Where several prefixes are configured, a leading "feature/" is meaningful, so
 	// one treewright does not recognize is far likelier to be the scheme misspelled
@@ -235,11 +284,11 @@ func validateSlug(cfg *config.Config, slug string) error {
 	// stray directories, which is the right answer only when a prefix is not what
 	// was meant.
 	if leading, _, found := strings.Cut(slug, "/"); found && len(cfg.Prefixes()) > 1 {
-		return usageErrorf("new", "%q does not name a configured branch prefix\nthis repo uses: %s",
+		return usageErrorf(cmd, "%q does not name a configured branch prefix\nthis repo uses: %s",
 			leading+"/", prefixList(cfg))
 	}
 	if err := refname.CheckSlug(slug); err != nil {
-		return usageErrorf("new", "%v", err)
+		return usageErrorf(cmd, "%v", err)
 	}
 	return nil
 }
@@ -611,18 +660,16 @@ func cmdRm(env *Env, args []string) error {
 }
 
 // escapeDeletedDir asks the calling shell to leave a directory that no longer
-// exists. Without the shell integration treewright can only say so.
+// exists. Without the shell integration treewright can only say so, which
+// moveShell owns.
 func escapeDeletedDir(env *Env, mainDir, goneDir string) {
-	emitEval(env, "cd "+shellQuote(mainDir))
-	if env.EvalFile == "" {
-		env.progressf("your shell is in %s, which no longer exists%s", goneDir,
-			asFields(field("run", env.copyable("cd "+mainDir))))
-	}
+	moveShell(env, mainDir, fmt.Sprintf("your shell is in %s, which no longer exists", goneDir))
 }
 
-// offerWindowClose offers to close a tmux window whose worktree has been removed,
-// since it now points at a directory that does not exist. assumeYes closes
-// without asking, and a zero window means there was none open.
+// offerWindowClose deals with the tmux window left open on a worktree that has
+// been removed, since it now points at a directory that does not exist: closed
+// outright under assumeYes, offered for closing otherwise. A zero window means
+// there was none open.
 //
 // The window is identified from the worktree's path rather than from the caller's
 // own pane, because a teardown is normally run from somewhere else: closing "the
@@ -631,36 +678,59 @@ func escapeDeletedDir(env *Env, mainDir, goneDir string) {
 //
 // No client is needed to close a window, so this runs outside tmux too: a worktree
 // torn down from a plain shell should not leave a window behind in the session
-// waiting to be attached to.
+// waiting to be attached to. The two halves are their own functions because they
+// share almost nothing: one closes and reports, the other asks first — or, with
+// nobody to ask, says what to run.
 func offerWindowClose(env *Env, slug string, window tmux.Window, assumeYes bool) {
 	if window.ID == "" {
 		return
 	}
-	// Closing a session's last window ends the session, which moves an attached
-	// client elsewhere or detaches it. Normally the base window keeps the session
-	// alive, so this only comes up once that has been closed by hand.
-	//
-	// It gets a line of its own rather than a clause inside the parenthetical
-	// naming the window. What it describes is a consequence of answering yes —
-	// the session goes, and an attached client goes with it — and a reader
-	// weighing that should not have to find it in the middle of the question.
-	last := ""
-	if window.LastInSession() {
-		last = fmt.Sprintf("it is the last in session %s, which ends with it", window.Session)
-	}
-
 	if assumeYes {
-		// --yes answered "close the window", which is not the same as "tell me
-		// nothing about what was in it" — the whole reason a window is not closed
-		// unasked is that something may still be running in it, and here treewright
-		// knows that something was.
-		warnIfAgentWorking(env, window)
-		_ = tmux.KillWindow(window.ID)
-		env.progressf("closed its tmux window %s%s", window.Name, under(last))
+		closeRemovedWindow(env, window)
 		return
 	}
+	askWindowClose(env, slug, window)
+}
 
-	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
+// lastInSessionNote is the caveat about a window whose closing ends its session
+// with it — moving an attached client elsewhere, or detaching it — and "" for a
+// window with company. Normally the base window keeps a session alive, so this
+// only comes up once that has been closed by hand.
+//
+// It gets a line of its own rather than a clause inside the sentence naming the
+// window. What it describes is a consequence of proceeding, and a reader
+// weighing that should not have to find it in the middle of the question.
+// Spelled once because rm's prompt, the --yes path and `close` all carry it.
+func lastInSessionNote(window tmux.Window) string {
+	if !window.LastInSession() {
+		return ""
+	}
+	return fmt.Sprintf("it is the last in session %s, which ends with it", window.Session)
+}
+
+// closeRemovedWindow closes the removed worktree's window without asking, as
+// --yes said to.
+//
+// --yes answered "close the window", which is not the same as "tell me nothing
+// about what was in it" — the whole reason a window is not closed unasked is
+// that something may still be running in it, and here treewright knows that
+// something was.
+func closeRemovedWindow(env *Env, window tmux.Window) {
+	warnIfAgentWorking(env, window)
+	_ = tmux.KillWindow(window.ID)
+	env.progressf("closed its tmux window %s%s", window.Name, under(lastInSessionNote(window)))
+}
+
+// openTTY is how askWindowClose reaches the person at the terminal. A variable
+// for the reason releaseAPI is one: the prompt is the one path the suite must
+// never take — a test that reached a developer's own /dev/tty would block it on
+// a [y/N] — so tests take the terminal away and drive the nobody-to-ask path.
+var openTTY = func() (*os.File, error) { return os.OpenFile("/dev/tty", os.O_RDWR, 0) }
+
+// askWindowClose asks before closing the removed worktree's window — or, with
+// nobody to ask, says what to run instead.
+func askWindowClose(env *Env, slug string, window tmux.Window) {
+	tty, err := openTTY()
 	if err != nil {
 		// Nobody to ask — treewright was run by a script or an agent. Say what to
 		// run rather than closing a window unasked, since something may still be
@@ -668,7 +738,7 @@ func offerWindowClose(env *Env, slug string, window tmux.Window, assumeYes bool)
 		// the directory treewright recorded on it, and that record outlives the
 		// directory this command has just deleted.
 		env.progressf("tmux window %s now points at a deleted directory%s%s",
-			window.Name, under(last),
+			window.Name, under(lastInSessionNote(window)),
 			asFields(field("close it with", closeHint(env, slug))))
 		return
 	}
@@ -679,10 +749,10 @@ func offerWindowClose(env *Env, slug string, window tmux.Window, assumeYes bool)
 	// have been sent somewhere else entirely. A working agent is the caveat most
 	// likely to change the answer, so it goes first.
 	if window.State == stateWorking {
-		fmt.Fprintf(tty, "its agent says it is working, and closing the window stops it\n")
+		fmt.Fprintf(tty, agentWorkingNote+"\n", window.Name)
 	}
-	if last != "" {
-		fmt.Fprintf(tty, "%s\n", last)
+	if note := lastInSessionNote(window); note != "" {
+		fmt.Fprintf(tty, "%s\n", note)
 	}
 	fmt.Fprintf(tty, "close its tmux window (%s)? [y/N] ", window.Name)
 	answer, err := bufio.NewReader(tty).ReadString('\n')
@@ -734,12 +804,9 @@ func cmdLs(env *Env, args []string) error {
 	// an unregistered repo exits 1 with "no registered config matches repo
 	// <path>" — so the fault was never an unanswerable question, it was one
 	// schema saying two things.
-	infos := make([]git.Info, 0, len(managed)+1)
+	var infos []git.Info
 	if asJSON || len(managed) > 0 {
-		infos = append(infos, repo.BaseCheckout(cfg.BaseBranch))
-	}
-	for _, wt := range managed {
-		infos = append(infos, repo.Inspect(wt, cfg.BaseBranch))
+		infos = inspectAll(repo, cfg, managed)
 	}
 
 	// After the output rather than before it, in either mode: a warning above a
@@ -821,6 +888,12 @@ func cmdPrune(env *Env, args []string) error {
 	windows := tmux.Windows(sessionFor(cfg))
 	stranded := ""
 
+	// Only the removals that succeeded feed the window pass below. A worktree
+	// git refused to remove — locked, say — still exists, its window still
+	// points at a live directory, and an agent may still be working in it: it
+	// has had its warning, and an offer to close its window on top would be an
+	// offer to kill that agent over a directory nothing deleted.
+	var removed []git.Worktree
 	for _, wt := range targets {
 		if err := repo.RemoveWorktree(wt.Dir); err != nil {
 			env.warnf("could not remove %s: %v", wt.Slug, err)
@@ -834,6 +907,7 @@ func cmdPrune(env *Env, args []string) error {
 		}
 		env.progressf("removed %s", wt.Slug)
 		fmt.Fprintln(env.Stdout, wt.Dir)
+		removed = append(removed, wt)
 	}
 	_ = repo.FetchPrune("origin")
 
@@ -843,7 +917,7 @@ func cmdPrune(env *Env, args []string) error {
 	// Asked per worktree, and never assumed: --yes answered "remove these
 	// worktrees", which is not the same as "close my windows" — one of them may
 	// have a session still running in it.
-	for _, wt := range targets {
+	for _, wt := range removed {
 		offerWindowClose(env, wt.Slug, windows[wt.Dir], false)
 	}
 	return nil
@@ -1009,6 +1083,23 @@ func baseNames(cfg *config.Config, base choice) []string {
 	return names
 }
 
+// inspectAll builds the rows the worktree table renders: the base checkout
+// first, then one per worktree.
+//
+// Base-first is an invariant rather than a taste. The picker numbers these rows
+// and maps a chosen index back with `managed[idx-1]`, so the base checkout
+// heading the list — pinned above the slugs rather than sorted among them, the
+// row you return to most staying row 1 as worktrees come and go — is arithmetic
+// two call sites depend on, and one function is what keeps them agreeing.
+func inspectAll(repo git.Repo, cfg *config.Config, managed []git.Worktree) []git.Info {
+	infos := make([]git.Info, 0, len(managed)+1)
+	infos = append(infos, repo.BaseCheckout(cfg.BaseBranch))
+	for _, wt := range managed {
+		infos = append(infos, repo.Inspect(wt, cfg.BaseBranch))
+	}
+	return infos
+}
+
 // chooseWorktree picks what a command should act on: the row named, or one the
 // user selects from a menu.
 //
@@ -1026,14 +1117,7 @@ func chooseWorktree(env *Env, cfg *config.Config, repo git.Repo, managed []git.W
 		return choice{Worktree: wt}, err
 	}
 
-	// The base checkout heads the list, pinned above the slugs rather than sorted
-	// among them, so the row you return to most is the one your fingers already
-	// know — and stays row 1 as worktrees come and go around it.
-	infos := make([]git.Info, 0, len(managed)+1)
-	infos = append(infos, repo.BaseCheckout(cfg.BaseBranch))
-	for _, wt := range managed {
-		infos = append(infos, repo.Inspect(wt, cfg.BaseBranch))
-	}
+	infos := inspectAll(repo, cfg, managed)
 	session := sessionFor(cfg)
 	// The menu is a prompt, not an answer, so it goes to stderr: stdout still
 	// carries only the path the caller may be capturing.
@@ -1114,11 +1198,7 @@ func cmdCd(env *Env, args []string) error {
 	if !target.Base {
 		warnIfSetupFailed(env, cfg, target.Slug)
 	}
-	emitEval(env, "cd "+shellQuote(target.Dir))
-	if env.EvalFile == "" {
-		env.progressf("no shell integration loaded, so your shell did not move%s",
-			asFields(field("run", env.copyable("cd "+target.Dir))))
-	}
+	moveShell(env, target.Dir, "no shell integration loaded, so your shell did not move")
 	return nil
 }
 
@@ -1220,7 +1300,7 @@ func cmdAttach(env *Env, args []string) error {
 	session := sessionFor(cfg)
 	if !tmux.HasSession(session) {
 		return fmt.Errorf("no tmux session %s is running%s", session,
-			asFields(field("open one with", env.Argv0+" base "+cfg.Name)))
+			asFields(field("open one with", env.copyable(env.Argv0+" base "+cfg.Name))))
 	}
 
 	// Inside tmux there is already a client holding this terminal, and attaching a

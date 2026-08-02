@@ -35,7 +35,7 @@ func cmdVersion(env *Env, args []string) error {
 func reportRelease(env *Env) {
 	switch state, latest := checkForNewerRelease(env.Version); state {
 	case releaseBehind:
-		env.warnf("treewright %s is out, and this is %s\n%s", latest, env.Version, copyableUpgradeAdvice(env))
+		env.warnf("%s", releaseBehindNotice(latest, env.Version, copyableUpgradeAdvice(env)))
 	case releaseCurrent:
 		env.progressf("%s is the latest release", latest)
 	case releaseUnreachable:

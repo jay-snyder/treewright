@@ -7,9 +7,14 @@
 set -gx TREEWRIGHT_SHELL_INIT_VERSION "{{version}}"
 
 function treewright
-    set -l tmp /tmp
-    if set -q TMPDIR
-        set tmp $TMPDIR
+    # ${TMPDIR:-/tmp}, as the other shims spell it: the fallback has to cover a
+    # TMPDIR that is set but empty as well as one that is unset. `set -q` is
+    # true for a defined-but-empty variable, so testing with it aimed the temp
+    # file at "/treewright-eval.XXXXXX" in the root, where the failure — and
+    # the `or return 1` after it — took every invocation down with it.
+    set -l tmp $TMPDIR
+    if test -z "$tmp"
+        set tmp /tmp
     end
     set -l evalfile (command mktemp $tmp/treewright-eval.XXXXXX)
     or return 1
@@ -28,7 +33,7 @@ end
 
 complete -c treewright -f
 complete -c treewright -n __fish_use_subcommand -a new        -d 'create a worktree and branch, and open a tmux window in it'
-complete -c treewright -n __fish_use_subcommand -a move       -d 'move uncommitted work into a new worktree'
+complete -c treewright -n __fish_use_subcommand -a move       -d 'move uncommitted work out of the main checkout into a new worktree'
 complete -c treewright -n __fish_use_subcommand -a resume     -d 'reopen a window on an existing worktree'
 complete -c treewright -n __fish_use_subcommand -a send       -d 'type one line at the agent in a worktree window'
 complete -c treewright -n __fish_use_subcommand -a cd         -d 'move your shell into a worktree'

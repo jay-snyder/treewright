@@ -59,7 +59,9 @@ func cmdSetup(env *Env, args []string) error {
 	}
 
 	path := filepath.Join(config.Dir(), name+".toml")
-	if _, err := os.Stat(path); err == nil && !dryRun {
+	_, statErr := os.Stat(path)
+	exists := statErr == nil
+	if exists && !dryRun {
 		return fmt.Errorf("%s already exists\nedit it, or pass a different name", path)
 	}
 	// A second config for the same repository would make which one applies depend
@@ -113,9 +115,17 @@ func cmdSetup(env *Env, args []string) error {
 	})
 	if dryRun {
 		fmt.Fprint(env.Stdout, body)
+		// The command named has to be one the real run would take. Over a config
+		// that already exists, plain setup refuses — the one that writes is
+		// --refresh, which keeps the file's own settings rather than these
+		// detections, and the label says so.
+		next := field("to do it", env.copyable(env.Argv0+" setup"))
+		if exists {
+			next = field("it already exists — keep its settings with", env.copyable(env.Argv0+" setup --refresh"))
+		}
 		env.progressf("nothing was written%s", asFields(
 			field("would write", path),
-			field("to do it", env.copyable(env.Argv0+" setup")),
+			next,
 		))
 		return nil
 	}
@@ -199,18 +209,32 @@ func refreshConfig(env *Env, name string, dryRun bool) error {
 // treewright's own changes and a setting is what refuses to.
 func settingsFrom(cfg *config.Config) configSettings {
 	s := configSettings{
-		name:       cfg.Name,
-		mainDir:    cfg.MainDir,
-		baseBranch: cfg.BaseBranch,
-		prefixes:   cfg.Prefixes(),
-		carry:      cfg.CarryFiles,
-		agent:      cfg.Agent,
+		name:     cfg.Name,
+		mainDir:  cfg.MainDir,
+		prefixes: cfg.Prefixes(),
+		carry:    cfg.CarryFiles,
+		agent:    cfg.Agent,
+	}
+	// base_branch has a default like every key below, and copying the loaded
+	// value unconditionally was how a file that never set it came back with
+	// "main" pinned in as a setting — the exact collapse this function's own
+	// comment forbids, guarded here the way its siblings are.
+	if cfg.Explicit("base_branch") {
+		s.baseBranch = cfg.BaseBranch
 	}
 	// A refreshed file is written under whichever spelling it already used, so a
 	// repository that lists several prefixes keeps the list and one that names a
 	// single prefix keeps the singular key. Prefixes() returns one element for
 	// the singular spelling, which is exactly the shape renderConfig expects.
 	s.pluralPrefixes = cfg.Explicit("branch_prefixes")
+	// A refresh knows the prefix only as the file's own value: whether it began
+	// as origin evidence or as an email guess was never written down, and
+	// --refresh re-detects nothing — so all the rewritten commentary can
+	// honestly claim is that the value is the file's. prefixExplicit is what
+	// keeps an explicit branch_prefix = "" alive through a rewrite instead of
+	// decaying into a commented-out example.
+	s.prefixFromFile = true
+	s.prefixExplicit = cfg.Explicit("branch_prefix") || cfg.Explicit("branch_prefixes")
 	if cfg.Explicit("command") {
 		s.command = cfg.Command
 	}
@@ -432,9 +456,18 @@ type configSettings struct {
 	// element, as config.Prefixes guarantees. pluralPrefixes says which of the
 	// setting's two spellings to write it under, and prefixFromOrigin whether a
 	// single one is evidence or a guess, since only the guess says so.
+	//
+	// prefixFromFile marks a value read back out of an existing file, where that
+	// provenance is not on record — --refresh re-detects nothing, so its
+	// commentary can claim neither the origin nor the email. prefixExplicit
+	// rides beside it saying whether the file set a prefix key at all, which is
+	// what tells an explicit branch_prefix = "" from a file that never mentioned
+	// the key.
 	prefixes         []string
 	pluralPrefixes   bool
 	prefixFromOrigin bool
+	prefixFromFile   bool
+	prefixExplicit   bool
 
 	carry []string
 	agent string
@@ -489,8 +522,18 @@ func renderConfig(s configSettings) string {
 	fmt.Fprintf(&b, "# named <main_dir>-<slug>.\n")
 	fmt.Fprintf(&b, "main_dir = %s\n\n", tomlString(abbreviateHome(s.mainDir)))
 
-	fmt.Fprintf(&b, "# New branches fork from origin/%s, and every status is measured against it.\n", s.baseBranch)
-	fmt.Fprintf(&b, "base_branch = %s\n\n", tomlString(s.baseBranch))
+	// Empty means the file never set it, which only --refresh produces — setup
+	// always detects one — and the default goes back as the commented line it
+	// is, never as a live setting: a setting is what refuses to follow
+	// treewright's own changes, and nobody made one here.
+	if s.baseBranch == "" {
+		fmt.Fprintf(&b, "# New branches fork from origin/<base_branch>, and every status is measured\n")
+		fmt.Fprintf(&b, "# against it. Defaults to %q.\n", config.DefaultBaseBranch)
+		fmt.Fprintf(&b, "# base_branch = %s\n\n", tomlString(config.DefaultBaseBranch))
+	} else {
+		fmt.Fprintf(&b, "# New branches fork from origin/%s, and every status is measured against it.\n", s.baseBranch)
+		fmt.Fprintf(&b, "base_branch = %s\n\n", tomlString(s.baseBranch))
+	}
 
 	switch {
 	case s.pluralPrefixes || len(prefixes) > 1:
@@ -506,6 +549,31 @@ func renderConfig(s configSettings) string {
 		fmt.Fprintf(&b, "# %seng-1\" branches %seng-1 — or leave it off and get %s.\n",
 			example, example, prefixes[0])
 		fmt.Fprintf(&b, "branch_prefixes = [%s]\n\n", tomlList(prefixes))
+	case s.prefixFromFile && s.prefixExplicit && prefixes[0] == "":
+		// The file wrote branch_prefix = "" itself. It behaves as the default
+		// does, but the key is the record of a decision, and a rewrite is not
+		// where that decision gets unmade — the old rendering dropped it to a
+		// commented-out example under a claim about user.email nothing checked.
+		fmt.Fprintf(&b, "# Prepended to a slug to form the branch name. Set empty here: branches\n")
+		fmt.Fprintf(&b, "# are named by the slug alone.\n")
+		fmt.Fprintf(&b, "branch_prefix = \"\"\n")
+		writePrefixesHint(&b)
+	case s.prefixFromFile && prefixes[0] == "":
+		// The file never set a prefix. A fresh setup in this state has checked
+		// git's user.email and can say so; a refresh has checked nothing, so the
+		// commentary explains the key and claims no reason for its absence.
+		fmt.Fprintf(&b, "# Prepended to a slug to form the branch name, e.g. \"alice/\" gives\n")
+		fmt.Fprintf(&b, "# alice/eng-1.\n")
+		fmt.Fprintf(&b, "# branch_prefix = \"alice/\"\n")
+		writePrefixesHint(&b)
+	case s.prefixFromFile:
+		// A single prefix read back out of the file. Whether it began as origin
+		// evidence or as an email guess was never recorded, and a refresh
+		// re-detects nothing — so it says neither, where it used to re-emit the
+		// guess's paragraph about a git email this run never consulted.
+		fmt.Fprintf(&b, "# Prepended to a slug to form the branch name: %seng-1.\n", prefixes[0])
+		fmt.Fprintf(&b, "branch_prefix = %s\n", tomlString(prefixes[0]))
+		writePrefixesHint(&b)
 	case len(prefixes) == 0 || prefixes[0] == "":
 		fmt.Fprintf(&b, "# Prepended to a slug to form the branch name, e.g. \"alice/\" gives\n")
 		fmt.Fprintf(&b, "# alice/eng-1. Left empty: git has no user.email configured for this repo.\n")

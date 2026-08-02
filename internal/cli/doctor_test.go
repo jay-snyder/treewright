@@ -6,12 +6,16 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/jay-snyder/treewright/internal/tmux"
 )
 
-// Nothing here asserts on doctor's exit code for a healthy setup: whether tmux is
-// installed is a property of the machine running the tests, not of the code, and
-// CI deliberately has no tmux. The findings about configs are what these tests
-// pin, since those are the ones treewright computes.
+// The findings about configs are what these tests mostly pin, since those are
+// the ones treewright computes. The healthy-setup exit code is asserted too,
+// gated on tmux being installed: whether it is is a property of the machine
+// running the tests, and CI installs it on both platforms — so there the gate
+// is always open, while a developer without tmux still gets the config
+// assertions.
 
 // reportLine is one finding of doctor's report, flattened back to the sentence
 // it would have been: "<group>: <check> <detail>", with the column padding
@@ -109,6 +113,15 @@ func TestDoctorApprovesAHealthySetup(t *testing.T) {
 	} {
 		if got := has(t, found, tc.substr); got != tc.want {
 			t.Errorf("finding for %q = %q, want %q\nall: %v", tc.substr, got, tc.want, found)
+		}
+	}
+
+	// With tmux present nothing here fails, so a setup script gating on doctor
+	// has to see exit 0 — warnings alone must not fail the run. Without tmux
+	// that check is a levelFail, so the gate stays closed on such a machine.
+	if tmux.Available() {
+		if r := f.exec("doctor"); r.err != nil {
+			t.Errorf("doctor on a healthy setup = %v, want exit 0\n%s", r.err, r.stdout)
 		}
 	}
 }

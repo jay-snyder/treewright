@@ -82,8 +82,12 @@ func resolvePrompt(cmd, prompt, promptFile string) (string, error) {
 	}
 	info, err := os.Stat(path)
 	switch {
-	case err != nil:
+	case os.IsNotExist(err):
 		return "", fmt.Errorf("no file at %s\nthe prompt is one line telling the agent to read it, so nothing was created", path)
+	case err != nil:
+		// The file may well be there — unreadable is not missing — and "no file"
+		// would send the reader to re-create one that exists.
+		return "", fmt.Errorf("could not read --prompt-file %s: %w\nnothing was created", path, err)
 	case info.IsDir():
 		return "", fmt.Errorf("%s is a directory, not a brief\nthe prompt is one line telling the agent to read it, so nothing was created", path)
 	case info.Size() == 0:

@@ -112,7 +112,7 @@ func cmdSend(env *Env, args []string) error {
 	// what the agent happened to print stays a %.
 	env.progressf("%s shows:\n%s", window.Name, pane)
 
-	if err := refuseHeldOpen(window, pane, name, env); err != nil {
+	if err := refuseHeldOpen(env, window, pane, name); err != nil {
 		return err
 	}
 	if dry {
@@ -155,7 +155,7 @@ func cmdSend(env *Env, args []string) error {
 // apart. The notice is the last line such a window shows, and the match is
 // against the last line rather than the whole capture, so an agent that happens
 // to print those words mid-screen is not mistaken for a dead one.
-func refuseHeldOpen(window tmux.Window, pane, name string, env *Env) error {
+func refuseHeldOpen(env *Env, window tmux.Window, pane, name string) error {
 	lines := strings.Split(pane, "\n")
 	if len(lines) == 0 || strings.TrimSpace(lines[len(lines)-1]) != heldOpenNotice {
 		return nil

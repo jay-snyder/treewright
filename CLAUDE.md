@@ -92,7 +92,8 @@ by default), revive, godot, gofumpt, funcorder's constructor rule — and the li
 left out are listed in `.golangci.yaml` with the reason, each grounded in Go's own
 guidance rather than in this repo's habits. Three exemptions exist, all narrow and
 all written where they apply: `//nolint:nilerr` on completion's four
-returns, `//nolint:usetesting` on the three tmux socket directories, and errcheck's
+returns, `//nolint:usetesting` on `testenv.PrivateTmuxServer`'s socket directory
+(the one place every tmux-driving test gets its isolation from), and errcheck's
 standard exclusion of the `fmt.Fprint` family. `nolintlint` requires every one of
 them to name its linter and say why, so a bare `//nolint` will not pass.
 
@@ -203,9 +204,10 @@ point them at buffers.
 `env.Argv0` (`tw`, usually). Anything destined for a *file* a program reads —
 tmux.conf lines, shell startup evals, help prose — spells out `treewright`.
 
-**Everything works without the shell integration.** `emitEval` is a no-op when
-`TREEWRIGHT_EVAL_FILE` is unset, so every caller must also print what to run by
-hand.
+**Everything works without the shell integration.** A shell command may never
+run — no integration loaded, or an eval file that cannot be written — so the
+by-hand line and the failure report belong beside the emit, which is what
+`moveShell` in `eval.go` owns. Don't call `appendEval` directly from a command.
 
 **tmux session targets are exact.** tmux matches session names as prefixes, so
 every session target goes through `exact()` → `=name`. Window targets are window

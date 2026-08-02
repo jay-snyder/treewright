@@ -874,12 +874,21 @@ re-derived them would quietly undo the ones that disagree with what treewright
 would guess today. What moves is the version, the commentary, and any key the
 generator has since learned to write.
 
-Two details in the rewrite are load-bearing. The prefixes come back under
-whichever of the two spellings the file used, since no config may set both. And
-`ticket_pattern` is written on whether the key was *there* rather than on whether
-it holds anything — `ticket_pattern = ""` is how a repository that tracks no
-tickets turns the search off, and a refresh that dropped it for looking empty
-would turn every window name in that repository back into a ticket hunt.
+Three details in the rewrite are load-bearing. The prefixes come back under
+whichever of the two spellings the file used, since no config may set both —
+and their commentary claims no provenance, because none is on record: whether a
+single prefix began as origin evidence or as an email guess was never written
+down, and a rewrite that re-emitted the guess's paragraph would assert facts
+about a git email this run never consulted. An explicit `branch_prefix = ""`
+survives as the live line it is, for the same reason `ticket_pattern` does:
+that key is written on whether it was *there* rather than on whether it holds
+anything — `ticket_pattern = ""` is how a repository that tracks no tickets
+turns the search off, and a refresh that dropped it for looking empty would
+turn every window name in that repository back into a ticket hunt. And every
+key with a default is read back through `Explicit`, `base_branch` included: a
+file that never set one gets the commented default back, never a live line,
+because a default written into the file as a setting is one that stops
+following treewright's own changes.
 
 Which config applies, in order: an explicit name; the config whose `main_dir` is
 the repository you are standing in; the only config, when the registry holds
@@ -937,7 +946,11 @@ makes a temp file, passes its path in `$TREEWRIGHT_EVAL_FILE`, and sources it
 after treewright exits. Two commands write to it — `cd`, and `rm` when your shell
 is standing in the directory being deleted. Everything must still behave
 correctly when the file is never sourced, which is why those commands also print
-the `cd` to run.
+the `cd` to run. An eval file that exists and cannot be written — a swept
+tmpdir, a full disk — is the same failure with a cause worth naming, so it is
+reported as a warning with the same by-hand line under it; both halves live in
+one helper, `moveShell`, so a new caller cannot keep the emit and forget the
+fallback.
 
 The shims are emitted by the binary rather than installed as files, so they can
 never drift out of sync with it — the same approach fzf, zoxide, direnv, and

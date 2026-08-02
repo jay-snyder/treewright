@@ -245,6 +245,39 @@ func TestRefreshSaysWhatItCannotReach(t *testing.T) {
 	}
 }
 
+// TestRefreshScopesTheWarningWhenWorktreesCannotBeListed pins what the failure
+// actually costs. The old warning said "only the main checkout was refreshed",
+// which was wrong twice: it was emitted while the targets were still being
+// listed, before anything had been refreshed at all, and a user-level copy is
+// still refreshed after it. Only the worktrees are out of reach.
+func TestRefreshScopesTheWarningWhenWorktreesCannotBeListed(t *testing.T) {
+	f := agentFixture(t, "agent = 'claude'\n")
+	f.mustRun("agent-init", "claude")
+
+	// With the repository's .git gone, the plugin in the main checkout is still
+	// there to refresh — but the worktrees cannot be listed.
+	if err := os.Rename(filepath.Join(f.MainDir, ".git"), filepath.Join(f.MainDir, ".git-away")); err != nil {
+		t.Fatalf("hide the repository: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Rename(filepath.Join(f.MainDir, ".git-away"), filepath.Join(f.MainDir, ".git"))
+	})
+
+	r := f.exec("refresh", "proj")
+	if r.err != nil {
+		t.Fatalf("refresh: %v\n%s", r.err, r.both())
+	}
+	if !strings.Contains(r.stderr, "could not list the worktrees") {
+		t.Fatalf("stderr = %q, want the listing failure reported", r.stderr)
+	}
+	if !strings.Contains(r.stderr, "plugin copies stay as they are") {
+		t.Errorf("stderr = %q, want the cost scoped to the worktrees", r.stderr)
+	}
+	if strings.Contains(r.stderr, "only the main checkout was refreshed") {
+		t.Errorf("stderr claims an exclusivity and a completion that are not true:\n%s", r.stderr)
+	}
+}
+
 // ---- the tmux server ---------------------------------------------------------
 
 // TestDoctorTellsALoadedTmuxIntegrationFromACurrentOne covers what
@@ -621,6 +654,87 @@ func TestSetupRefreshKeepsEverySettingItFinds(t *testing.T) {
 	}
 	if !strings.Contains(string(body), "branch_prefixes = [") {
 		t.Errorf("refreshed config = %q, want the plural spelling kept", body)
+	}
+}
+
+// TestSetupRefreshDoesNotPinTheDefaultBaseBranch: base_branch has a default
+// like every key beside it, and a refresh that copied the loaded value back
+// unconditionally wrote "main" into a file that never chose it — a default
+// turned into a setting, which is the one thing a regenerated file must not do.
+func TestSetupRefreshDoesNotPinTheDefaultBaseBranch(t *testing.T) {
+	f := newFixture(t, "")
+	f.writeConfig("main_dir = '" + f.MainDir + "'\n")
+
+	f.mustRun("setup", "--refresh")
+
+	cfg, err := config.Load(filepath.Join(f.registry, "proj.toml"))
+	if err != nil {
+		t.Fatalf("the refreshed config does not load: %v", err)
+	}
+	if cfg.Explicit("base_branch") {
+		t.Error("base_branch became explicit through a refresh — the default was written back as a setting")
+	}
+	if cfg.BaseBranch != "main" {
+		t.Errorf("base_branch = %q, want the default still in force", cfg.BaseBranch)
+	}
+	// The key stays visible as the commented default every unset sibling gets.
+	body, err := os.ReadFile(filepath.Join(f.registry, "proj.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "# base_branch") {
+		t.Errorf("refreshed config = %q, want base_branch shown as a commented default", body)
+	}
+}
+
+// TestSetupRefreshClaimsNoProvenanceForAKeptPrefix: the file records a prefix
+// and not where it came from, and --refresh re-detects nothing — so the
+// commentary it rewrites must claim neither the origin nor the email. The old
+// rendering re-emitted the fresh-setup paragraph calling it "a guess, from your
+// git email", about a value this run never derived from anything.
+func TestSetupRefreshClaimsNoProvenanceForAKeptPrefix(t *testing.T) {
+	f := newFixture(t, "")
+	f.writeConfig("main_dir = '" + f.MainDir + "'\nbranch_prefix = 'feature/'\n")
+
+	f.mustRun("setup", "--refresh")
+
+	body, err := os.ReadFile(filepath.Join(f.registry, "proj.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), `branch_prefix = "feature/"`) {
+		t.Errorf("refreshed config = %q, want the prefix kept as a live setting", body)
+	}
+	for _, claim := range []string{"your git email", "user.email"} {
+		if strings.Contains(string(body), claim) {
+			t.Errorf("refreshed commentary claims %q about a prefix whose provenance it never checked:\n%s", claim, body)
+		}
+	}
+}
+
+// TestSetupRefreshKeepsAnExplicitlyEmptyPrefix: branch_prefix = "" is a
+// decision the file records — no prefix, on purpose. The old rendering dropped
+// the key to a commented-out example asserting git had no user.email, a fact
+// refresh never checked, by its own design.
+func TestSetupRefreshKeepsAnExplicitlyEmptyPrefix(t *testing.T) {
+	f := newFixture(t, "")
+	f.writeConfig("main_dir = '" + f.MainDir + "'\nbranch_prefix = ''\n")
+
+	f.mustRun("setup", "--refresh")
+
+	cfg, err := config.Load(filepath.Join(f.registry, "proj.toml"))
+	if err != nil {
+		t.Fatalf("the refreshed config does not load: %v", err)
+	}
+	if !cfg.Explicit("branch_prefix") {
+		t.Error("an explicit branch_prefix = \"\" decayed into a comment through a refresh")
+	}
+	body, err := os.ReadFile(filepath.Join(f.registry, "proj.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(body), "user.email") {
+		t.Errorf("refreshed commentary claims git has no user.email, which refresh never checked:\n%s", body)
 	}
 }
 
