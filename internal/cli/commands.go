@@ -109,8 +109,8 @@ func (p worktreePlan) openWindow(env *Env, dir, branch string) {
 }
 
 // createWorktree makes the branch and the worktree, and gives the worktree
-// everything a fresh one starts with: the carried files, the background setup,
-// and the note that no agent has run in it yet.
+// everything a fresh one starts with: the carried files and the background
+// setup.
 //
 // Split out for `move`, which wants the whole of this and then has work of its
 // own to do before a window should open. The window is deliberately not part of
@@ -169,10 +169,6 @@ func createWorktree(env *Env, cfg *config.Config, prefix, slug string) (dir, bra
 	if err := startPostCreate(env, cfg, dir, slug); err != nil {
 		env.warnf("post_create did not start: %v", err)
 	}
-	// True from the moment the worktree exists until a window has run the
-	// command in it — and stays true when that window never opens, which is the
-	// state `resume` needs to recognize.
-	markNoAgentYet(env, cfg, slug)
 	return dir, branch, nil
 }
 
@@ -197,19 +193,15 @@ type worktreeWindow struct {
 // error, a window being the whole of what they were asked for.
 func openWorktreeWindow(env *Env, cfg *config.Config, w worktreeWindow) {
 	created, err := openWindow(env, cfg, tmux.Spec{
-		Dir:     w.Dir,
-		Name:    w.Name,
-		Command: w.Command,
-		Slug:    w.Slug,
-		Branch:  w.Branch,
-	})
+		Dir:    w.Dir,
+		Name:   w.Name,
+		Slug:   w.Slug,
+		Branch: w.Branch,
+	}, windowCommand{Command: w.Command})
 	if err != nil {
 		env.warnf("%v", err)
 	}
 	warnIfPromptUndelivered(env, w.Prompt, created, err)
-	if created {
-		clearNoAgentYet(cfg, w.Slug)
-	}
 }
 
 // warnIfBaseIsAhead says so when the base branch holds commits origin has not
@@ -464,93 +456,6 @@ func postCreateScript(commands []string, failedPath string) string {
 			c, shellQuote(c), shellQuote(c), shellQuote(failedPath))
 	}
 	return b.String()
-}
-
-// ---- the worktree whose first agent never started ---------------------------
-
-// A worktree that got made and never had an agent in it used to be a worktree
-// nothing could open. `resume` runs resume_command, which is "carry on where I
-// left off" — `claude --continue` and its like — and there is nothing to carry
-// on from, so it exits on an error and the held-open wrapper parks the window on
-// that. `new` refuses the slug, the worktree being right there, and points at
-// `resume`: the one command that could not work. `ls` shows a healthy row with an
-// empty WINDOW column. The only way out was to remove the worktree and start
-// again, which is a long way to go for a window that failed to open.
-//
-// treewright cannot ask an agent whether it has a conversation in a directory, so
-// it keeps a note of its own: a marker saying no agent has started here yet,
-// written when the worktree is made and taken off the moment a window actually
-// runs the command. `resume` reads it and runs command instead, which is the
-// honest reading of "reopen a window on this worktree" when nothing was ever
-// open.
-//
-// The marker is the negative on purpose. One saying an agent *has* run here
-// would be missing from every worktree made by a treewright that never wrote one
-// — worktrees in use for weeks, holding exactly the conversation --continue
-// wants — and the fallback would greet each of them with a fresh agent and no
-// history. A first-run heuristic that silently discards someone's session is a
-// worse bug than the one being fixed, so absence has to keep meaning "as
-// before": the state that already existed stays silent, and the marker is the
-// news.
-//
-// It records that an *agent* was started, not that a *window* was opened, which
-// is where the two part company — the case this exists for is the window that
-// was never opened at all.
-
-// firstAgentNote is what the marker holds. Nothing reads it back — its presence
-// is the whole record — but a file in .git/treewright that cannot say what wrote
-// it is a file nobody can safely delete.
-const firstAgentNote = "no agent has started in this worktree yet\n" +
-	"treewright resume opens it with command rather than resume_command until one has\n" +
-	"delete this file to make resume use resume_command instead\n"
-
-// firstAgentPath names the marker: beside post_create's log, inside the .git
-// directory treewright already writes to, so this adds no new place to look for
-// what treewright left behind.
-func firstAgentPath(cfg *config.Config, slug string) string {
-	return filepath.Join(cfg.MainDir, ".git", "treewright", "no-agent-yet-"+strings.ReplaceAll(slug, "/", "-"))
-}
-
-// markNoAgentYet records that a worktree exists and nothing has started an agent
-// in it.
-//
-// Written as the worktree is made rather than once a window has failed to open,
-// for the reason startPostCreate clears its failure marker there: a slug can be
-// recreated after its worktree was removed, and the answer left by the last one
-// would otherwise be inherited by a worktree it is not about.
-//
-// A failure to write is worth saying, because what it costs is the recovery this
-// file exists for — and the state it leaves is the one a user cannot work out
-// from anything treewright shows them.
-func markNoAgentYet(env *Env, cfg *config.Config, slug string) {
-	path := firstAgentPath(cfg, slug)
-	err := os.MkdirAll(filepath.Dir(path), 0o755)
-	if err == nil {
-		err = os.WriteFile(path, []byte(firstAgentNote), 0o644)
-	}
-	if err != nil {
-		env.warnf("could not record that no agent has run in %s yet: %v", slug, err)
-	}
-}
-
-// clearNoAgentYet takes the marker off, a window having run the command.
-//
-// Nothing is reported when the removal fails. What it costs is one resume
-// opening a fresh agent where --continue would have worked, which is the
-// direction this whole mechanism already errs in, and a warning about a file the
-// user has never heard of would be louder than the thing it describes.
-//
-// A config with a blank command runs nothing either way, so there the
-// distinction has nothing to bite on.
-func clearNoAgentYet(cfg *config.Config, slug string) {
-	_ = os.Remove(firstAgentPath(cfg, slug))
-}
-
-// noAgentYet reports that nothing has started an agent in a worktree, so
-// `resume` should run command rather than resume_command.
-func noAgentYet(cfg *config.Config, slug string) bool {
-	_, err := os.Stat(firstAgentPath(cfg, slug))
-	return err == nil
 }
 
 // ---- rm --------------------------------------------------------------------
@@ -927,7 +832,9 @@ func cmdPrune(env *Env, args []string) error {
 
 func cmdResume(env *Env, args []string) error {
 	var prompt, promptFile string
-	positional, err := parseArgs("resume", args, nil, promptValues(&prompt, &promptFile), 1)
+	var fresh bool
+	positional, err := parseArgs("resume", args,
+		map[string]*bool{"--fresh": &fresh}, promptValues(&prompt, &promptFile), 1)
 	if err != nil {
 		return err
 	}
@@ -935,14 +842,14 @@ func cmdResume(env *Env, args []string) error {
 	if err != nil {
 		return err
 	}
-	// Before the menu, so a brief that is not there and a resume_command that
-	// cannot take the prompt are both refused before anyone has picked a row to
-	// send it to.
+	// Before the menu, so a brief that is not there and a command that cannot
+	// take the prompt are both refused before anyone has picked a row to send it
+	// to.
 	prompt, err = resolvePrompt("resume", prompt, promptFile)
 	if err != nil {
 		return err
 	}
-	command, err := fillPrompt(cfg.ResumeCommand, "resume_command", prompt)
+	run, err := resumeCommand(cfg, prompt, fresh)
 	if err != nil {
 		return err
 	}
@@ -988,13 +895,13 @@ func cmdResume(env *Env, args []string) error {
 	// name — with resume_command, this being resume. The prompt rides along:
 	// the base window runs an agent too, and "resume the base and hand it this"
 	// is the same sentence as for any worktree.
+	//
+	// The fallback rides along too, and that is the half the marker file this
+	// replaces could never reach: the base checkout is a row in every picker,
+	// and one whose agent left no session behind dead-ends there exactly as a
+	// worktree does.
 	if target.Base {
-		// The first-agent fallback below deliberately stops here. The base
-		// checkout is not a worktree treewright made, so there is no moment at
-		// which it could honestly write that nothing had run in it — and `tw
-		// base` opens that window with command already, so the way in that needs
-		// no conversation is a command of its own rather than a fallback.
-		created, err := openBaseWindow(env, cfg, command)
+		created, err := openBaseWindow(env, cfg, run)
 		warnIfPromptUndelivered(env, prompt, created, err)
 		return err
 	}
@@ -1002,39 +909,65 @@ func cmdResume(env *Env, args []string) error {
 	// Said before the window opens, since afterwards the agent has the screen.
 	warnIfSetupFailed(env, cfg, target.Slug)
 
-	// Nothing has ever started an agent here, so there is no conversation for
-	// resume_command to continue and it would exit on saying so. command is what
-	// this worktree is still owed.
-	//
-	// Filled here rather than beside resume_command at the top, because a
-	// template with no {prompt} in it is only a problem for the invocation that
-	// needs it: refusing every `resume --prompt` in a repository whose command
-	// cannot take one, for a fallback most of them will not use, is the wrong
-	// half of that trade. Nothing has been created either way, so the refusal is
-	// as cheap here as it is there.
-	if noAgentYet(cfg, target.Slug) {
-		fresh, err := fillPrompt(cfg.Command, "command", prompt)
-		if err != nil {
-			return err
-		}
-		command = fresh
-		env.progressf("no agent has run in %s yet — opening it with command rather than resume_command", target.Slug)
-	}
-
 	// openWindow does the rest: a window already open on that worktree is the
 	// session being asked for, so it is switched to rather than duplicated.
 	created, err := openWindow(env, cfg, tmux.Spec{
-		Dir:     target.Dir,
-		Name:    cfg.WindowName(target.Slug, ""),
-		Command: command,
-		Slug:    target.Slug,
-		Branch:  target.Branch,
-	})
+		Dir:    target.Dir,
+		Name:   cfg.WindowName(target.Slug, ""),
+		Slug:   target.Slug,
+		Branch: target.Branch,
+	}, run)
 	warnIfPromptUndelivered(env, prompt, created, err)
-	if created {
-		clearNoAgentYet(cfg, target.Slug)
-	}
 	return err
+}
+
+// resumeCommandPair is how the length check names what a resume window runs,
+// which is two settings rather than one. Spelled to read as a subject in both
+// forms the refusal takes: "... is too long", and "--prompt makes ... too long".
+const resumeCommandPair = "resume_command with command behind it"
+
+// resumeCommand settles what a resume window runs, before anything is picked or
+// opened.
+//
+// Ordinarily that is resume_command with command behind it, so that a resume
+// which finds nothing to continue starts an agent rather than parking the window
+// on the error. --fresh is the same request made deliberately — give me a new
+// session, whatever there is to continue — so it runs command alone, and there
+// is nothing behind that to fall back to.
+//
+// The prompt fills both templates. It was aimed at the agent this resume starts,
+// and when the fallback fires the fresh agent is the agent that starts; text the
+// user typed once and cannot retype must not be dropped on the way. That is also
+// why a command with no {prompt} in it is refused here rather than at the moment
+// the fallback fires: there is no reporting anything from inside a window
+// treewright left minutes ago, and at this point nothing has been created.
+func resumeCommand(cfg *config.Config, prompt string, fresh bool) (windowCommand, error) {
+	if fresh {
+		command, err := fillPrompt(cfg.Command, "command", prompt)
+		return windowCommand{Command: command}, err
+	}
+	resume, err := fillPrompt(cfg.ResumeCommand, "resume_command", prompt)
+	if err != nil {
+		return windowCommand{}, err
+	}
+	// A blank command is the setting that opens a window on a shell, and a shell
+	// is not something to fall back to: there is no agent standing in it. So the
+	// repository that asked for one keeps resume_command alone, and a --prompt is
+	// not refused on account of a template that could never have read it.
+	if strings.TrimSpace(cfg.Command) == "" {
+		return windowCommand{Command: resume}, nil
+	}
+	command, err := fillPrompt(cfg.Command, "command", prompt)
+	if err != nil {
+		return windowCommand{}, err
+	}
+	// Each half fits, which is not the question tmux asks: the window is handed
+	// one script holding both, with the prompt in each of them.
+	run := windowCommand{Command: resume, Fresh: command}
+	if err := checkCommandFits(run.script(), resumeCommandPair, prompt); err != nil {
+		return windowCommand{}, err
+	}
+	return run, nil
 }
 
 // choice is what `resume` and `cd` act on: one row of the menu.
@@ -1220,7 +1153,7 @@ func cmdBase(env *Env, args []string) error {
 	if err != nil {
 		return err
 	}
-	_, err = openBaseWindow(env, cfg, command)
+	_, err = openBaseWindow(env, cfg, windowCommand{Command: command})
 	return err
 }
 
@@ -1237,7 +1170,7 @@ func cmdBase(env *Env, args []string) error {
 //
 // The disagreement shows once and then never again: every later call finds the
 // window by its directory and switches to it, whatever it was started with.
-func openBaseWindow(env *Env, cfg *config.Config, command string) (created bool, err error) {
+func openBaseWindow(env *Env, cfg *config.Config, run windowCommand) (created bool, err error) {
 	if branch, err := git.CurrentBranch(cfg.MainDir); err == nil && branch != cfg.BaseBranch {
 		where := branch
 		if where == "" {
@@ -1256,17 +1189,16 @@ func openBaseWindow(env *Env, cfg *config.Config, command string) (created bool,
 	// stale the moment they do.
 	if tmux.Available() {
 		return openWindow(env, cfg, tmux.Spec{
-			Dir:     cfg.MainDir,
-			Name:    strings.ToUpper(cfg.BaseBranch),
-			Command: command,
-		})
+			Dir:  cfg.MainDir,
+			Name: strings.ToUpper(cfg.BaseBranch),
+		}, run)
 	}
 
 	// A blank command is the setting that leaves a window holding a shell, and
 	// outside tmux there is no window to leave one in — the caller is standing
 	// in a shell already. Said rather than done, because `sh -c ""` returns
 	// instantly and `base` would otherwise exit 0 having visibly done nothing.
-	if strings.TrimSpace(command) == "" {
+	if strings.TrimSpace(run.Command) == "" {
 		env.progressf("no tmux and a blank command, so there is nothing to open%s",
 			asFields(field("the checkout is at", cfg.MainDir)))
 		return false, nil
@@ -1275,7 +1207,12 @@ func openBaseWindow(env *Env, cfg *config.Config, command string) (created bool,
 	// Without tmux there is no window to open, so run the command here and hand
 	// it the terminal — which is the command running, prompt included, so this
 	// counts as created for the caller weighing whether a prompt was delivered.
-	cmd := exec.Command("sh", "-c", command)
+	//
+	// The fallback stays behind with the window. What it recovers is a window
+	// parked on an error in a session the user is not looking at; here the
+	// failure is on the terminal in front of them, with their own shell back
+	// underneath it and `--fresh` a line away.
+	cmd := exec.Command("sh", "-c", run.Command)
 	cmd.Dir = cfg.MainDir
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	return true, cmd.Run()

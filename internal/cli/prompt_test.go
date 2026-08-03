@@ -116,6 +116,49 @@ func TestPromptRefusedWithoutAPlaceholder(t *testing.T) {
 	if r.err == nil || !strings.Contains(r.err.Error(), "resume_command") {
 		t.Errorf("err = %v, want resume_command named", r.err)
 	}
+
+	// And it refuses for command as well, which is the one it may end up
+	// running: a fallback that reached the fresh agent with the prompt dropped
+	// on the way would lose text the user typed once, and there is nowhere to
+	// report that from once the window is somebody else's.
+	f3 := newFixture(t, "command = 'sleep 300'\nresume_command = 'sleep 300 {prompt}'\n")
+	f3.mustRun("new", "gamma")
+	r = f3.exec("resume", "gamma", "--prompt", "carry on")
+	if r.err == nil || !strings.Contains(r.err.Error(), `command has no {prompt}`) {
+		t.Errorf("err = %v, want command named", r.err)
+	}
+	if r = f3.exec("resume", "--fresh", "gamma", "--prompt", "carry on"); r.err == nil {
+		t.Errorf("err = %v, want --fresh refused by the very command it runs", r.err)
+	}
+}
+
+// TestALongPromptIsRefusedForTheWindowResumeWillActuallyOpen is the length check
+// meeting the one command that runs two.
+//
+// A resume window is handed resume_command and command in a single script, with
+// the prompt in each of them, so a prompt that fits either alone can still be
+// half again too long for what tmux is given. Measuring the setting rather than
+// the script passed that invocation, and tmux refused it — as its own raw
+// "command too long", over a window that never opened.
+func TestALongPromptIsRefusedForTheWindowResumeWillActuallyOpen(t *testing.T) {
+	f := newFixture(t, "command = 'claude {prompt}'\nresume_command = 'claude --continue {prompt}'\n")
+	f.mustRun("new", "alpha")
+
+	// Comfortably inside the limit on its own, and over it once the window
+	// carries both — which is what makes this the pair's refusal and not either
+	// command's.
+	prompt := strings.Repeat("a", tmux.MaxCommandLength*2/3)
+	if _, err := fillPrompt("claude --continue {prompt}", "resume_command", prompt); err != nil {
+		t.Fatalf("the prompt no longer fits one command alone, so this proves nothing: %v", err)
+	}
+
+	r := f.exec("resume", "alpha", "--prompt", prompt)
+	if r.err == nil {
+		t.Fatal("want a refusal for a pair of commands tmux will not run")
+	}
+	if msg := flat(r.err.Error()); !strings.Contains(msg, "--prompt makes "+resumeCommandPair+" too long") {
+		t.Errorf("error = %q, want both settings named as what is too long", msg)
+	}
 }
 
 // TestALongPromptIsRefusedBeforeTheWorktreeExists is the fourth rule, and it
@@ -307,10 +350,16 @@ func TestAPromptFileCarriesABriefTooLongToPass(t *testing.T) {
 	waitForContent(t, marker, fmt.Sprintf(promptPointer, path), "the window's command")
 }
 
-// TestResumePromptDelivery covers both halves of delivery: a resume that
-// starts the agent hands it the prompt, and one that merely switches to an
-// open window says the prompt went nowhere — the text was typed once, and
-// dropping it silently is the quiet failure everything else refuses to be.
+// TestResumePromptDelivery covers all three halves of delivery: a resume that
+// starts the agent hands it the prompt, one whose resume_command never got
+// going hands it to the agent that starts in its place, and one that merely
+// switches to an open window says the prompt went nowhere — the text was typed
+// once, and dropping it silently is the quiet failure everything else refuses
+// to be.
+//
+// Every fixture here gives command a {prompt} as well, because resume carries
+// both commands into the window now: the prompt was aimed at the agent this
+// resume starts, and either of the two may turn out to be it.
 //
 // The subtest names are curt because they end up in a tmux socket path, which
 // a unix socket caps at little over a hundred characters.
@@ -319,7 +368,7 @@ func TestResumePromptDelivery(t *testing.T) {
 	marker := filepath.Join(t.TempDir(), "resumed")
 
 	t.Run("fresh", func(t *testing.T) {
-		f := newFixture(t, "command = 'true'\nresume_command = \"printf %s {prompt} > "+marker+"\"\n")
+		f := newFixture(t, "command = 'true {prompt}'\nresume_command = \"printf %s {prompt} > "+marker+"\"\n")
 		f.mustRun("new", "solo")
 		// The window `new` opened runs `true` and closes by itself; resume must
 		// then create one, which is the case where the prompt is deliverable.
@@ -332,8 +381,19 @@ func TestResumePromptDelivery(t *testing.T) {
 		}
 	})
 
+	t.Run("fallen back", func(t *testing.T) {
+		fell := filepath.Join(t.TempDir(), "fell-back")
+		f := newFixture(t, "command = \"printf %s {prompt} > "+fell+"\"\n"+
+			"resume_command = 'false {prompt}'\n")
+		f.mustRun("new", "solo")
+		waitForNoPanes(t, f.DirFor("solo"))
+
+		f.mustRun("resume", "solo", "-p", "address the review comments")
+		waitForContent(t, fell, "address the review comments", "the fresh command")
+	})
+
 	t.Run("open", func(t *testing.T) {
-		f := newFixture(t, "command = 'sleep 300'\nresume_command = 'sleep 300 {prompt}'\n")
+		f := newFixture(t, "command = 'sleep 300 {prompt}'\nresume_command = 'sleep 300 {prompt}'\n")
 		f.mustRun("new", "solo")
 
 		out := f.mustRun("resume", "solo", "--prompt", "you never see this")

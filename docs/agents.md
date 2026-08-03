@@ -611,45 +611,78 @@ window is its normal case — the flag would warn more often than it worked.
 ## When there is nothing to resume
 
 `resume` runs `resume_command`, and `resume_command` is "carry on where I left
-off" — `claude --continue` and its like. A worktree whose first agent never
-started has nothing to carry on from, so that command exits on saying so and the
+off" — `claude --continue` and its like. There is not always anything to carry
+on from. A worktree whose first window never opened has never had an agent in
+it; so has one whose agent started and ended before it recorded a session, which
+is a thing that happens in the seconds after `new` when somebody closes the
+window they just opened. Either way the command exits on saying so, and the
 held-open window parks on the error.
 
-Such a worktree used to be unreachable. `new` refuses the slug, the worktree
+Such a checkout used to be unreachable. `new` refuses the slug, the worktree
 being right there, and names `resume` as the way in: the one command that could
 not work. `ls` shows a healthy row with an empty WINDOW column and nothing to
 say why. Removing the worktree and starting over was the only way out — a long
 way to go for a window that failed to open.
 
-treewright cannot ask an agent whether it has a conversation in a directory, so
-it keeps a note of its own: `.git/treewright/no-agent-yet-<slug>`, written when
-`new` makes the worktree and taken off the moment a window actually runs the
-command. `resume` reads it and runs `command` instead, and says so rather than
-doing it quietly — a fresh agent appearing where you expected your session back
-is a thing to explain. That is also what makes `new`'s "open it with
-`tw resume <slug>`" true again, rather than a signpost to the one command that
-cannot help.
+**The recovery is the failure, not a prediction of it.** `resume` hands its
+window one script holding both commands: `resume_command`, and behind it
+`command`, run only if the first failed without ever getting going. The window
+says which it is doing and carries on, so what the user gets is an agent rather
+than a message about a conversation that does not exist. `--fresh` asks for the
+same thing outright, for the session you would rather leave behind than
+continue.
 
-**The marker is the negative, and that is the whole decision.** A marker saying
-*an agent has run here* would be missing from every worktree made by a treewright
-that never wrote one — worktrees in use for weeks, holding exactly the
-conversation `--continue` wants — and the fallback would greet each of them with
-a fresh agent and no history. A first-run heuristic that silently discards
-somebody's session is a worse bug than the one being fixed. So absence has to
-mean *as before*: the state that already existed stays silent, and the marker is
-the news.
+**What "without ever getting going" means is how long it ran**, and the
+threshold is `neverGotGoing` — five seconds, in `internal/cli/session.go`. Any
+agent's *nothing to resume* is a message and an exit, over in well under a
+second; any agent a person actually used ran for minutes. What the guard is
+protecting is the other direction: an agent that ran for an hour and then died
+leaves its stack trace on screen, and starting a fresh one over it takes the
+alternate screen and erases the one thing the user needs. A failure is a
+recovery only where nothing had started yet. Exit 0 and anything above 128 — the
+range of a signal, and usually the user's own Ctrl-C — are untouched, since
+restarting an agent somebody just quit would be worse than useless.
 
-It records that an **agent was started**, not that a **window was opened**. Those
-are the same thing nearly always, and they come apart in exactly the case this
-exists for.
+Matching the agent's own "no conversation found" on stderr reads as more precise
+and is worth less. It is an undocumented string from another program, in one
+language, for one agent, and it fails silently the day that program rewords it —
+which is the coupling this whole mechanism exists to remove. How long a command
+ran belongs to nobody in particular.
 
-**The base checkout is left out of it.** It is not a worktree treewright made, so
-there is no moment at which treewright could honestly write that nothing had ever
-run in it — and `tw base` opens that window with `command` already, so the way in
-that needs no conversation is a command of its own rather than a fallback.
+**The clock is `date +%s`, read twice, and read defensively.** It is what every
+shell tmux might run the script through agrees on — `$SECONDS` is bash and zsh
+but not dash — and a missing or unusable `date` leaves the elapsed time unknown.
+Unknown means no fallback, which is exactly the behavior that came before it:
+the window is held open, and nothing is erased.
 
-A `--fresh` flag on `resume`, with `new`'s error naming it, was the alternative
-and it loses on both counts: it is one more thing to know at exactly the moment
-you are confused, and the question it puts to the user — *has an agent ever run
-here?* — is one treewright is in a better position to answer.
+**It runs once.** A `command` that also fails at once is held open, not tried
+again, and the line naming what exited names whichever of the two it was.
+
+**The base checkout gets all of this**, which is the half the mechanism this
+replaces could never reach. That mechanism was a marker file —
+`.git/treewright/no-agent-yet-<slug>`, written by `new` and removed once a
+window ran the command — and the base checkout is not a worktree treewright
+made, so there was no moment at which anything could honestly write that nothing
+had run in it. It is a row in every picker all the same. The marker had three
+other faults worth recording, since somebody built it deliberately: it was a
+proxy for a fact it did not own, and every proxy for somebody else's state
+drifts from it; it was the negative, so *absence* had to mean "assume a
+conversation exists", which made every worktree created before it — or by
+anything other than `new` — a latent instance of the bug; and it was cleared
+when the *window* opened rather than when an *agent started*, which are the same
+thing except in the case it existed for.
+
+Nothing reads those files now. treewright no longer writes them and does not
+delete the ones it wrote: they are inert, they sit in `.git/treewright/` beside
+post_create's logs, and `rm .git/treewright/no-agent-yet-*` takes them off any
+repository that still has some.
+
+Reading the agent's own session storage — `$CLAUDE_CONFIG_DIR/projects/…` and
+its `.jsonl` transcripts — was the other alternative, and it is a real check
+rather than a proxy. It loses for the same reason the error string does: an
+undocumented layout treewright does not own, with a path-mangling rule that
+cannot be fully derived, answering for exactly one agent, and failing silently
+when it changes. There is no supported way to ask, either: `claude --help` has
+no session-listing subcommand. Trading a brittle file you control for a brittle
+assumption you do not is not an improvement.
 

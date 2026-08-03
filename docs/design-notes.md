@@ -44,7 +44,9 @@ worktree quietly start meaning the base checkout.
 out of the resume menu runs `resume_command`, the same "carry on where I left
 off" every other row gets — which after a reboot is the point. The difference
 shows only on the first open, since every later call finds the window by its
-directory and switches to it.
+directory and switches to it. It also gets what every other row gets when there
+turns out to be nothing to carry on from: `command` behind the failure, and
+`--fresh` to ask for it outright.
 
 **Its status is `base`, outside the safe-to-remove scale.** A base checkout
 sitting level with origin has no commits outside it, which would read as
@@ -602,9 +604,19 @@ window and no agent, under tmux's raw refusal with the doubled script quoted int
 it. So the report names the command's first line, cut to eighty columns, and the
 copy that actually runs stays byte-exact.
 
+**A resume window is handed two commands**, `resume_command` with `command`
+behind it, so that a resume which finds nothing to continue starts an agent
+rather than parking on the error — see "When there is nothing to resume" in
+`agents.md`. Everything above holds unchanged: one script, one shell, the last
+command's status deciding whether the window is held open, and the line that
+names what exited naming whichever of the two it was.
+
 **And the length is checked before anything is created**, in `fillPrompt`, beside
 the refusal of a prompt the template cannot take: both are this invocation being
-wrong, and both are cheap to say while there is still nothing to clean up. The
+wrong, and both are cheap to say while there is still nothing to clean up. What
+is measured is the script tmux is handed rather than the setting it came from,
+which for `resume` is both commands with the prompt in each of them: a check
+against either alone would pass an invocation tmux then refuses. The
 error names the size and the limit, since the only useful thing to know about a
 prompt that will not fit is how far over it is. The limit treewright holds to is
 tmux's less a kilobyte for the rest of `new-window`'s argument list — the
@@ -841,11 +853,21 @@ What it writes, in full:
 |---|---|
 | `<config dir>/<name>.toml` | The registry *is* the configuration; there is no treewright without it. One directory, `rm -r` and it is gone. |
 | `<main_dir>/.git/treewright/post-create-*` | A background step's log and failure marker, inside the repository's own `.git`, which goes when the repository does. |
-| `<main_dir>/.git/treewright/no-agent-yet-*` | The note that a worktree has never had an agent in it, beside that log and gone the same way. It says what it is for in its own first line, since a marker nobody can read is a marker nobody can delete. |
 | `<main_dir>/.git/treewright/move-*.patch` | The uncommitted work `move` is carrying, written before anything is created and deleted once it has landed. What is left behind is left after a failure, deliberately: it is a second copy of work that exists in one place, and the way back in by hand. |
 | `<main_dir>/.claude/skills/treewright/` | The agent plugin, written by `agent-init` — inside the repository, in a directory treewright named and nothing else writes to. `rm -r` and it is gone, and `claude plugin disable treewright@skills-dir` stops it loading without deleting anything. |
 | `~/.claude/skills/treewright/` | The same plugin, when `agent-init --global` is asked for it. The only thing on this list outside a repository besides the registry, and the flag *is* the consent: it is not written unless it is named. |
 | The worktrees themselves | What the tool is for, and `rm` takes each one back. |
+
+One path has come off that list rather than been added to it.
+`.git/treewright/no-agent-yet-*` was a note that a worktree had never had an
+agent in it, and `resume` read it to decide whether to run `command` instead of
+`resume_command`; the recovery is triggered by the failure now, and nothing
+reads the files. treewright neither writes them nor deletes the ones it wrote —
+deleting a user's files to tidy up after itself is not a licence this list
+grants — so they sit inert beside post_create's logs, and
+`rm .git/treewright/no-agent-yet-*` takes them off a repository that still has
+some. See "When there is nothing to resume" in `agents.md` for why the mechanism
+went.
 
 Everything else is *printed for a person to place*, which is why `shell-init`
 and `tmux-init` exist at all. The line in your `.zshrc`, the line in your

@@ -260,8 +260,9 @@ Nothing that runs for you fails quietly:
   names the command it stopped at and where the log is.
 - **`command` fails** — its window stays open with the error still on screen,
   rather than closing before you can read it.
-- **The window never opened** — `tw resume` starts the agent fresh instead of
-  trying to continue a conversation that was never had, and says so.
+- **There's no conversation to continue** — a `tw resume` that dies on the spot
+  starts the agent fresh in the same window instead, and says so. `--fresh` asks
+  for that outright.
 - **A `--prompt` too long for tmux to carry** — refused before the worktree is
   made, not after.
 

@@ -3,6 +3,7 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/jay-snyder/treewright/internal/config"
@@ -35,10 +36,11 @@ func sessionFor(cfg *config.Config) string {
 // openWindow puts a window on spec.Dir in the repository's session — or focuses
 // the window already sitting there, wherever it turns out to be.
 //
-// The caller describes the worktree: its directory, window name, command, and the
-// slug and branch behind it. What every window of a repository shares — the
-// session it goes in and the repository's name — is filled in here from the
-// config, so no caller has to remember it.
+// The caller describes the worktree: its directory, window name, the slug and
+// branch behind it, and — separately, in run — what the window should be
+// running. What every window of a repository shares — the session it goes in
+// and the repository's name — is filled in here from the config, so no caller
+// has to remember it.
 //
 // The session is created when it does not exist yet, so the first `new` of the
 // day is also what establishes the repository's session. Nothing here needs a
@@ -47,9 +49,9 @@ func sessionFor(cfg *config.Config) string {
 //
 // Whether the window was created or merely found is reported back, because the
 // two differ in the one thing a caller cannot see: only a created window runs
-// spec.Command. A caller that folded something into that command — a kickoff
+// the command. A caller that folded something into that command — a kickoff
 // prompt — needs to know when it never ran.
-func openWindow(env *Env, cfg *config.Config, spec tmux.Spec) (created bool, err error) {
+func openWindow(env *Env, cfg *config.Config, spec tmux.Spec, run windowCommand) (created bool, err error) {
 	if !tmux.Available() {
 		// The two things to type get a labelled line each, because that is what
 		// they are: a directory to move to and a command to run there, both long
@@ -57,18 +59,18 @@ func openWindow(env *Env, cfg *config.Config, spec tmux.Spec) (created bool, err
 		// line with no obvious seam.
 		env.progressf("tmux is not installed, so no window was opened%s", asFields(
 			field("cd", env.copyable(spec.Dir)),
-			field("run", env.copyable(spec.Command)),
+			field("run", env.copyable(run.Command)),
 		))
 		return false, nil
 	}
 	spec.Session = sessionFor(cfg)
 	spec.Repo = cfg.Name
 
-	// Kept as the user wrote it for everything below that talks about it, while
-	// tmux gets the wrapped form: a message naming a command has to name the
-	// command, not treewright's scaffolding around it.
-	command := spec.Command
-	spec.Command = heldOpenOnFailure(command)
+	// The command stays as the user wrote it for everything below that talks
+	// about it, while tmux gets the script around it: a message naming a command
+	// has to name the command, not treewright's scaffolding around it.
+	command := run.Command
+	spec.Command = run.script()
 
 	// A window already sitting in that directory is the window being asked for, so
 	// switch to it rather than opening a duplicate beside it — unless it is the
@@ -127,6 +129,40 @@ func isTheCallersOwnShell(w tmux.Window, dir string) bool {
 	return w.ID == tmux.CurrentWindow()
 }
 
+// windowCommand is what a window is asked to run: the command itself, and —
+// where the caller has one — what to run instead when that command fails
+// without ever getting going.
+//
+// Only `resume` has the second. It runs resume_command, which is "carry on
+// where I left off", and a checkout with nothing to carry on from meets that
+// with an error and a window parked on it. command is what such a checkout is
+// owed, so the recovery is to run it in the same window: the failure triggers
+// it, rather than treewright predicting from somewhere outside the agent
+// whether a conversation exists. Everything else — `new`, `move`, `base` —
+// runs command already and has nothing to fall back to.
+type windowCommand struct {
+	Command string // what the window runs
+	Fresh   string // what runs instead when Command fails at once, "" for none
+}
+
+// script renders what tmux is handed for this window.
+func (c windowCommand) script() string {
+	// A blank command is the setting that opens a window on a plain shell. There
+	// is nothing there that can fail, so there is nothing to wrap and nothing to
+	// fall back to — and a script around nothing would run the shell, exit 0, and
+	// close the window that was meant to stay.
+	if strings.TrimSpace(c.Command) == "" {
+		return c.Command
+	}
+	// A fallback to the command that has just failed is not a fallback: it is the
+	// same failure again, in the one shape that could be read as a retry loop.
+	// The rule is one recovery and then the held-open window.
+	if strings.TrimSpace(c.Fresh) == "" || c.Fresh == c.Command {
+		return heldOpenOnFailure(c.Command)
+	}
+	return freshOnFastFailure(c.Command, c.Fresh) + heldOpenTail()
+}
+
 // heldOpenOnFailure wraps a window's command so that one which fails leaves its
 // output on screen instead of taking the window down with it.
 //
@@ -140,9 +176,9 @@ func isTheCallersOwnShell(w tmux.Window, dir string) bool {
 // Enter. A successful one closes as before: the shell exits with the same status,
 // so nothing about finishing normally changes.
 //
-// Anything above 128 is let through untouched. That range is a command killed by a
-// signal — usually the user's own Ctrl-C — and holding a window open to report a
-// stop the user asked for would turn every deliberate quit into a keypress.
+// Which of those two happens is heldOpenTail's decision, taken from the status
+// of whatever ran last — this being the shape of a window that runs one command,
+// and freshOnFastFailure the shape of one that may run two.
 //
 // The wrapper is a shell script because tmux already runs the command through a
 // shell, so this adds no layer that was not there: `command` is still one shell
@@ -156,34 +192,104 @@ func isTheCallersOwnShell(w tmux.Window, dir string) bool {
 // The line that reports what exited names the command rather than repeating it,
 // which is the difference between a wrapper of a fixed size and one that grows
 // twice as fast as what it wraps. See abbreviated for what that cost.
-//
-// The held-open path also takes the agent state off the window. That state
-// normally dies with the window — the agent is the window's command — and holding
-// the window open past the command is the one place that stops being true: left
-// alone, a dead agent's "working" would sit in the ls table for as long as the
-// window sat unread, and its waiting marker would keep flagging a window whose
-// agent is gone. Both are cleared best-effort, straight through tmux rather than
-// through `treewright signal`, so the wrapper stays runnable when the binary that
-// wrote it has since moved off PATH. Inside the pane, $TMUX names the right
-// server — including under TREEWRIGHT_TMUX_LABEL — and $TMUX_PANE targets the
-// pane's own window, which display-message untargeted would not.
 func heldOpenOnFailure(command string) string {
-	if strings.TrimSpace(command) == "" {
-		return command
-	}
-	return "( " + command + "\n)\n" +
-		"tw_status=$?\n" +
-		`if [ "$tw_status" -eq 0 ] || [ "$tw_status" -gt 128 ]; then exit "$tw_status"; fi` + "\n" +
+	return runStep(command) + heldOpenTail()
+}
+
+// runStep renders one command as a step of a window's script: the name the
+// reports below give it, the command itself, and the status it exited with.
+//
+// The name goes in a variable rather than into each message, because a script
+// can hold two commands and the line that reports a failure has to name
+// whichever of them failed. A variable is how the shell knows which that was.
+func runStep(command string) string {
+	return "tw_command=" + shellQuote(abbreviated(command)) + "\n" +
+		"( " + command + "\n)\n" +
+		"tw_status=$?\n"
+}
+
+// heldOpenTail is what a window's script ends with: nothing at all when the last
+// command succeeded or was interrupted, and otherwise the window held open on
+// its output until the user has read it and pressed Enter.
+//
+// Anything above 128 is let through untouched. That range is a command killed by
+// a signal — usually the user's own Ctrl-C — and holding a window open to report
+// a stop the user asked for would turn every deliberate quit into a keypress.
+//
+// This path also takes the agent state off the window. That state normally dies
+// with the window — the agent is the window's command — and holding the window
+// open past the command is the one place that stops being true: left alone, a
+// dead agent's "working" would sit in the ls table for as long as the window sat
+// unread, and its waiting marker would keep flagging a window whose agent is
+// gone. Both are cleared best-effort, straight through tmux rather than through
+// `treewright signal`, so the script stays runnable when the binary that wrote it
+// has since moved off PATH. Inside the pane, $TMUX names the right server —
+// including under TREEWRIGHT_TMUX_LABEL — and $TMUX_PANE targets the pane's own
+// window, which display-message untargeted would not.
+func heldOpenTail() string {
+	return `if [ "$tw_status" -eq 0 ] || [ "$tw_status" -gt 128 ]; then exit "$tw_status"; fi` + "\n" +
 		`if [ -n "$TMUX_PANE" ]; then` + "\n" +
 		`  tmux set-window-option -q -u -t "$TMUX_PANE" ` + tmux.AgentStateOption + " 2>/dev/null || true\n" +
 		`  tw_name=$(tmux display-message -p -t "$TMUX_PANE" '#{window_name}' 2>/dev/null) || tw_name=''` + "\n" +
 		`  case "$tw_name" in ` + shellQuote(tmux.WaitingMarker) + `*) tmux rename-window -t "$TMUX_PANE" "${tw_name#?}" 2>/dev/null || true ;; esac` + "\n" +
 		"fi\n" +
-		"printf '\\n\"%s\" exited %s — this window is kept so the output above stays readable\\n'" +
-		" " + shellQuote(abbreviated(command)) + ` "$tw_status"` + "\n" +
+		`printf '\n"%s" exited %s — this window is kept so the output above stays readable\n' "$tw_command" "$tw_status"` + "\n" +
 		"printf '" + heldOpenNotice + "\\n'\n" +
 		"read -r tw_done\n" +
 		`exit "$tw_status"` + "\n"
+}
+
+// neverGotGoing is how long a command may run and still be read as one that
+// never got going, in seconds.
+//
+// The question the fallback has to answer is "did the agent ever start", and
+// treewright cannot ask it: whether a conversation exists is the agent's own
+// fact, and every proxy treewright has kept for it drifted from it. How long the
+// command ran is the one honest signal that belongs to nobody in particular. Any
+// agent's *nothing to resume* is a message and an exit, over in well under a
+// second; any agent a person actually used ran for minutes.
+//
+// Five seconds sits in the gap. It has to clear the slow end of a start that
+// fails — a launcher script, a runtime coming off a cold page cache, a config
+// read over a network home directory — and it has to stay far below anything a
+// person worked in. What it must never do is fire on a session that ran and then
+// died, because starting a fresh agent over that takes the alternate screen and
+// erases the stack trace the user needs, which is the whole reason the held-open
+// window exists.
+//
+// The alternative was matching the agent's own "no conversation found" on
+// stderr. It reads as more precise and is worth less: it is an undocumented
+// string from another program, in one language, for one agent — the coupling
+// this mechanism exists to remove — and it fails silently on the day that
+// program rewords it.
+const neverGotGoing = 5
+
+// freshOnFastFailure renders resume's two commands as one script: the resume
+// command, and behind it the fresh one, run only when the first failed without
+// ever getting going.
+//
+// The clock is `date +%s`, twice, because it is the one clock every shell tmux
+// might run this through agrees on: $SECONDS is bash and zsh but not dash, and
+// timing the command from Go is not available to a script treewright is no
+// longer around to watch. It is read defensively — a missing or unusable date
+// leaves the elapsed time unknown, and unknown means no fallback, which is
+// exactly today's behavior. Second granularity is ample for a threshold of
+// seconds.
+//
+// Nothing inside the `if` is indented, because a command reaching here can carry
+// a prompt with newlines in it: indenting the block would put spaces inside the
+// user's own quoted text.
+func freshOnFastFailure(resume, fresh string) string {
+	return "tw_started=$(date +%s 2>/dev/null)\n" +
+		runStep(resume) +
+		"tw_ended=$(date +%s 2>/dev/null)\n" +
+		"tw_brief=0\n" +
+		`case "$tw_started,$tw_ended" in *[!0-9,]*|,*|*,) ;; *) [ "$((tw_ended - tw_started))" -lt ` +
+		strconv.Itoa(neverGotGoing) + ` ] && tw_brief=1 ;; esac` + "\n" +
+		`if [ "$tw_brief" -eq 1 ] && [ "$tw_status" -gt 0 ] && [ "$tw_status" -le 128 ]; then` + "\n" +
+		`printf '\n"%s" exited %s straight away — starting a fresh agent instead\n' "$tw_command" "$tw_status"` + "\n" +
+		runStep(fresh) +
+		"fi\n"
 }
 
 // heldOpenNotice is the last thing a held-open window prints before it blocks
@@ -250,9 +356,13 @@ func abbreviated(command string) string {
 // invocation being wrong, refused in the same breath as a prompt the template
 // cannot take, and before anything exists to clean up.
 //
-// What is measured is the wrapped command, because that is what tmux is handed.
-func checkCommandFits(command, key, prompt string) error {
-	size := len(heldOpenOnFailure(command))
+// What is measured is the whole script, rendered by the caller, because that is
+// what tmux is handed — and for `resume` that is two commands and a prompt in
+// each of them rather than one. A check that measured the setting alone would
+// pass an invocation tmux then refuses, which arrives as tmux's raw "command too
+// long" over a worktree that already exists.
+func checkCommandFits(script, key, prompt string) error {
+	size := len(script)
 	if size <= tmux.MaxCommandLength {
 		return nil
 	}

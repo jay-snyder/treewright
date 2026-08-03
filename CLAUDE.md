@@ -285,8 +285,7 @@ on a window that was already open and its command never ran.
 
 **treewright writes its own registry, its own plugin directory, and nothing
 else.** The whole list is `<config dir>/<name>.toml`,
-`.git/treewright/post-create-*`, `.git/treewright/no-agent-yet-*` and
-`.git/treewright/move-*.patch` inside the
+`.git/treewright/post-create-*` and `.git/treewright/move-*.patch` inside the
 repo, the worktrees, and `.claude/skills/treewright/` —
 `~/.claude/skills/treewright/` only when `agent-init --global` names it.
 Everything else — the shell line, the tmux line, any `.gitignore` entry — is
@@ -352,10 +351,11 @@ added on one side and not the other fails there. Two divergences are deliberate
 and marked `stricter`: a slug may not contain `/`, and neither may start with `-`.
 
 **A window's command is wrapped; every message about it is not.** `openWindow`
-hands tmux `heldOpenOnFailure(command)`, which holds a failing window open so its
-output can be read, and keeps the plain string the caller passed for the prose that
-names it. Both it and `postCreateScript` run the user's command in a subshell so an
-`exit` of its own does not end the wrapper — the case that erases the output.
+hands tmux `run.script()` — the `windowCommand` the caller passed, rendered as a
+shell script that holds a failing window open so its output can be read — and
+keeps the plain `run.Command` for the prose that names it. Both it and
+`postCreateScript` run the user's command in a subshell so an `exit` of its own
+does not end the wrapper — the case that erases the output.
 
 **The wrapper's size does not grow with the command's.** The line reporting what
 exited names the command through `abbreviated` — first line, eighty columns —
@@ -365,17 +365,23 @@ copy spent tmux's own command-length budget twice; `tmux.MaxCommandLength` is
 what is left of it, and `checkCommandFits` runs inside `fillPrompt` so an
 over-long `--prompt` is refused **before the worktree exists** rather than
 arriving as tmux's raw `command too long` over a worktree with no window.
+**What it measures is the script, not the setting** — `resume` renders two
+commands into one window and checks that pair itself, since a prompt that fits
+either alone can still be too long for what tmux is handed.
 
-**`resume` runs `command`, not `resume_command`, where no agent has ever run.**
-`new` writes `.git/treewright/no-agent-yet-<slug>` as it makes a worktree and
-`clearNoAgentYet` removes it once a window has actually run the command, so a
-worktree whose window never opened stays reachable instead of meeting
-`claude --continue` with no conversation to continue. **The marker is the
-negative on purpose**: absence has to keep meaning "as before", or every worktree
-made by an older treewright would be met by a fresh agent in place of the session
-it had. It records that an *agent started*, not that a *window opened* — the two
-differ exactly in the case it exists for — and `base` is deliberately outside it.
-See "When there is nothing to resume" in `docs/agents.md`.
+**`resume` falls back to `command` when `resume_command` fails without ever
+getting going.** The window is given both, and the failure is what triggers the
+recovery — treewright does not predict from outside the agent whether a
+conversation exists, which is what the `.git/treewright/no-agent-yet-*` marker
+this replaces was doing. The discrimination is `neverGotGoing` (five seconds) in
+`session.go`: exit 0 and exit > 128 are untouched, a fast failure runs `command`,
+and **a failure after a while is held open exactly as before** — an agent that
+ran and then died leaves output the fresh agent's alternate screen would erase,
+and that is the case that must not regress. It runs once, it reaches the base
+row, and `--fresh` is the same request made deliberately. The clock is
+`date +%s`, and no clock means no fallback. `new`, `move` and `base` run
+`command` already and pass no `Fresh`. See "When there is nothing to resume" in
+`docs/agents.md`.
 
 **`move` touches the base checkout last, and only after the work has been seen
 somewhere else.** The base checkout is the only copy of uncommitted work until
