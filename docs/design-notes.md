@@ -708,9 +708,10 @@ against a `dev` build would be no comparison at all.
 
 ### `refresh`, and what it deliberately will not do
 
-`refresh` is the one command to run after an upgrade. It rewrites the plugin in
-the main checkout and in every worktree, reloads the tmux bindings, and reports
-what moved in each place — naming the files, the way `agent-init` does, because
+`refresh` is the one command to run after an upgrade. It rewrites the plugin
+wherever it is installed — the user-level copy, the main checkout's, and every
+worktree's — reloads the tmux bindings, and reports what moved in each place,
+naming the files the way `agent-init` does, because
 the interesting run is the second one and "wrote `hooks/hooks.json` in eng-1"
 says which part of the wiring had gone stale where "updated 6 checkouts" says
 only that something did.
@@ -854,8 +855,8 @@ What it writes, in full:
 | `<config dir>/<name>.toml` | The registry *is* the configuration; there is no treewright without it. One directory, `rm -r` and it is gone. |
 | `<main_dir>/.git/treewright/post-create-*` | A background step's log and failure marker, inside the repository's own `.git`, which goes when the repository does. |
 | `<main_dir>/.git/treewright/move-*.patch` | The uncommitted work `move` is carrying, written before anything is created and deleted once it has landed. What is left behind is left after a failure, deliberately: it is a second copy of work that exists in one place, and the way back in by hand. |
-| `<main_dir>/.claude/skills/treewright/` | The agent plugin, written by `agent-init` — inside the repository, in a directory treewright named and nothing else writes to. `rm -r` and it is gone, and `claude plugin disable treewright@skills-dir` stops it loading without deleting anything. |
-| `~/.claude/skills/treewright/` | The same plugin, when `agent-init --global` is asked for it. The only thing on this list outside a repository besides the registry, and the flag *is* the consent: it is not written unless it is named. |
+| `~/.claude/skills/treewright/` | The agent plugin, written by `agent-init` — one copy covering every checkout the agent is started in. The only thing on this list outside a repository besides the registry, and running the command that installs the wiring *is* the consent: nothing else writes there, `rm -r` and it is gone, and `claude plugin disable treewright@skills-dir` stops it loading without deleting anything. |
+| `<main_dir>/.claude/skills/treewright/` | The same plugin, when `agent-init --local` is asked for it — inside the repository, in a directory treewright named and nothing else writes to. |
 | The worktrees themselves | What the tool is for, and `rm` takes each one back. |
 
 One path has come off that list rather than been added to it.
@@ -883,6 +884,16 @@ moved into a plugin directory of treewright's own, there is no file of the
 user's to touch. One directory, named after the tool, holding nothing a person
 put there — which is a thing you can find and delete on the day you stop using
 treewright, and the whole point of keeping this list short.
+
+That the default placement is under `$HOME` rather than inside the repository
+does not change the rule, only who is asked. A flag used to be the consent, and
+now the command is: `agent-init` exists to install the wiring and does nothing
+else, it prints the directory it wrote on stdout, and `--print` writes nothing
+and dumps the files for anyone who wants to read hooks before they run. What the
+flag bought in exchange was a copy per repository, each one a directory `git
+status` reports as untracked and each one going stale on its own — a worse
+bargain for the same list. See "Where the wiring goes" in
+[`agents.md`](agents.md).
 
 `tmux-init --apply` looks like the exception and is not: it applies key bindings
 to a running tmux server, in memory, and writes nothing. The one line in

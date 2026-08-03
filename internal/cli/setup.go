@@ -619,13 +619,13 @@ func renderConfig(s configSettings) string {
 	}
 
 	fmt.Fprintf(&b, "# The coding agent these windows run. Supplies command and resume_command,\n")
-	fmt.Fprintf(&b, "# and copies the agent's own per-project files — its settings, and the\n")
-	fmt.Fprintf(&b, "# plugin holding treewright's hooks and skill — into each new worktree.\n")
-	fmt.Fprintf(&b, "# Nothing ignores that plugin until you say so, so it reads as untracked\n")
-	fmt.Fprintf(&b, "# everywhere it lands — \"treewright doctor\" says so too. Removing this key\n")
-	fmt.Fprintf(&b, "# stops the carry and the defaults it supplies, but the windows still run\n")
-	fmt.Fprintf(&b, "# the command below — which defaults to claude. For a window with no agent\n")
-	fmt.Fprintf(&b, "# in it, set command = \"\" as well.\n")
+	fmt.Fprintf(&b, "# and copies the agent's own per-project files — its settings, and a plugin\n")
+	fmt.Fprintf(&b, "# of treewright's if this repository has one of its own — into each new\n")
+	fmt.Fprintf(&b, "# worktree. Nothing ignores such a plugin until you say so, so it reads as\n")
+	fmt.Fprintf(&b, "# untracked everywhere it lands — \"treewright doctor\" says so too. Removing\n")
+	fmt.Fprintf(&b, "# this key stops the carry and the defaults it supplies, but the windows\n")
+	fmt.Fprintf(&b, "# still run the command below — which defaults to claude. For a window with\n")
+	fmt.Fprintf(&b, "# no agent in it, set command = \"\" as well.\n")
 	if s.agent == "" {
 		fmt.Fprintf(&b, "# agent = \"claude\"\n\n")
 	} else {

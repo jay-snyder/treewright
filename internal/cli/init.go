@@ -106,12 +106,25 @@ func cmdTmuxInit(env *Env, args []string) error {
 // friends work, with everything else on stderr — the same contract as every
 // other command. --print writes nothing and dumps the files instead, for
 // reading the hooks before they run, which is the reason tmux-init prints by
-// default; unlike the default path it needs no repository, so it is also how
-// agent-init still answers outside git entirely.
+// default.
+//
+// The default placement is the agent's own user-level directory, and --local is
+// what confines it to one repository. Per-repo was the default for a while and
+// the argument for it — treewright is a tool you use in some repositories and
+// not others — turned out to describe the config registry rather than the
+// wiring: a repository treewright does not manage has no window for `signal` to
+// find, so the hooks there cost nothing and say nothing. What per-repo costs is
+// real and recurs, since that directory is one every worktree starts without:
+// the plugin reaches the MAIN window and nowhere else until `agent = "claude"`
+// carries it, which is a second step nobody is told about until doctor says so.
+// One install that covers every checkout, made and to be made, has no such
+// gap. --local is still there for a machine where treewright's wiring should
+// touch one repository and no other. See "Where the wiring goes" in
+// docs/agents.md.
 func cmdAgentInit(env *Env, args []string) error {
-	var global, dump bool
+	var local, dump bool
 	positional, err := parseArgs("agent-init", args,
-		map[string]*bool{"--global": &global, "--print": &dump}, nil, 1)
+		map[string]*bool{"--local": &local, "--print": &dump}, nil, 1)
 	if err != nil {
 		return err
 	}
@@ -125,27 +138,28 @@ func cmdAgentInit(env *Env, args []string) error {
 	}
 
 	if dump {
-		return dumpPlugin(env, agent, global)
+		return dumpPlugin(env, agent, local)
 	}
-	if global {
+	if !local {
 		return installAgentPlugin(env, agent, expandHome(agent.UserPlugin), nil)
 	}
 	// The repository decides where a per-repo plugin goes, so this is the one
 	// path that needs a config — and having one is what lets the carry warning
-	// below know whether it applies. Someone with no config yet still has
-	// --global and --print, and the error says so.
+	// below know whether it applies. Someone with no config yet still has the
+	// default placement and --print, and the error says so.
 	cfg, err := resolveConfig("")
 	if err != nil {
 		return fmt.Errorf("%w%s", err, asFields(
-			field("or cover every repository", env.copyable(env.Argv0+" agent-init "+agent.Name+" --global")),
+			field("or cover every repository", env.copyable(env.Argv0+" agent-init "+agent.Name)),
 		))
 	}
 	return installAgentPlugin(env, agent, filepath.Join(cfg.MainDir, filepath.FromSlash(agent.ProjectPlugin)), cfg)
 }
 
 // installAgentPlugin writes the plugin into dir and says what happened. A nil
-// cfg means --global, where nothing has to be carried anywhere: the agent's own
-// user-level directory already covers whatever directory it is started in.
+// cfg is the default placement, where nothing has to be carried anywhere: the
+// agent's own user-level directory already covers whatever directory it is
+// started in.
 func installAgentPlugin(env *Env, agent agentinit.Agent, dir string, cfg *config.Config) error {
 	written, err := agent.Install(dir)
 	if err != nil {
@@ -177,9 +191,15 @@ func installAgentPlugin(env *Env, agent agentinit.Agent, dir string, cfg *config
 		"in a session that is already open, run %s",
 		agent.Name, env.copyable("/reload-plugins"))
 
+	// Said in that order because the second line is what makes the first one
+	// cheap: covering a repository treewright knows nothing about sounds like
+	// more than it is, there being no window there for `signal` to find. The
+	// alternative comes last, as the only line here anyone types back.
 	if cfg == nil {
-		env.progressf("every repository is covered now, treewright-managed or not\n" +
-			"outside a treewright window, signal does nothing and says nothing")
+		env.progressf("every repository is covered now, treewright-managed or not\n"+
+			"outside a treewright window, signal does nothing and says nothing\n"+
+			"to wire up one repository and no other, run %s",
+			env.copyable(env.Argv0+" agent-init "+agent.Name+" --local"))
 		return nil
 	}
 	if cfg.Agent != agent.Name {
@@ -200,17 +220,16 @@ func installAgentPlugin(env *Env, agent agentinit.Agent, dir string, cfg *config
 		"add %s to .gitignore\n"+
 		"unless you mean to commit it for everyone who clones",
 		env.copyable(agent.ProjectPlugin+"/"))
-	env.progressf("--global covers every repository instead, and writes into none")
 	return nil
 }
 
 // dumpPlugin prints the plugin's files rather than installing them, each under
 // the path it would be written to. The headers are cat's own multi-file form,
 // because that is what the output is: several files at once, for reading.
-func dumpPlugin(env *Env, agent agentinit.Agent, global bool) error {
-	dir := agent.ProjectPlugin
-	if global {
-		dir = agent.UserPlugin
+func dumpPlugin(env *Env, agent agentinit.Agent, local bool) error {
+	dir := agent.UserPlugin
+	if local {
+		dir = agent.ProjectPlugin
 	}
 	for i, f := range agent.Plugin {
 		if i > 0 {
@@ -220,8 +239,8 @@ func dumpPlugin(env *Env, agent agentinit.Agent, global bool) error {
 		fmt.Fprint(env.Stdout, f.Body)
 	}
 	env.progressf("nothing was written%s", asFields(
-		field("to install it here", env.copyable(env.Argv0+" agent-init "+agent.Name)),
-		field("for every repository", env.copyable(env.Argv0+" agent-init "+agent.Name+" --global")),
+		field("to install it for every repository", env.copyable(env.Argv0+" agent-init "+agent.Name)),
+		field("for this repository alone", env.copyable(env.Argv0+" agent-init "+agent.Name+" --local")),
 	))
 	return nil
 }

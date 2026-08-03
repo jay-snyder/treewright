@@ -29,6 +29,13 @@ type fixture struct {
 func newFixture(t *testing.T, extraConfig string) *fixture {
 	t.Helper()
 
+	// HOME is this test's own, which is the same argument as the private tmux
+	// server below, one directory over: the placement `agent-init` installs into
+	// by default is under the user's home, so without this a test of it would
+	// rewrite the developer's own wiring — and a test of anything else would let
+	// their ~/.claude decide what doctor sees.
+	t.Setenv("HOME", t.TempDir())
+
 	repo := gittest.New(t)
 	f := &fixture{Repo: repo, t: t, registry: filepath.Join(repo.Root, "conf")}
 	if err := os.MkdirAll(f.registry, 0o755); err != nil {

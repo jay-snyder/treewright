@@ -17,8 +17,8 @@ import (
 //
 // Three integrations propagate an upgrade on their own and one does not. The
 // shell shim is re-evaluated at every shell start; the tmux snippet is re-read
-// at every server start; the agent plugin in the main checkout is rewritten by
-// the next `agent-init`. What none of that reaches is a worktree: its copy of
+// at every server start; the agent plugin is rewritten wherever it was installed
+// by the next `agent-init`. What none of that reaches is a worktree: its copy of
 // the plugin is made once, when `new` carries it in, and nothing has looked at
 // it since — so a worktree created before an upgrade runs its agent against the
 // old hooks and the old skill for as long as the worktree lives, which is the

@@ -79,7 +79,7 @@ complete -c treewright -n '__fish_seen_subcommand_from resume' -l fresh -d 'run 
 # -F is what turns the argument back into a filename completion: the file is on
 # the caller's disk, which treewright knows nothing about.
 complete -c treewright -n '__fish_seen_subcommand_from new move resume' -l prompt-file -r -F -d 'a file holding the brief'
-complete -c treewright -n '__fish_seen_subcommand_from agent-init' -l global -d 'install it for every repository instead of this one'
+complete -c treewright -n '__fish_seen_subcommand_from agent-init' -l local -d 'install it for this repository alone, not every one'
 complete -c treewright -n '__fish_seen_subcommand_from agent-init' -l print -d 'print the plugin files instead of installing them'
 
 # tw calls the treewright function, and --wraps inherits its completions. The
