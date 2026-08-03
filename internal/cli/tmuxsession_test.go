@@ -880,13 +880,22 @@ func TestOnlyAFailureStartsAFreshAgent(t *testing.T) {
 func TestTheFallbackRunsOnceAndOnlyOnce(t *testing.T) {
 	// Counted in a file rather than in the output, which names the fresh command
 	// a second time in the line reporting what exited.
-	runs := filepath.Join(t.TempDir(), "runs")
+	//
+	// The file is named relative to a directory this test stands in, rather than
+	// by its absolute path, because the assertion below is about which command
+	// the report names. macOS puts a test's temporary directory under
+	// /var/folders/<two levels of gibberish>, which is enough on its own to push
+	// the command past the eighty columns abbreviated cuts it to — so the report
+	// named the right command and said so with a "…" on the end, and the test
+	// failed over the wrapper working.
+	dir := t.TempDir()
+	t.Chdir(dir)
 	out, status := runScript(t, windowCommand{
 		Command: "echo nothing to continue >&2; exit 1",
-		Fresh:   "echo ran >> " + runs + "; exit 4",
+		Fresh:   "echo ran >> runs; exit 4",
 	}, 0)
 
-	body, err := os.ReadFile(runs)
+	body, err := os.ReadFile(filepath.Join(dir, "runs"))
 	if err != nil {
 		t.Fatalf("the fresh command never ran: %v", err)
 	}
@@ -898,7 +907,7 @@ func TestTheFallbackRunsOnceAndOnlyOnce(t *testing.T) {
 	}
 	// And the window reports the command that actually failed, which by now is
 	// not the one it was asked to run.
-	if !strings.Contains(out, `"echo ran >> `+runs+`; exit 4" exited 4`) {
+	if !strings.Contains(out, `"echo ran >> runs; exit 4" exited 4`) {
 		t.Errorf("output = %q, want the fresh command named as what exited", out)
 	}
 	if status != 4 {
