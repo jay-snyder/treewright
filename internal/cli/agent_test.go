@@ -17,18 +17,9 @@ import (
 // agent key carrying it into worktrees, and doctor catching the half-installed
 // states. The signal protocol itself is covered in signal_test.go.
 
-// agentFixture is a fixture whose HOME is this test's own, so the developer's
-// real ~/.claude can never decide what these tests see — in either direction —
-// and so a test of --global has somewhere harmless to install.
-func agentFixture(t *testing.T, extraConfig string) *fixture {
-	t.Helper()
-	f := newFixture(t, extraConfig)
-	t.Setenv("HOME", t.TempDir())
-	return f
-}
-
-// pluginPaths is every file the claude module installs, relative to a checkout.
-func pluginPaths(t *testing.T) []string {
+// pluginFiles is every file the claude module installs, relative to whichever
+// directory the plugin was installed into.
+func pluginFiles(t *testing.T) []string {
 	t.Helper()
 	agent, ok := agentinit.Lookup("claude")
 	if !ok {
@@ -36,19 +27,77 @@ func pluginPaths(t *testing.T) []string {
 	}
 	var out []string
 	for _, f := range agent.Plugin {
-		out = append(out, agent.ProjectPlugin+"/"+f.Path)
+		out = append(out, f.Path)
 	}
 	return out
 }
 
-func TestAgentInitInstallsThePluginIntoTheMainCheckout(t *testing.T) {
-	f := agentFixture(t, "")
+// pluginPaths is the same files relative to a checkout, which is where --local
+// puts them and where the carry takes them.
+func pluginPaths(t *testing.T) []string {
+	t.Helper()
+	var out []string
+	for _, rel := range pluginFiles(t) {
+		out = append(out, ".claude/skills/treewright/"+rel)
+	}
+	return out
+}
+
+// TestAgentInitCoversEveryRepositoryByDefault is the placement with no trap in
+// it: one install under the user's own home, covering every checkout the agent
+// is started in — worktrees included, with nothing to carry and no repository
+// required to have one.
+func TestAgentInitCoversEveryRepositoryByDefault(t *testing.T) {
+	f := newFixture(t, "")
+	home := os.Getenv("HOME")
+	t.Chdir(t.TempDir()) // outside any repository at all
 
 	r := f.exec("agent-init", "claude")
 	if r.err != nil {
 		t.Fatalf("agent-init claude: %v\n%s", r.err, r.both())
 	}
 	// stdout is the directory alone, so the path can be piped somewhere useful.
+	want := filepath.Join(home, ".claude", "skills", "treewright")
+	if got := strings.TrimSpace(r.stdout); got != want {
+		t.Errorf("stdout = %q, want exactly %q", got, want)
+	}
+	for _, rel := range pluginFiles(t) {
+		if _, err := os.Stat(filepath.Join(want, filepath.FromSlash(rel))); err != nil {
+			t.Errorf("%s was not installed: %v", rel, err)
+		}
+	}
+
+	// Nothing to carry at user scope, and no .gitignore to speak of: ~/.claude
+	// covers every directory the agent is ever started in, and belongs to no
+	// repository.
+	if strings.Contains(r.stderr, `agent = "claude"`) {
+		t.Errorf("stderr = %q, want no carry advice for a placement that needs none", r.stderr)
+	}
+	if strings.Contains(r.stderr, ".gitignore") {
+		t.Errorf("stderr = %q, want no ignore advice for a directory no repository holds", r.stderr)
+	}
+	// Hooks do not reload themselves, so a session already open stays wired to
+	// whatever it loaded at start.
+	if !strings.Contains(r.stderr, "/reload-plugins") {
+		t.Errorf("stderr = %q, want the reload named", r.stderr)
+	}
+	// And the placement it did not take is named, the way the second option
+	// always is.
+	if !strings.Contains(r.stderr, "agent-init claude --local") {
+		t.Errorf("stderr = %q, want the per-repository placement offered", r.stderr)
+	}
+}
+
+// TestAgentInitLocalInstallsThePluginIntoTheMainCheckout is the placement for a
+// machine where treewright's wiring should touch one repository and no other.
+// It is also the one with the carry trap in it, which is why it says so.
+func TestAgentInitLocalInstallsThePluginIntoTheMainCheckout(t *testing.T) {
+	f := newFixture(t, "")
+
+	r := f.exec("agent-init", "claude", "--local")
+	if r.err != nil {
+		t.Fatalf("agent-init claude --local: %v\n%s", r.err, r.both())
+	}
 	want := filepath.Join(f.MainDir, ".claude", "skills", "treewright") + "\n"
 	if r.stdout != want {
 		t.Errorf("stdout = %q, want exactly %q", r.stdout, want)
@@ -57,6 +106,11 @@ func TestAgentInitInstallsThePluginIntoTheMainCheckout(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(f.MainDir, filepath.FromSlash(rel))); err != nil {
 			t.Errorf("%s was not installed: %v", rel, err)
 		}
+	}
+	// Nothing under the user's home was touched: this placement is the one that
+	// was asked for.
+	if _, err := os.Stat(filepath.Join(os.Getenv("HOME"), ".claude")); err == nil {
+		t.Error("--local wrote into the user's own directory as well")
 	}
 
 	// The instructions are narration: the carry the plugin needs to reach a
@@ -68,8 +122,6 @@ func TestAgentInitInstallsThePluginIntoTheMainCheckout(t *testing.T) {
 	if !strings.Contains(r.stderr, ".gitignore") {
 		t.Errorf("stderr = %q, want the reader told the plugin is not ignored for them", r.stderr)
 	}
-	// Hooks do not reload themselves, so a session already open stays wired to
-	// whatever it loaded at start.
 	if !strings.Contains(r.stderr, "/reload-plugins") {
 		t.Errorf("stderr = %q, want the reload named", r.stderr)
 	}
@@ -79,7 +131,7 @@ func TestAgentInitInstallsThePluginIntoTheMainCheckout(t *testing.T) {
 // of a settings file: run again after an upgrade it rewrites what changed and
 // says so, where a pasted fragment could only ever be pasted a second time.
 func TestAgentInitUpdatesRatherThanRepeats(t *testing.T) {
-	f := agentFixture(t, "")
+	f := newFixture(t, "")
 	f.mustRun("agent-init", "claude")
 
 	r := f.exec("agent-init", "claude")
@@ -92,7 +144,7 @@ func TestAgentInitUpdatesRatherThanRepeats(t *testing.T) {
 
 	// What an upgrade looks like from here: a file left by an older treewright,
 	// named on the way past rather than silently replaced.
-	hooks := filepath.Join(f.MainDir, ".claude", "skills", "treewright", "hooks", "hooks.json")
+	hooks := filepath.Join(os.Getenv("HOME"), ".claude", "skills", "treewright", "hooks", "hooks.json")
 	if err := os.WriteFile(hooks, []byte(`{"hooks":{"Stop":[]}}`), 0o644); err != nil {
 		t.Fatalf("write the stale hooks: %v", err)
 	}
@@ -113,17 +165,19 @@ func TestAgentInitUpdatesRatherThanRepeats(t *testing.T) {
 // hooks that will run on every transition of an agent, and tmux-init prints by
 // default for the same reason.
 func TestAgentInitPrintWritesNothing(t *testing.T) {
-	f := agentFixture(t, "")
+	f := newFixture(t, "")
 
 	r := f.exec("agent-init", "claude", "--print")
 	if r.err != nil {
 		t.Fatalf("agent-init claude --print: %v\n%s", r.err, r.both())
 	}
-	for _, rel := range pluginPaths(t) {
-		if !strings.Contains(r.stdout, "==> "+rel+" <==") {
+	// Each file under the path it would be written to, which for the default
+	// placement is the user's own directory.
+	for _, rel := range pluginFiles(t) {
+		if !strings.Contains(r.stdout, "==> ~/.claude/skills/treewright/"+rel+" <==") {
 			t.Errorf("stdout does not announce %s:\n%s", rel, r.stdout)
 		}
-		if _, err := os.Stat(filepath.Join(f.MainDir, filepath.FromSlash(rel))); err == nil {
+		if _, err := os.Stat(filepath.Join(os.Getenv("HOME"), ".claude", "skills", "treewright", filepath.FromSlash(rel))); err == nil {
 			t.Errorf("%s was written by a command that only prints", rel)
 		}
 	}
@@ -133,46 +187,36 @@ func TestAgentInitPrintWritesNothing(t *testing.T) {
 	if !strings.Contains(r.stderr, "nothing was written") {
 		t.Errorf("stderr = %q, want it said that nothing was installed", r.stderr)
 	}
-}
 
-// TestAgentInitGlobalNeedsNoRepository covers the placement offered second:
-// every repository at once, treewright-managed or not, which is safe because
-// signal is silent outside a treewright window.
-func TestAgentInitGlobalNeedsNoRepository(t *testing.T) {
-	f := agentFixture(t, "")
-	home := os.Getenv("HOME")
-	t.Chdir(t.TempDir()) // outside any repository at all
-
-	r := f.exec("agent-init", "claude", "--global")
-	if r.err != nil {
-		t.Fatalf("agent-init claude --global: %v\n%s", r.err, r.both())
+	// And with --local the headers name where that placement would put them,
+	// since reading the files is also reading where they land.
+	local := f.exec("agent-init", "claude", "--print", "--local")
+	if local.err != nil {
+		t.Fatalf("agent-init claude --print --local: %v\n%s", local.err, local.both())
 	}
-	if got, want := strings.TrimSpace(r.stdout), filepath.Join(home, ".claude", "skills", "treewright"); got != want {
-		t.Errorf("stdout = %q, want %q", got, want)
-	}
-	if _, err := os.Stat(filepath.Join(home, ".claude", "skills", "treewright", "hooks", "hooks.json")); err != nil {
-		t.Errorf("the user-level plugin was not installed: %v", err)
-	}
-	// Nothing to carry at user scope: ~/.claude covers every directory the
-	// agent is ever started in, worktrees included.
-	if strings.Contains(r.stderr, `agent = "claude"`) {
-		t.Errorf("stderr = %q, want no carry advice for a placement that needs none", r.stderr)
+	for _, rel := range pluginPaths(t) {
+		if !strings.Contains(local.stdout, "==> "+rel+" <==") {
+			t.Errorf("stdout does not announce %s:\n%s", rel, local.stdout)
+		}
+		if _, err := os.Stat(filepath.Join(f.MainDir, filepath.FromSlash(rel))); err == nil {
+			t.Errorf("%s was written by a command that only prints", rel)
+		}
 	}
 }
 
-// TestAgentInitOutsideARepositorySaysWhatToDo: the per-repo install is the only
-// form that needs a config, and the error names the two that do not.
-func TestAgentInitOutsideARepositorySaysWhatToDo(t *testing.T) {
-	f := agentFixture(t, "")
+// TestAgentInitLocalOutsideARepositorySaysWhatToDo: --local is the only form
+// that needs a config, and the error names the placement that does not.
+func TestAgentInitLocalOutsideARepositorySaysWhatToDo(t *testing.T) {
+	f := newFixture(t, "")
 	registry := t.TempDir() // empty, so nothing resolves
 	t.Setenv("TREEWRIGHT_CONFIG_DIR", registry)
 	t.Chdir(t.TempDir())
 
-	r := f.exec("agent-init", "claude")
+	r := f.exec("agent-init", "claude", "--local")
 	if r.err == nil {
-		t.Fatalf("agent-init claude succeeded outside a repository:\n%s", r.both())
+		t.Fatalf("agent-init claude --local succeeded outside a repository:\n%s", r.both())
 	}
-	if !strings.Contains(r.err.Error(), "--global") {
+	if !strings.Contains(flat(r.err.Error()), "cover every repository") {
 		t.Errorf("err = %v, want the placement that needs no config named", r.err)
 	}
 }
@@ -265,7 +309,7 @@ func TestAgentInitRejectsAnUnknownAgent(t *testing.T) {
 // named on the carried list rather than the directory holding them, so a
 // worktree cannot arrive with the skill and no hooks.
 func TestAgentKeyCarriesThePluginAndTheSettings(t *testing.T) {
-	f := agentFixture(t, "agent = 'claude'\n")
+	f := newFixture(t, "agent = 'claude'\n")
 	settings := filepath.Join(f.MainDir, ".claude", "settings.local.json")
 	if err := os.MkdirAll(filepath.Dir(settings), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
@@ -273,7 +317,7 @@ func TestAgentKeyCarriesThePluginAndTheSettings(t *testing.T) {
 	if err := os.WriteFile(settings, []byte(`{"permissions":{}}`), 0o644); err != nil {
 		t.Fatalf("write settings: %v", err)
 	}
-	f.mustRun("agent-init", "claude")
+	f.mustRun("agent-init", "claude", "--local")
 
 	f.mustRun("new", "alpha")
 	for _, rel := range append(pluginPaths(t), ".claude/settings.local.json") {
@@ -349,7 +393,7 @@ func TestSetupDetectsAnInstalledAgent(t *testing.T) {
 // ---- doctor ------------------------------------------------------------------
 
 func TestDoctorWarnsWhenTheAgentReportsNoState(t *testing.T) {
-	f := agentFixture(t, "agent = 'claude'\n")
+	f := newFixture(t, "agent = 'claude'\n")
 
 	found := findings(t, f)
 	if got := has(t, found, "not wired to report state"); got != "warn" {
@@ -365,8 +409,8 @@ func TestDoctorNamesTheCarryTrap(t *testing.T) {
 	// checkout, where it reaches the MAIN window and no worktree at all. The
 	// module is sniffed from the default command, claude, which is the guess a
 	// warn-level hint is allowed to rest on.
-	f := agentFixture(t, "")
-	f.mustRun("agent-init", "claude")
+	f := newFixture(t, "")
+	f.mustRun("agent-init", "claude", "--local")
 
 	if got := has(t, findings(t, f), "reaches no worktree"); got != "warn" {
 		t.Errorf("finding = %q, want the trap warned about", got)
@@ -390,8 +434,8 @@ func TestDoctorNamesTheCarryTrap(t *testing.T) {
 // worktree made after it. The sentence at install time scrolls away; the state
 // does not, which is what doctor is for.
 func TestDoctorNamesAPluginNothingIgnores(t *testing.T) {
-	f := agentFixture(t, "agent = 'claude'\n")
-	f.mustRun("agent-init", "claude")
+	f := newFixture(t, "agent = 'claude'\n")
+	f.mustRun("agent-init", "claude", "--local")
 
 	if got := has(t, findings(t, f), "git neither ignores nor tracks .claude/skills/treewright"); got != "warn" {
 		t.Errorf("finding = %q, want the unignored plugin warned about", got)
@@ -419,8 +463,8 @@ func TestDoctorNamesAPluginNothingIgnores(t *testing.T) {
 // treewright would write, so a hook mapping that has moved on is a warning
 // rather than an installation that looks finished and reports the wrong words.
 func TestDoctorNoticesAPluginAnOlderTreewrightWrote(t *testing.T) {
-	f := agentFixture(t, "agent = 'claude'\n")
-	f.mustRun("agent-init", "claude")
+	f := newFixture(t, "agent = 'claude'\n")
+	f.mustRun("agent-init", "claude", "--local")
 	stalePlugin(t, f.MainDir)
 
 	if got := has(t, findings(t, f), "not what this treewright would write"); got != "warn" {
@@ -428,7 +472,7 @@ func TestDoctorNoticesAPluginAnOlderTreewrightWrote(t *testing.T) {
 	}
 
 	// And the fix is the command it names, which is the point of naming it.
-	f.mustRun("agent-init", "claude")
+	f.mustRun("agent-init", "claude", "--local")
 	if got := has(t, findings(t, f), "not what this treewright would write"); got != "" {
 		t.Errorf("finding = %q, want the warning gone after the rerun", got)
 	}
@@ -438,7 +482,7 @@ func TestDoctorNoticesAPluginAnOlderTreewrightWrote(t *testing.T) {
 // wired by an older treewright's paste still works, and doctor says so in the
 // terms that matter — it is a copy nothing can update.
 func TestDoctorNamesHooksLeftInASettingsFile(t *testing.T) {
-	f := agentFixture(t, "agent = 'claude'\n")
+	f := newFixture(t, "agent = 'claude'\n")
 	settings := filepath.Join(f.MainDir, ".claude", "settings.local.json")
 	if err := os.MkdirAll(filepath.Dir(settings), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
@@ -470,7 +514,7 @@ func TestDoctorNamesHooksLeftInASettingsFile(t *testing.T) {
 // lines — the tmux.conf run-shell and the startup-file eval — stay spelled
 // treewright on purpose, being read by programs rather than typed.
 func TestDoctorSpeaksTheNameTheUserTyped(t *testing.T) {
-	agentFixture(t, "agent = 'claude'\n")
+	newFixture(t, "agent = 'claude'\n")
 
 	var out, errOut bytes.Buffer
 	// The error is not the subject: a machine without tmux fails the tmux check

@@ -293,16 +293,19 @@ The hooks also hold the rule the skill teaches. A tool call that would change
 two commands that hand the work over instead. Reading another worktree is never
 blocked — that is how you review it.
 
-What it writes is a plugin — `.claude/skills/treewright/` in your main checkout,
-which claude loads whole on its next start. Nothing else is edited: no settings
-file, no dotfile, no `.gitignore`. Set `agent = "claude"` in the config and every
-new worktree gets a copy, so the repos you use treewright in are wired and the
-ones you don't are left alone.
+What it writes is a plugin — `~/.claude/skills/treewright/`, which claude loads
+whole on its next start. One copy, covering every worktree you'll ever make.
+Nothing else is edited: no settings file, no dotfile, no `.gitignore`. Repos you
+don't use treewright in are covered too, and that costs nothing: outside a
+treewright window, `signal` does nothing and says nothing.
 
-Since it won't write your `.gitignore` for you, that directory shows up as
+Want it in one repository and no other? `tw agent-init claude --local` puts the
+same plugin in your main checkout instead. Then set `agent = "claude"` in the
+config, or the wiring reaches your MAIN window and no worktree at all — and since
+treewright won't write your `.gitignore` for you, that directory shows up as
 untracked until you decide what it is: ignore it and the wiring stays yours,
-commit it and everyone who clones gets it. `tw doctor` keeps mentioning it until
-you've picked one.
+commit it and everyone who clones gets it. `tw doctor` keeps mentioning both
+until you've picked.
 
 Already have an agent running? `tw send eng-2318 "rebase on main first"` types
 one line into its window and presses Enter — where `--prompt` only reaches an
@@ -345,10 +348,11 @@ in `~/.tmux.conf` both ask the binary for their own text, so a new shell and a
 new tmux server pick up the new version for free. Three things don't, and all
 three are quiet about it:
 
-- **Your worktrees.** Each got its copy of the agent plugin when it was created,
-  and nothing looks at it again — so one made before the upgrade keeps running
-  the old hooks and the old skill for as long as it lives. `tw refresh` rewrites
-  every copy and names what moved where.
+- **The agent plugin on disk.** Its files are whatever the treewright that wrote
+  them produced, and nothing looks at them again — so the copy in `~/.claude`,
+  and each copy a worktree got when it was created if you went `--local`, keeps
+  running the old hooks and the old skill. `tw refresh` rewrites every copy and
+  names what moved where.
 - **The tmux server you're attached to.** It keeps what it loaded at start,
   which may have been weeks ago. `tw refresh` reloads the bindings onto whatever
   keys they're already on.
@@ -367,22 +371,23 @@ touches the network, and only when you ask it to.
 
 ## Uninstalling
 
-Short list, on purpose: treewright writes its own registry and nothing else
+Short list, on purpose: two directories named after treewright, and nothing else
 outside a repository. Everything else is a line you pasted in yourself.
 
 **Take the worktrees back first, while treewright is still here to do it** —
 afterwards they're ordinary git worktrees, removed one at a time by hand:
 
 ```sh
-tw prune --yes                      # every merged, clean worktree
-tw rm <slug>                        # whatever prune left
-brew uninstall --cask treewright    # or: rm $(go env GOPATH)/bin/treewright
-rm -r ~/.config/treewright          # the one thing it wrote for itself
+tw prune --yes                        # every merged, clean worktree
+tw rm <slug>                          # whatever prune left
+brew uninstall --cask treewright      # or: rm $(go env GOPATH)/bin/treewright
+rm -r ~/.config/treewright            # the registry
+rm -r ~/.claude/skills/treewright     # the agent plugin, if you installed it
 ```
 
 Then delete the `shell-init` line from your shell startup file and the
-`tmux-init` line from `~/.tmux.conf`. Agent hooks and skills were per-repo, so
-they leave with the repo. Leftover tmux sessions close with
+`tmux-init` line from `~/.tmux.conf`. A plugin you installed with `--local` lives
+in the repo and leaves with it. Leftover tmux sessions close with
 `tmux kill-session -t <repo>`.
 
 ## Questions you might have

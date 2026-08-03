@@ -602,8 +602,9 @@ func checkAgentWiring(env *Env, r *report, cfg *config.Config) {
 		r.addf(levelOK, "agent", "%s reports state through its plugin", module.Name)
 	}
 
-	// Asked only of a plugin that is actually in the checkout: --global puts it
-	// under the user's home directory, where no repository has an opinion.
+	// Asked only of a plugin that is actually in the checkout: the default
+	// placement is under the user's home directory, where no repository has an
+	// opinion — nothing to ignore, and nothing to carry.
 	if project != pluginAbsent {
 		checkPluginIsIgnored(r, cfg, module)
 		checkWorktreePlugins(env, r, cfg, module)

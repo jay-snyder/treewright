@@ -136,8 +136,9 @@ only be layered on, where rewriting the files treewright wrote makes
 changed ones are named, so the run says what the upgrade moved.
 
 `--print` keeps the read-before-you-run path that made tmux-init print by
-default — these are hooks that will run on every transition of an agent — and
-it is the one form that still needs no repository at all.
+default — these are hooks that will run on every transition of an agent. It
+prints each file under the path that placement would write it to, so reading the
+files is also reading where they land.
 
 **Three consequences of the plugin, none of them free.** The skill is
 namespaced: `/treewright:treewright`, where the same file without the manifest
@@ -399,10 +400,10 @@ the check the pasted fragment made impossible.
 ### The copy in a worktree, and why it needed a command of its own
 
 The plugin is treewright's to rewrite, and for a long time only one of its copies
-was actually rewritten. `agent-init` writes to the main checkout — run from
-inside a worktree it resolves the config and writes to the main checkout too, not
-to where you are standing — and the copy in a worktree is made once, by the
-carry, at `new` time. Nothing looked at it again: `doctor` inspected the main
+was actually rewritten. `agent-init --local` writes to the main checkout — run
+from inside a worktree it resolves the config and writes to the main checkout
+too, not to where you are standing — and the copy in a worktree is made once, by
+the carry, at `new` time. Nothing looked at it again: `doctor` inspected the main
 checkout and the user-level directory and enumerated no worktrees at all.
 
 So a worktree created the day before an upgrade ran its agent against the old
@@ -431,23 +432,46 @@ treewright itself" in [`design-notes.md`](design-notes.md).
 
 ### Where the wiring goes, and the trap between the placements
 
-Per-repo is the default, and it is the main checkout's
-`.claude/skills/treewright/`: treewright is a tool you use in *some*
-repositories, and the wiring should follow that rather than assert itself in
-every checkout on the machine. Machine-wide (`--global`, into the agent's own
-`~/.claude/skills/treewright/`) is offered second, for someone who does want
-every repository covered at once, and costs little because `signal` silently
-no-ops outside treewright windows.
+Machine-wide is the default, and it is the agent's own
+`~/.claude/skills/treewright/`: one install, covering every checkout the agent is
+ever started in, worktrees included. `--local` puts it in the main checkout's
+`.claude/skills/treewright/` instead, for a machine where treewright's wiring
+should touch one repository and no other.
 
-The per-repo placement has a trap, and closing it is what `agent = "claude"` is
-for. That directory is uncommitted — treewright invented the path, so nothing
-ignores it and nothing tracks it until somebody says which — so **every
-worktree treewright creates starts without it**, and wiring placed there reaches
-the MAIN window and no worktree at all unless something carries it. Project-scope
-plugins loading from the start directory rather than the repository root make
-that exact, not approximate. The half-configured state looks finished, which is
-why `doctor` checks for it. The committed project file would work mechanically
-and is not offered: it imposes treewright on every teammate who clones the repo.
+Per-repo was the default for a while, on the argument that treewright is a tool
+you use in *some* repositories and the wiring should follow that rather than
+assert itself in every checkout on the machine. That argument turned out to
+describe the config registry rather than the wiring. A repository treewright does
+not manage has no treewright window in it, so `signal` there does nothing and
+says nothing, `guard` finds no worktree to protect, and the skill describes a
+tool the agent is not being asked to drive — the whole install costs one
+directory nobody looks at. Machine-wide asserts nothing; it just answers the
+question before it is asked.
+
+What per-repo costs is the other side of the ledger, and it recurs. That
+directory is uncommitted — treewright invented the path, so nothing ignores it
+and nothing tracks it until somebody says which — so **every worktree treewright
+creates starts without it**, and wiring placed there reaches the MAIN window and
+no worktree at all unless something carries it. Project-scope plugins loading
+from the start directory rather than the repository root make that exact, not
+approximate. The half-configured state looks finished, which is why `doctor`
+checks for it and why `agent = "claude"` exists to close it — but it is a second
+step, and the person who needs it is by definition the person who has not read
+this far. The user-level placement has no such step: it is current in every
+worktree because there is only ever one copy of it. The committed project file
+would work mechanically and is offered nowhere: it imposes treewright on every
+teammate who clones the repo.
+
+Writing outside a repository by default is a real cost and the reason it is
+acceptable is the rule the whole write list is held to — *whose file is it*.
+`~/.claude/skills/treewright/` is a directory named after treewright, holding
+nothing a person put there, which a developer can find and `rm -r` on the day
+they stop using the tool. What changed with the default is only when the consent
+is given: it used to be the `--global` flag, and it is now running `agent-init`
+at all — a command whose entire purpose is to install the wiring, which prints
+the directory it wrote on stdout and offers `--print` to anyone who wants to read
+the files first. See "What treewright is allowed to write" in
+[`design-notes.md`](design-notes.md).
 
 `.claude/settings.local.json` keeps its place on the carried list, and for a
 different reason than it used to have: it no longer holds hooks, but it does

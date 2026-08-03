@@ -641,36 +641,38 @@ worth reading first.`,
 		},
 		{
 			name:    "agent-init",
-			args:    "[--global] [--print] <agent>",
+			args:    "[--local] [--print] <agent>",
 			summary: "install the plugin that wires an agent to treewright",
-			long: `Installs an agent's plugin into the main checkout of the repository
-you are standing in. It holds two things, one in each direction: the agent's
-own hooks wired to "treewright signal", so the window it runs in says whether
-it is working, waiting on you, or done — the AGENT column of "treewright ls",
-and a marker on the window's name when it needs a person — and a skill
-teaching the agent to drive treewright, from reading what is in flight with
-"treewright ls --json" to starting parallel work with new and a --prompt.
+			long: `Installs an agent's plugin into the agent's own user-level directory,
+covering every repository you work in. It holds two things, one in each
+direction: the agent's own hooks wired to "treewright signal", so the window it
+runs in says whether it is working, waiting on you, or done — the AGENT column
+of "treewright ls", and a marker on the window's name when it needs a person —
+and a skill teaching the agent to drive treewright, from reading what is in
+flight with "treewright ls --json" to starting parallel work with new and a
+--prompt.
 
-For claude that is .claude/skills/treewright/, which claude loads whole as
+For claude that is ~/.claude/skills/treewright/, which claude loads whole as
 treewright@skills-dir the next time it starts. Nothing else is edited: no
-settings file, no dotfile, no .gitignore.
-
-Set agent = "claude" in the repo's config so every new worktree gets a copy;
-without it the plugin reaches the main checkout and no worktree at all.
-"treewright doctor" checks for exactly that gap, and for a plugin left behind
-by an older treewright.
+settings file, no dotfile, no .gitignore. A repository treewright does not
+manage costs nothing by being covered: outside a treewright window, signal does
+nothing, quietly.
 
 stdout is the directory, so the path can be piped. Run it again after
 upgrading treewright: the files are treewright's own, so a second run updates
 the wiring rather than leaving a second copy of it somewhere.
 
---global installs it for every repository instead, treewright-managed or not,
-which is safe: outside a treewright window, signal does nothing, quietly.
+--local installs it into the main checkout of the repository you are standing in
+instead — .claude/skills/treewright/ for claude — and is the one form that needs
+a config. Set agent = "claude" in that config as well, so every new worktree
+gets a copy; without it the plugin reaches the main checkout and no worktree at
+all. "treewright doctor" checks for exactly that gap, and for a plugin left
+behind by an older treewright.
 
 --print writes nothing and prints the files, for reading the hooks before
-they run. It is also the one form that needs no repository.`,
+they run.`,
 			flags: []flagDoc{
-				{"--global", "install it for every repository instead of this one"},
+				{"--local", "install it for this repository alone, not every one"},
 				{"--print", "print the plugin's files instead of installing them"},
 			},
 			run: cmdAgentInit,

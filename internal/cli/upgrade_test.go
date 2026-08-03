@@ -85,8 +85,8 @@ func stalePlugin(t *testing.T, checkout string) {
 // its life, and the report stayed green the whole time — the same frozen copy
 // the plugin exists to abolish, one directory further down.
 func TestDoctorNoticesAWorktreeLeftOnAnOlderPlugin(t *testing.T) {
-	f := agentFixture(t, "agent = 'claude'\n")
-	f.mustRun("agent-init", "claude")
+	f := newFixture(t, "agent = 'claude'\n")
+	f.mustRun("agent-init", "claude", "--local")
 	f.mustRun("new", "alpha")
 	f.mustRun("new", "beta")
 
@@ -124,9 +124,9 @@ func TestDoctorNoticesAWorktreeLeftOnAnOlderPlugin(t *testing.T) {
 // `new` time, so it had nothing to copy — and every worktree older than the
 // wiring stays unwired with nothing to say so.
 func TestDoctorNoticesAWorktreeThePluginNeverReached(t *testing.T) {
-	f := agentFixture(t, "agent = 'claude'\n")
+	f := newFixture(t, "agent = 'claude'\n")
 	f.mustRun("new", "early") // before there is any plugin to carry
-	f.mustRun("agent-init", "claude")
+	f.mustRun("agent-init", "claude", "--local")
 
 	found := findings(t, f)
 	if got := has(t, found, "agent plugin missing from 1 worktree"); got != "warn" {
@@ -147,8 +147,8 @@ func TestDoctorNoticesAWorktreeThePluginNeverReached(t *testing.T) {
 // repository. Repeating it per worktree would turn one misconfiguration into a
 // column of them.
 func TestAnUncarriedWorktreeIsNotReportedTwice(t *testing.T) {
-	f := agentFixture(t, "")
-	f.mustRun("agent-init", "claude")
+	f := newFixture(t, "")
+	f.mustRun("agent-init", "claude", "--local")
 	f.mustRun("new", "alpha")
 
 	found := findings(t, f)
@@ -160,6 +160,31 @@ func TestAnUncarriedWorktreeIsNotReportedTwice(t *testing.T) {
 	}
 }
 
+// TestDoctorIsQuietAboutTheDefaultPlacement is the reversal's whole argument,
+// checked rather than asserted in prose: the user-level plugin has no carry to
+// configure, no repository to ignore it and no per-worktree copy to go stale, so
+// every finding the per-repo placement earns must stay unsaid about it.
+func TestDoctorIsQuietAboutTheDefaultPlacement(t *testing.T) {
+	f := newFixture(t, "agent = 'claude'\n")
+	f.mustRun("agent-init", "claude")
+	f.mustRun("new", "alpha")
+
+	found := findings(t, f)
+	if got := has(t, found, "reports state through its plugin"); got != "ok" {
+		t.Errorf("finding = %q, want the wiring reported ok\nall: %v", got, found)
+	}
+	for _, quiet := range []string{
+		"reaches no worktree",
+		"neither ignores nor tracks",
+		"agent plugin missing from",
+		"agent plugin out of date",
+	} {
+		if got := has(t, found, quiet); got != "" {
+			t.Errorf("%q = %q, want nothing said about a gap this placement does not have\nall: %v", quiet, got, found)
+		}
+	}
+}
+
 // ---- refresh -----------------------------------------------------------------
 
 // TestRefreshNamesWhatMovedInEachCheckout: the interesting run is the one after
@@ -167,8 +192,8 @@ func TestAnUncarriedWorktreeIsNotReportedTwice(t *testing.T) {
 // wiring had gone stale where "updated 6 checkouts" says only that something
 // did.
 func TestRefreshNamesWhatMovedInEachCheckout(t *testing.T) {
-	f := agentFixture(t, "agent = 'claude'\n")
-	f.mustRun("agent-init", "claude")
+	f := newFixture(t, "agent = 'claude'\n")
+	f.mustRun("agent-init", "claude", "--local")
 	f.mustRun("new", "alpha")
 	f.mustRun("new", "beta")
 	stalePlugin(t, f.DirFor("alpha"))
@@ -200,12 +225,37 @@ func TestRefreshNamesWhatMovedInEachCheckout(t *testing.T) {
 	}
 }
 
+// TestRefreshRewritesTheUserLevelPlugin covers the copy the default placement
+// makes, which is the copy most installations have. Being the only one does not
+// make it current: it is a snapshot of whatever treewright wrote it, exactly as a
+// worktree's is, and refresh is what puts it right.
+func TestRefreshRewritesTheUserLevelPlugin(t *testing.T) {
+	f := newFixture(t, "agent = 'claude'\n")
+	f.mustRun("agent-init", "claude")
+	dir := filepath.Join(os.Getenv("HOME"), ".claude", "skills", "treewright")
+	stalePlugin(t, os.Getenv("HOME"))
+
+	r := f.exec("refresh")
+	if r.err != nil {
+		t.Fatalf("refresh: %v\n%s", r.err, r.both())
+	}
+	// Named by its path rather than by a slug, that copy belonging to no
+	// repository.
+	if !strings.Contains(flat(r.stderr), dir+" hooks/hooks.json") {
+		t.Errorf("stderr = %q, want the user-level directory and the file it rewrote", r.stderr)
+	}
+	body, err := os.ReadFile(filepath.Join(dir, "hooks", "hooks.json"))
+	if err != nil || !strings.Contains(string(body), "treewright signal working") {
+		t.Errorf("hooks.json = %q, want the current wiring", body)
+	}
+}
+
 // TestRefreshInstallsNothingNew is the line between this and agent-init. It is
 // the command people run without reading it, and which repositories treewright
 // writes into is a decision `agent-init` exists to take — never one that gets
 // made for you by an upgrade.
 func TestRefreshInstallsNothingNew(t *testing.T) {
-	f := agentFixture(t, "agent = 'claude'\n")
+	f := newFixture(t, "agent = 'claude'\n")
 	f.mustRun("new", "alpha")
 
 	r := f.exec("refresh")
@@ -227,7 +277,7 @@ func TestRefreshInstallsNothingNew(t *testing.T) {
 // of what this can do about it, and leaving it unsaid is how somebody runs
 // refresh after an upgrade and keeps the old wrapper for the rest of the day.
 func TestRefreshSaysWhatItCannotReach(t *testing.T) {
-	f := agentFixture(t, "agent = 'claude'\n")
+	f := newFixture(t, "agent = 'claude'\n")
 	t.Setenv("TREEWRIGHT_EVAL_FILE", filepath.Join(t.TempDir(), "eval"))
 	t.Setenv(shellinit.VersionVar, "000000000000")
 
@@ -251,8 +301,8 @@ func TestRefreshSaysWhatItCannotReach(t *testing.T) {
 // listed, before anything had been refreshed at all, and a user-level copy is
 // still refreshed after it. Only the worktrees are out of reach.
 func TestRefreshScopesTheWarningWhenWorktreesCannotBeListed(t *testing.T) {
-	f := agentFixture(t, "agent = 'claude'\n")
-	f.mustRun("agent-init", "claude")
+	f := newFixture(t, "agent = 'claude'\n")
+	f.mustRun("agent-init", "claude", "--local")
 
 	// With the repository's .git gone, the plugin in the main checkout is still
 	// there to refresh — but the worktrees cannot be listed.

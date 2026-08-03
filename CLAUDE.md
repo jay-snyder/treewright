@@ -286,8 +286,8 @@ on a window that was already open and its command never ran.
 **treewright writes its own registry, its own plugin directory, and nothing
 else.** The whole list is `<config dir>/<name>.toml`,
 `.git/treewright/post-create-*` and `.git/treewright/move-*.patch` inside the
-repo, the worktrees, and `.claude/skills/treewright/` —
-`~/.claude/skills/treewright/` only when `agent-init --global` names it.
+repo, the worktrees, and `~/.claude/skills/treewright/` —
+`<main_dir>/.claude/skills/treewright/` when `agent-init --local` names it.
 Everything else — the shell line, the tmux line, any `.gitignore` entry — is
 *printed for a person to place*. `tmux-init --apply` is not an exception: it
 sets bindings on a running server and writes no file.
@@ -317,10 +317,12 @@ per-project file it forgets to carry — that omission puts the file in the main
 checkout and in no worktree, which is the trap `agent = "claude"` exists to
 close. It names each plugin file rather than the directory, because `carryOne`
 copies files and skips directories, and a `carry_files` entry naming a
-directory has no meaning for the warn-when-missing rule. Per-repo is the
-placement `agent-init` leads with, because treewright is a tool you use in some
-repositories and not others; `--global` is the second option it names, never the
-first. treewright writes to no `.gitignore` and generates none.
+directory has no meaning for the warn-when-missing rule. That trap is why the
+placement `agent-init` leads with is the user-level one: one copy covers every
+worktree, made and to be made, where a per-repo copy needs the carry configured
+as a second step nobody hears about until doctor says so. `--local` is the
+second option it names, never the first, and the carry is what makes it work.
+treewright writes to no `.gitignore` and generates none.
 
 **What ships as a file is checked in as a file, and named in Go one at a
 time.** Two directories work this way — `internal/agentinit/plugins/<agent>/`
@@ -624,9 +626,11 @@ Commits are co-authored with the trailer.
 
 `newFixture(t, extraConfig)` in `internal/cli/cli_test.go` is the workhorse: a
 real git repo with a bare origin, a config registry pointing at it, an inert
-`claude` stub first on `PATH`, and a **private tmux server** (own socket dir, own
-`-L` label, killed on cleanup) so tests never touch your own sessions. Never call
-bare `tmux` in a test — go through the package, which honors
+`claude` stub first on `PATH`, a **private tmux server** (own socket dir, own
+`-L` label, killed on cleanup) so tests never touch your own sessions, and a
+**`HOME` of its own** — `agent-init` installs into `~/.claude/skills/treewright/`
+by default, so without it a test of the plugin would rewrite the maintainer's own
+wiring. Never call bare `tmux` in a test — go through the package, which honors
 `TREEWRIGHT_TMUX_LABEL`.
 
 Fixture helpers: `exec` (streams kept apart), `run`/`mustRun` (combined),

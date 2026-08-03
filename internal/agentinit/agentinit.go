@@ -83,17 +83,19 @@ type Agent struct {
 	ProjectSettings string
 	UserSettings    string
 
-	// ProjectPlugin is the directory the agent loads treewright's plugin from,
-	// relative to a checkout's root, and is where the wiring belongs by
-	// default: a repository you use treewright in gets it, and one you do not
-	// stays untouched. UserPlugin is the agent's own user-level directory —
-	// what `agent-init --global` installs into — for someone who wants every
-	// repository covered at once. It keeps the User prefix to match
-	// UserSettings beside it, those being one place in the agent's own terms;
-	// the flag is spelled for what it does to the machine rather than for where
-	// the agent happens to keep it.
-	ProjectPlugin string
+	// UserPlugin is the agent's own user-level directory, and is where the
+	// wiring belongs by default: one install covers every checkout the agent is
+	// ever started in, worktrees included, where a per-repo copy reaches the
+	// main checkout and nothing else until something carries it. ProjectPlugin
+	// is the directory the agent loads a checkout's own plugin from, relative
+	// to its root — what `agent-init --local` installs into — for a machine
+	// where treewright's wiring should touch one repository and no other. Both
+	// keep the names the agent uses for the two scopes, matching UserSettings
+	// and ProjectSettings above; the flag is spelled `--local` instead, that
+	// being git's own word for the scope of a repository and one every user of
+	// this tool has typed.
 	UserPlugin    string
+	ProjectPlugin string
 
 	// Plugin is what goes in either of them — the agent's own hooks wired to
 	// `treewright signal`, the skill teaching it to drive treewright, and

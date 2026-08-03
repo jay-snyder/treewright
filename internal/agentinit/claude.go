@@ -9,9 +9,10 @@ import _ "embed"
 // a .claude-plugin/plugin.json manifest. Claude Code loads it as
 // `treewright@skills-dir` on its next start, with no marketplace, no install
 // step, and no settings file edited. The layout, which is the layout of
-// plugins/claude in this package:
+// plugins/claude in this package — in the user's own skills directory by
+// default, in a checkout's with --local, the tail being the same either way:
 //
-//	.claude/skills/treewright/
+//	~/.claude/skills/treewright/
 //	├── SKILL.md                    the driving guide
 //	├── .claude-plugin/plugin.json  the manifest that makes it a plugin
 //	└── hooks/hooks.json            the wiring, in settings' own hooks format
@@ -64,8 +65,8 @@ var claude = Agent{
 	ResumeCommand:   "claude --continue {prompt}",
 	ProjectSettings: ".claude/settings.local.json",
 	UserSettings:    "~/.claude/settings.json",
-	ProjectPlugin:   ".claude/skills/treewright",
 	UserPlugin:      "~/.claude/skills/treewright",
+	ProjectPlugin:   ".claude/skills/treewright",
 	// The plugin's manifest, in both senses. Each file is checked in under
 	// plugins/claude and named here, so the bytes are a real file a contributor
 	// can read, lint and point `claude plugin validate` at — while what *ships*
