@@ -12,6 +12,7 @@ import (
 
 	"github.com/jay-snyder/treewright/internal/config"
 	"github.com/jay-snyder/treewright/internal/gittest"
+	"github.com/jay-snyder/treewright/internal/testenv"
 )
 
 // These tests cover where a window is put, rather than what is in it: one session
@@ -742,13 +743,227 @@ func TestAHeldWindowNamesItsCommandWithoutRepeatingIt(t *testing.T) {
 	}
 }
 
+// ---- the fresh agent behind a resume that never got going -------------------
+
+// runScript runs a window's script the way tmux does — one shell, stdin at
+// /dev/null so the read that holds a window open returns at once — with a fake
+// clock ahead of the real date on PATH. It returns everything the pane would
+// have shown and the status the window exited with.
+//
+// $TMUX and $TMUX_PANE are taken away because the held-open path aims its tmux
+// calls at the pane it is running in, and a developer running the suite from
+// inside tmux would otherwise hand it their own.
+func runScript(t *testing.T, run windowCommand, elapsed int) (output string, status int) {
+	t.Helper()
+	cmd := exec.Command("sh", "-c", run.script())
+	cmd.Env = append(os.Environ(),
+		"PATH="+fakeClock(t, elapsed)+string(os.PathListSeparator)+os.Getenv("PATH"),
+		"TMUX=", "TMUX_PANE=")
+	out, err := cmd.CombinedOutput()
+	var exit *exec.ExitError
+	if errors.As(err, &exit) {
+		status = exit.ExitCode()
+	}
+	return string(out), status
+}
+
+// fakeClock writes a `date` ahead of the real one on PATH and returns the
+// directory holding it: the same second the first time it is asked, then elapsed
+// seconds later. A negative elapsed makes it fail instead, which is a machine
+// whose date cannot answer +%s.
+func fakeClock(t *testing.T, elapsed int) string {
+	t.Helper()
+	dir := t.TempDir()
+	body := "#!/bin/sh\nexit 127\n"
+	if elapsed >= 0 {
+		// The script asks twice, so the first call leaves a mark and the second
+		// finds it. Nothing else in a window's script runs `date`.
+		body = "#!/bin/sh\n" +
+			`if [ -f "$0.asked" ]; then echo ` + strconv.Itoa(1000+elapsed) +
+			`; else : > "$0.asked"; echo 1000; fi` + "\n"
+	}
+	if err := os.WriteFile(filepath.Join(dir, "date"), []byte(body), 0o755); err != nil {
+		t.Fatalf("write the fake date: %v", err)
+	}
+	return dir
+}
+
+// TestAResumeThatRanForAWhileIsHeldOpen is the direction the fallback must fail
+// in, and the case the whole timing guard exists for.
+//
+// An agent that ran for an hour and then died leaves its stack trace on screen,
+// and that is what the held-open window is for. Starting a fresh agent over it
+// takes the alternate screen and erases the one thing the user needs — so a
+// failure is a recovery only where the command never got going at all.
+//
+// The clock is faked rather than waited out: five real seconds per case is a
+// slow suite bought with nothing, and the fake is aimed at the mechanism itself.
+func TestAResumeThatRanForAWhileIsHeldOpen(t *testing.T) {
+	failed := windowCommand{Command: "echo the agent died >&2; exit 3", Fresh: "echo FRESH-AGENT"}
+
+	t.Run("a command that never got going", func(t *testing.T) {
+		out, status := runScript(t, failed, neverGotGoing-1)
+		if !strings.Contains(out, "FRESH-AGENT") {
+			t.Errorf("output = %q, want the fresh command to have run", out)
+		}
+		if !strings.Contains(out, "starting a fresh agent") {
+			t.Errorf("output = %q, want the fallback announced rather than applied silently", out)
+		}
+		// The fresh command succeeded, so the window closes on its status rather
+		// than being held open over a failure that has been dealt with.
+		if status != 0 || strings.Contains(out, heldOpenNotice) {
+			t.Errorf("status = %d, output = %q, want the window closed on the fresh command", status, out)
+		}
+	})
+
+	t.Run("a command that ran and then died", func(t *testing.T) {
+		out, status := runScript(t, failed, neverGotGoing)
+		if strings.Contains(out, "FRESH-AGENT") {
+			t.Errorf("output = %q, want no fresh agent over output the user needs", out)
+		}
+		if !strings.Contains(out, "the agent died") || !strings.Contains(out, heldOpenNotice) {
+			t.Errorf("output = %q, want the window held open on what failed", out)
+		}
+		if status != 3 {
+			t.Errorf("status = %d, want the failing command's own 3", status)
+		}
+	})
+
+	t.Run("no clock to read", func(t *testing.T) {
+		// With no usable date there is no telling the two apart, and the answer
+		// that cannot erase anything is the one to give: what happened before
+		// any of this existed.
+		out, _ := runScript(t, failed, -1)
+		if strings.Contains(out, "FRESH-AGENT") {
+			t.Errorf("output = %q, want no fallback where nothing timed the command", out)
+		}
+		if !strings.Contains(out, heldOpenNotice) {
+			t.Errorf("output = %q, want the window held open as it was before", out)
+		}
+	})
+}
+
+// TestOnlyAFailureStartsAFreshAgent is the other half of the discrimination, and
+// the half that has nothing to do with the clock: a command that finished, and
+// one the user stopped, are both left exactly as they are.
+//
+// The clock says "brief" throughout, so the status is the only thing deciding.
+// A resume the user quits with Ctrl-C matters most: restarting an agent somebody
+// has just closed is worse than useless.
+func TestOnlyAFailureStartsAFreshAgent(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		command string
+		status  int
+	}{
+		{"a resume that finished", "echo bye", 0},
+		{"a resume the user interrupted", "sh -c 'exit 130'", 130},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			out, status := runScript(t, windowCommand{Command: tc.command, Fresh: "echo FRESH-AGENT"}, 0)
+			if strings.Contains(out, "FRESH-AGENT") {
+				t.Errorf("output = %q, want nothing started over a command nobody reported failing", out)
+			}
+			if strings.Contains(out, heldOpenNotice) {
+				t.Errorf("output = %q, want the window closed as before", out)
+			}
+			if status != tc.status {
+				t.Errorf("status = %d, want the command's own %d", status, tc.status)
+			}
+		})
+	}
+}
+
+// TestTheFallbackRunsOnceAndOnlyOnce holds the rule that keeps a window out of a
+// loop: the fresh command is the recovery, and a fresh command that also fails
+// at once is held open rather than tried again.
+func TestTheFallbackRunsOnceAndOnlyOnce(t *testing.T) {
+	// Counted in a file rather than in the output, which names the fresh command
+	// a second time in the line reporting what exited.
+	//
+	// The file is named relative to a directory this test stands in, rather than
+	// by its absolute path, because the assertion below is about which command
+	// the report names. macOS puts a test's temporary directory under
+	// /var/folders/<two levels of gibberish>, which is enough on its own to push
+	// the command past the eighty columns abbreviated cuts it to — so the report
+	// named the right command and said so with a "…" on the end, and the test
+	// failed over the wrapper working.
+	dir := t.TempDir()
+	t.Chdir(dir)
+	out, status := runScript(t, windowCommand{
+		Command: "echo nothing to continue >&2; exit 1",
+		Fresh:   "echo ran >> runs; exit 4",
+	}, 0)
+
+	body, err := os.ReadFile(filepath.Join(dir, "runs"))
+	if err != nil {
+		t.Fatalf("the fresh command never ran: %v", err)
+	}
+	if got := strings.Count(string(body), "ran"); got != 1 {
+		t.Errorf("the fresh command ran %d times, want exactly one recovery", got)
+	}
+	if !strings.Contains(out, heldOpenNotice) {
+		t.Errorf("output = %q, want the second failure held open", out)
+	}
+	// And the window reports the command that actually failed, which by now is
+	// not the one it was asked to run.
+	if !strings.Contains(out, `"echo ran >> runs; exit 4" exited 4`) {
+		t.Errorf("output = %q, want the fresh command named as what exited", out)
+	}
+	if status != 4 {
+		t.Errorf("status = %d, want the fresh command's own 4", status)
+	}
+}
+
+// TestAWindowScriptParsesInTheShellsTmuxMightRunIt is the check the shims get
+// from TestScriptsParse, for the other script treewright emits.
+//
+// tmux does not run a window's command through /bin/sh: it uses the user's
+// login shell, so a machine whose $SHELL is zsh gets `zsh -c '<script>'`. That
+// makes "it works here" a statement about the developer's own shell, and a
+// script that fails to parse takes the window with it — which is the one
+// failure the wrapper exists to prevent. So it is written to POSIX and checked
+// against the shells people actually log in with.
+func TestAWindowScriptParsesInTheShellsTmuxMightRunIt(t *testing.T) {
+	scripts := map[string]string{
+		"one command": windowCommand{Command: "claude --continue"}.script(),
+		"with a fresh command behind it": windowCommand{
+			Command: "claude --continue 'it'\\''s a brief'",
+			Fresh:   "claude 'it'\\''s a brief'",
+		}.script(),
+	}
+	for _, shell := range []string{"sh", "bash", "zsh"} {
+		t.Run(shell, func(t *testing.T) {
+			bin, err := exec.LookPath(shell)
+			if err != nil {
+				testenv.Unavailablef(t, "%s is not installed", shell)
+			}
+			for name, script := range scripts {
+				path := filepath.Join(t.TempDir(), "window")
+				if err := os.WriteFile(path, []byte(script), 0o644); err != nil {
+					t.Fatalf("write: %v", err)
+				}
+				if out, err := exec.Command(bin, "-n", path).CombinedOutput(); err != nil {
+					t.Errorf("%s rejected the script for %s: %v\n%s", shell, name, err, out)
+				}
+			}
+		})
+	}
+}
+
 // TestABlankCommandIsLeftAlone keeps the wrapper out of the one case tmux handles
 // by opening a plain shell: a script around nothing would run the shell, exit 0,
 // and close the window that was meant to stay.
+//
+// A fallback behind a blank command is left alone too — a window holding a shell
+// has nothing in it that can fail, so there is nothing to recover from.
 func TestABlankCommandIsLeftAlone(t *testing.T) {
 	for _, command := range []string{"", "   "} {
-		if got := heldOpenOnFailure(command); got != command {
-			t.Errorf("heldOpenOnFailure(%q) = %q, want it untouched", command, got)
+		for _, fresh := range []string{"", "claude"} {
+			run := windowCommand{Command: command, Fresh: fresh}
+			if got := run.script(); got != command {
+				t.Errorf("windowCommand%+v.script() = %q, want it untouched", run, got)
+			}
 		}
 	}
 }

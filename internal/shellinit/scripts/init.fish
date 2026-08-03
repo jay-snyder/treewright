@@ -75,6 +75,7 @@ complete -c treewright -n '__fish_seen_subcommand_from tmux-init' -l new-key -r 
 complete -c treewright -n '__fish_seen_subcommand_from new move' -s p -l prompt -r -d 'text the agent starts working on'
 complete -c treewright -n '__fish_seen_subcommand_from move' -l keep -d 'leave the work in the main checkout as well'
 complete -c treewright -n '__fish_seen_subcommand_from resume' -s p -l prompt -r -d 'text for the resumed agent'
+complete -c treewright -n '__fish_seen_subcommand_from resume' -l fresh -d 'run command rather than resume_command'
 # -F is what turns the argument back into a filename completion: the file is on
 # the caller's disk, which treewright knows nothing about.
 complete -c treewright -n '__fish_seen_subcommand_from new move resume' -l prompt-file -r -F -d 'a file holding the brief'

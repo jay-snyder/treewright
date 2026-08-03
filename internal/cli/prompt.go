@@ -108,12 +108,16 @@ func resolvePrompt(cmd, prompt, promptFile string) (string, error) {
 // prompt too long to run are the same kind of mistake — this invocation being
 // wrong — and finding either out afterwards leaves a half-made worktree behind
 // an error about a flag.
+//
+// The length is measured against the window this command would be the whole of.
+// `resume` runs two of them in one window and measures the pair itself, since
+// neither half can see the other from here.
 func fillPrompt(command, key, prompt string) (string, error) {
 	filled, err := fillTemplate(command, key, prompt)
 	if err != nil {
 		return "", err
 	}
-	if err := checkCommandFits(filled, key, prompt); err != nil {
+	if err := checkCommandFits(windowCommand{Command: filled}.script(), key, prompt); err != nil {
 		return "", err
 	}
 	return filled, nil

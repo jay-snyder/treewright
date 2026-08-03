@@ -232,7 +232,7 @@ stdout is the new worktree's path, so cd "$(treewright move eng-1)" works, and
 		{
 			name:    "resume",
 			aliases: []string{"reopen"},
-			args:    "[-p <text>] [slug]",
+			args:    "[-p <text>] [--fresh] [slug]",
 			summary: "reopen a window on an existing worktree",
 			long: `Opens a tmux window running the configured resume_command in the
 worktree, or switches to the window already open there — following it into
@@ -247,18 +247,32 @@ on disk survives and a tmux session does not, it is reopened along with them. Na
 it "base" or name the branch it is parked on. It runs resume_command like every
 other row; "treewright base" is the way in that opens it fresh.
 
---prompt hands the resumed agent its next instruction, at resume_command's
-{prompt} placeholder. It only reaches an agent the resume actually starts: a
-window that was already open is switched to as usual, with a warning that the
-prompt went undelivered — and "treewright send" is what reaches the agent
-standing in it.
+resume_command is "carry on where I left off", and there is not always anything
+to carry on from: a worktree whose first window never opened, or an agent that
+started once and ended before it recorded a session. Where it fails without ever
+getting going, the window runs command instead and says which it is running, so
+you get an agent rather than a window parked on "nothing to continue". One that
+ran for a while and then failed is left on screen exactly as before — that
+output is the whole reason the window is held open.
+
+--fresh asks for the same thing outright: run command, not resume_command, and
+start a new session however much there was to continue. It works on the base
+checkout too.
+
+--prompt hands the resumed agent its next instruction, at the {prompt}
+placeholder of whichever command runs — so it has to fit both templates, since
+either may be the one that ends up reading it. It only reaches an agent the
+resume actually starts: a window that was already open is switched to as usual,
+with a warning that the prompt went undelivered — and "treewright send" is what
+reaches the agent standing in it.
 
 --prompt-file names a file holding the instructions instead, and the prompt
 becomes one line telling the agent to read it. See "treewright help new" for
 what that buys and what it leaves you to clean up.`,
 			flags: []flagDoc{
-				{promptFlagNames, "text for the resumed agent, placed at resume_command's {prompt}"},
+				{promptFlagNames, "text for the resumed agent, placed at the command's {prompt}"},
 				promptFileDoc,
+				{"--fresh", "start a new session: run command rather than resume_command"},
 			},
 			run: cmdResume,
 		},
