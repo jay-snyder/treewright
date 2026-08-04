@@ -287,7 +287,12 @@ on a window that was already open and its command never ran.
 else.** The whole list is `<config dir>/<name>.toml`,
 `.git/treewright/post-create-*` and `.git/treewright/move-*.patch` inside the
 repo, the worktrees, and `~/.claude/skills/treewright/` —
-`<main_dir>/.claude/skills/treewright/` when `agent-init --local` names it.
+`<main_dir>/.claude/skills/treewright/` when `agent-init --local` names it, and
+`$CLAUDE_CONFIG_DIR/skills/treewright/` when the agent's own variable moves that
+directory. **A user-level path is resolved through the agent module, never
+spelled in core**: `Agent.UserPluginDir()` and `Agent.UserSettingsFile()` ask the
+agent's environment, and hard-coding `~/.claude` instead is a bug whose every
+symptom is a success message — see "Where the wiring goes" in `docs/agents.md`.
 Everything else — the shell line, the tmux line, any `.gitignore` entry — is
 *printed for a person to place*. `tmux-init --apply` is not an exception: it
 sets bindings on a running server and writes no file.
@@ -630,8 +635,10 @@ real git repo with a bare origin, a config registry pointing at it, an inert
 `-L` label, killed on cleanup) so tests never touch your own sessions, and a
 **`HOME` of its own** — `agent-init` installs into `~/.claude/skills/treewright/`
 by default, so without it a test of the plugin would rewrite the maintainer's own
-wiring. Never call bare `tmux` in a test — go through the package, which honors
-`TREEWRIGHT_TMUX_LABEL`.
+wiring. `CLAUDE_CONFIG_DIR` is emptied for the same reason and is not covered by
+`HOME`: it is usually absolute, so on the machine of anyone who has moved that
+directory the suite would install into their real one. Never call bare `tmux` in
+a test — go through the package, which honors `TREEWRIGHT_TMUX_LABEL`.
 
 Fixture helpers: `exec` (streams kept apart), `run`/`mustRun` (combined),
 `runWithEvalFile` (returns what treewright asked the shell to run), `statusOf`.
@@ -653,3 +660,4 @@ parse would break the startup of whatever loads it.
 | `TREEWRIGHT_TMUX_LABEL` | Drive a non-default tmux server (`tmux -L <label>`). |
 | `TREEWRIGHT_POPUP` | Set inside a popup, so exit paths can say "press Esc to close". |
 | `NO_COLOR`, `TERM=dumb` | Turn color off; color is also off whenever stdout is not a terminal. |
+| `CLAUDE_CONFIG_DIR` | Not treewright's — claude's, read so the plugin lands where that agent looks. Named by the module (`Agent.UserDirVar`), never by core. |

@@ -250,20 +250,62 @@ func TestClaudeModuleFacts(t *testing.T) {
 	if module.ProjectSettings != ".claude/settings.local.json" {
 		t.Errorf("ProjectSettings = %q, want the checkout's own settings file", module.ProjectSettings)
 	}
-	if module.UserSettings != "~/.claude/settings.json" {
-		t.Errorf("UserSettings = %q, want the user-level file", module.UserSettings)
+	// The two user-level paths are relative to the agent's config directory,
+	// which is the field below them and not always ~/.claude.
+	if module.UserSettings != "settings.json" {
+		t.Errorf("UserSettings = %q, want the user-level file inside the config directory", module.UserSettings)
+	}
+	if module.UserDir != "~/.claude" || module.UserDirVar != "CLAUDE_CONFIG_DIR" {
+		t.Errorf("config directory = %q / $%s, want claude's default and the variable that moves it",
+			module.UserDir, module.UserDirVar)
 	}
 	// The plugin's home is a skills directory in both scopes, which is what
 	// makes a folder with a manifest in it load as a plugin at all.
 	if module.ProjectPlugin != ".claude/skills/treewright" {
 		t.Errorf("ProjectPlugin = %q, want the checkout's own skills directory", module.ProjectPlugin)
 	}
-	if module.UserPlugin != "~/.claude/skills/treewright" {
-		t.Errorf("UserPlugin = %q, want the user-level skills directory", module.UserPlugin)
+	if module.UserPlugin != "skills/treewright" {
+		t.Errorf("UserPlugin = %q, want the skills directory inside the config directory", module.UserPlugin)
 	}
 
 	if _, ok := Lookup("copilot"); ok {
 		t.Error("Lookup(copilot) found a module that does not exist yet")
+	}
+}
+
+// TestTheUserPluginFollowsTheAgentsConfigDirectory covers the failure that split
+// UserDir from the paths inside it: an agent whose config directory has been
+// moved reads nothing at the default, so a plugin written there installs
+// cleanly, passes doctor's byte comparison, and is loaded by nobody. Every part
+// reports success, which is the kind of bug a test has to be the first to see.
+//
+// The three cases are the three ways the question gets answered — the variable
+// set, unset, and set to a path a shell has not expanded.
+func TestTheUserPluginFollowsTheAgentsConfigDirectory(t *testing.T) {
+	moved := t.TempDir()
+	t.Setenv(claude.UserDirVar, moved)
+	if got, want := claude.UserPluginDir(), filepath.Join(moved, "skills", "treewright"); got != want {
+		t.Errorf("UserPluginDir() = %q, want %q — where the agent was told to look", got, want)
+	}
+	if got, want := claude.UserSettingsFile(), filepath.Join(moved, "settings.json"); got != want {
+		t.Errorf("UserSettingsFile() = %q, want %q", got, want)
+	}
+
+	// Empty is unset, that being what an exported-but-empty variable means to
+	// the agent reading it too, and both fall back to the module's default.
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv(claude.UserDirVar, "")
+	if got, want := claude.UserPluginDir(), filepath.Join(home, ".claude", "skills", "treewright"); got != want {
+		t.Errorf("UserPluginDir() with the variable unset = %q, want the default at %q", got, want)
+	}
+
+	// A value holding a ~ is expanded like the default is. It comes from a shell
+	// profile, where the shell has usually already done it — but a value set in
+	// a config file or handed to a process directly has been through no shell.
+	t.Setenv(claude.UserDirVar, "~/elsewhere")
+	if got, want := claude.UserPluginDir(), filepath.Join(home, "elsewhere", "skills", "treewright"); got != want {
+		t.Errorf("UserPluginDir() = %q, want the ~ expanded, at %q", got, want)
 	}
 }
 

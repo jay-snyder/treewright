@@ -574,7 +574,7 @@ func checkAgentWiring(env *Env, r *report, cfg *config.Config) {
 		return
 	}
 	projectDir := filepath.Join(cfg.MainDir, filepath.FromSlash(module.ProjectPlugin))
-	project, user := inspectPlugin(module, projectDir), inspectPlugin(module, expandHome(module.UserPlugin))
+	project, user := inspectPlugin(module, projectDir), inspectPlugin(module, module.UserPluginDir())
 	pasted := settingsWithPastedHooks(module, cfg)
 
 	// Each of these is a finding, what it costs, and the command that answers
@@ -768,7 +768,7 @@ func carriesPlugin(module agentinit.Agent, cfg *config.Config) bool {
 func settingsWithPastedHooks(module agentinit.Agent, cfg *config.Config) string {
 	for _, path := range []string{
 		filepath.Join(cfg.MainDir, filepath.FromSlash(module.ProjectSettings)),
-		expandHome(module.UserSettings),
+		module.UserSettingsFile(),
 	} {
 		if mentionsSignal(path) {
 			return path
@@ -808,17 +808,6 @@ func mentionsSignal(path string) bool {
 		return false
 	}
 	return strings.Contains(string(body), "treewright signal")
-}
-
-// expandHome resolves the leading ~ the agent modules spell their user-level
-// paths with, being paths shown to users as often as read.
-func expandHome(path string) string {
-	if path == "~" || strings.HasPrefix(path, "~/") {
-		if home, err := os.UserHomeDir(); err == nil {
-			return filepath.Join(home, strings.TrimPrefix(strings.TrimPrefix(path, "~"), "/"))
-		}
-	}
-	return path
 }
 
 // checkCurrentRepo reports which config the caller's location selects, since that

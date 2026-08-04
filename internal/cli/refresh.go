@@ -157,7 +157,7 @@ func pluginCheckouts(env *Env, cfg *config.Config, module agentinit.Agent) []che
 		}
 	}
 
-	if userDir := expandHome(module.UserPlugin); inspectPlugin(module, userDir) != pluginAbsent {
+	if userDir := module.UserPluginDir(); inspectPlugin(module, userDir) != pluginAbsent {
 		found = append(found, checkout{label: userDir, dir: userDir})
 	}
 	return found

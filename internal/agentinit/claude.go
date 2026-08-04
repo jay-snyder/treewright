@@ -17,6 +17,12 @@ import _ "embed"
 //	├── .claude-plugin/plugin.json  the manifest that makes it a plugin
 //	└── hooks/hooks.json            the wiring, in settings' own hooks format
 //
+// `~/.claude` there is the default and not the whole answer: Claude Code reads
+// $CLAUDE_CONFIG_DIR, and a home directory kept to the XDG layout points it
+// under ~/.local/state. That is why UserDir and UserDirVar are separate fields
+// — the plugin has to be written where this agent will look for it, which is a
+// question only the agent's own environment answers.
+//
 // Only plugin.json goes inside .claude-plugin/; hooks/ and SKILL.md are at the
 // plugin root, and Claude Code's own documentation names putting them inside
 // the manifest directory as the common mistake. A plugin shipping exactly one
@@ -64,8 +70,10 @@ var claude = Agent{
 	Command:         "claude {prompt}",
 	ResumeCommand:   "claude --continue {prompt}",
 	ProjectSettings: ".claude/settings.local.json",
-	UserSettings:    "~/.claude/settings.json",
-	UserPlugin:      "~/.claude/skills/treewright",
+	UserDir:         "~/.claude",
+	UserDirVar:      "CLAUDE_CONFIG_DIR",
+	UserSettings:    "settings.json",
+	UserPlugin:      "skills/treewright",
 	ProjectPlugin:   ".claude/skills/treewright",
 	// The plugin's manifest, in both senses. Each file is checked in under
 	// plugins/claude and named here, so the bytes are a real file a contributor
