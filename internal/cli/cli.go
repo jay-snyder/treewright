@@ -658,9 +658,14 @@ settings file, no dotfile, no .gitignore. A repository treewright does not
 manage costs nothing by being covered: outside a treewright window, signal does
 nothing, quietly.
 
-stdout is the directory, so the path can be piped. Run it again after
-upgrading treewright: the files are treewright's own, so a second run updates
-the wiring rather than leaving a second copy of it somewhere.
+Where the agent keeps that directory is the agent's own business, and claude
+lets it be moved: with CLAUDE_CONFIG_DIR set, the plugin goes there instead, so
+it lands where the agent will actually read it.
+
+stdout is the directory, so the path can be piped — and is the answer to where
+this put things, whatever the environment says. Run it again after upgrading
+treewright: the files are treewright's own, so a second run updates the wiring
+rather than leaving a second copy of it somewhere.
 
 --local installs it into the main checkout of the repository you are standing in
 instead — .claude/skills/treewright/ for claude — and is the one form that needs

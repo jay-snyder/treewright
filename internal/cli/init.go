@@ -141,7 +141,7 @@ func cmdAgentInit(env *Env, args []string) error {
 		return dumpPlugin(env, agent, local)
 	}
 	if !local {
-		return installAgentPlugin(env, agent, expandHome(agent.UserPlugin), nil)
+		return installAgentPlugin(env, agent, agent.UserPluginDir(), nil)
 	}
 	// The repository decides where a per-repo plugin goes, so this is the one
 	// path that needs a config — and having one is what lets the carry warning
@@ -227,7 +227,7 @@ func installAgentPlugin(env *Env, agent agentinit.Agent, dir string, cfg *config
 // the path it would be written to. The headers are cat's own multi-file form,
 // because that is what the output is: several files at once, for reading.
 func dumpPlugin(env *Env, agent agentinit.Agent, local bool) error {
-	dir := agent.UserPlugin
+	dir := agent.UserPluginDir()
 	if local {
 		dir = agent.ProjectPlugin
 	}

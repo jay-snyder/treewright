@@ -35,6 +35,14 @@ func newFixture(t *testing.T, extraConfig string) *fixture {
 	// rewrite the developer's own wiring — and a test of anything else would let
 	// their ~/.claude decide what doctor sees.
 	t.Setenv("HOME", t.TempDir())
+	// And the agent's own variable for moving that directory, which HOME alone
+	// does not contain: an absolute $CLAUDE_CONFIG_DIR is answered whatever HOME
+	// says, so on the machine of anyone who has moved it — the XDG layout puts it
+	// under ~/.local/state — these tests would install into the developer's real
+	// config directory and doctor would report on their real wiring. Emptied
+	// rather than pointed at the temp home, so the default placement is what the
+	// suite exercises; the test that covers a moved directory sets it itself.
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
 
 	repo := gittest.New(t)
 	f := &fixture{Repo: repo, t: t, registry: filepath.Join(repo.Root, "conf")}

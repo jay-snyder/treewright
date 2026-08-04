@@ -41,6 +41,7 @@ import (
 	"path"
 	"path/filepath"
 	"sort"
+	"strings"
 )
 
 // PluginFile is one file of the plugin a module installs: a path relative to
@@ -76,24 +77,37 @@ type Agent struct {
 	// the "always allow" permission decisions the agent records as it works,
 	// which every worktree wants, so it stays on the carried list.
 	//
-	// UserSettings is the same file made global. It is named for two reasons
-	// that outlived the paste it used to receive: doctor recognizes hooks an
-	// older treewright told the user to put there, and someone who wired the
-	// agent by hand put them in one of these two files.
+	// UserSettings is the same file made global, relative to UserDir. It is
+	// named for two reasons that outlived the paste it used to receive: doctor
+	// recognizes hooks an older treewright told the user to put there, and
+	// someone who wired the agent by hand put them in one of these two files.
 	ProjectSettings string
 	UserSettings    string
 
-	// UserPlugin is the agent's own user-level directory, and is where the
-	// wiring belongs by default: one install covers every checkout the agent is
-	// ever started in, worktrees included, where a per-repo copy reaches the
-	// main checkout and nothing else until something carries it. ProjectPlugin
-	// is the directory the agent loads a checkout's own plugin from, relative
-	// to its root — what `agent-init --local` installs into — for a machine
-	// where treewright's wiring should touch one repository and no other. Both
-	// keep the names the agent uses for the two scopes, matching UserSettings
-	// and ProjectSettings above; the flag is spelled `--local` instead, that
-	// being git's own word for the scope of a repository and one every user of
-	// this tool has typed.
+	// UserDir is where the agent keeps its user-level configuration, and
+	// UserDirVar names the environment variable the agent itself reads to
+	// relocate it. Every user-level path below is relative to whichever of the
+	// two wins, which is the whole point of naming the variable here: an agent
+	// that lets its directory be moved has users who have moved it, and to
+	// those users the default is not a good guess but a directory nothing
+	// reads. The wiring then installs successfully, doctor confirms it, and the
+	// agent never loads it — a failure with no symptom except the feature
+	// quietly not working. Leave UserDirVar empty for an agent that has no such
+	// variable; UserDir alone is then the answer.
+	UserDir    string
+	UserDirVar string
+
+	// UserPlugin is the agent's own user-level plugin directory, relative to
+	// UserDir, and is where the wiring belongs by default: one install covers
+	// every checkout the agent is ever started in, worktrees included, where a
+	// per-repo copy reaches the main checkout and nothing else until something
+	// carries it. ProjectPlugin is the directory the agent loads a checkout's
+	// own plugin from, relative to its root — what `agent-init --local`
+	// installs into — for a machine where treewright's wiring should touch one
+	// repository and no other. Both keep the names the agent uses for the two
+	// scopes, matching UserSettings and ProjectSettings above; the flag is
+	// spelled `--local` instead, that being git's own word for the scope of a
+	// repository and one every user of this tool has typed.
 	UserPlugin    string
 	ProjectPlugin string
 
@@ -133,6 +147,57 @@ func (a Agent) LocalState() []string {
 		out = append(out, path.Join(a.ProjectPlugin, f.Path))
 	}
 	return out
+}
+
+// UserConfigDir is the directory the agent actually keeps its user-level
+// configuration in: the environment variable the agent reads when it is set,
+// else the module's default.
+//
+// Asking the environment rather than hard-coding the default is what makes the
+// user-level placement work for the people most likely to have moved it. Claude
+// Code reads $CLAUDE_CONFIG_DIR, and anyone keeping their home directory to the
+// XDG layout has pointed it somewhere under ~/.local/state — so `agent-init`
+// wrote a correct plugin into ~/.claude, doctor compared it against ~/.claude
+// and pronounced it current, and the agent, reading the directory it was told
+// to, loaded nothing. Every part reported success, which is why this is
+// resolved in one place that all of them call rather than at each call site.
+//
+// The variable wins over the default whenever it holds anything, and an empty
+// value is treated as unset because that is what an exported-but-empty variable
+// means to the agent too. It is expanded for a leading ~ like the default: the
+// value comes from a shell profile, where writing ~ is ordinary and the shell
+// has usually already expanded it, but a value set in a config file or a
+// process environment has not been through a shell at all.
+func (a Agent) UserConfigDir() string {
+	if a.UserDirVar != "" {
+		if dir := os.Getenv(a.UserDirVar); dir != "" {
+			return expandHome(dir)
+		}
+	}
+	return expandHome(a.UserDir)
+}
+
+// UserPluginDir is where `agent-init` installs the plugin by default, resolved.
+func (a Agent) UserPluginDir() string {
+	return filepath.Join(a.UserConfigDir(), filepath.FromSlash(a.UserPlugin))
+}
+
+// UserSettingsFile is the agent's user-level settings file, resolved. Nothing
+// writes it — doctor reads it to recognize hooks pasted by an older treewright.
+func (a Agent) UserSettingsFile() string {
+	return filepath.Join(a.UserConfigDir(), filepath.FromSlash(a.UserSettings))
+}
+
+// expandHome resolves the leading ~ the modules spell their user-level paths
+// with. A path that does not start with one is returned untouched, including an
+// absolute one, which is what an agent's own environment variable usually holds.
+func expandHome(dir string) string {
+	if dir == "~" || strings.HasPrefix(dir, "~/") {
+		if home, err := os.UserHomeDir(); err == nil {
+			return filepath.Join(home, strings.TrimPrefix(strings.TrimPrefix(dir, "~"), "/"))
+		}
+	}
+	return dir
 }
 
 // Install writes the module's plugin into dir and returns the files it changed,

@@ -433,8 +433,9 @@ treewright itself" in [`design-notes.md`](design-notes.md).
 ### Where the wiring goes, and the trap between the placements
 
 Machine-wide is the default, and it is the agent's own
-`~/.claude/skills/treewright/`: one install, covering every checkout the agent is
-ever started in, worktrees included. `--local` puts it in the main checkout's
+`~/.claude/skills/treewright/` — or wherever `$CLAUDE_CONFIG_DIR` puts that
+directory, which is the subject of the last part of this section: one install,
+covering every checkout the agent is ever started in, worktrees included. `--local` puts it in the main checkout's
 `.claude/skills/treewright/` instead, for a machine where treewright's wiring
 should touch one repository and no other.
 
@@ -472,6 +473,25 @@ at all — a command whose entire purpose is to install the wiring, which prints
 the directory it wrote on stdout and offers `--print` to anyone who wants to read
 the files first. See "What treewright is allowed to write" in
 [`design-notes.md`](design-notes.md).
+
+Which directory that actually is comes from the agent, not from treewright.
+Claude Code reads `$CLAUDE_CONFIG_DIR` and falls back to `~/.claude`, so anyone
+keeping their home directory to the XDG layout has pointed it under
+`~/.local/state` — and the module carries both halves, `UserDir` for the default
+and `UserDirVar` for the variable that moves it, with the plugin and settings
+paths relative to whichever wins.
+
+Hard-coding the default instead is the shape this had first, and what it cost is
+worth recording, because every part of it reported success. `agent-init` wrote a
+valid plugin and printed the directory; `doctor` compared that same directory
+against what it would write and called the wiring current; `refresh` kept it up
+to date. The agent, reading the directory it had been pointed at, loaded none of
+it. There was no error anywhere — only the AGENT column staying empty and a
+skill the agent had never heard of, which reads as treewright's state protocol
+being broken rather than as a plugin sitting in the wrong folder. A default that
+is wrong for a whole class of users is worse than an unset value, because it
+produces a confident answer instead of a question, and that is the argument for
+asking the agent's own environment wherever a user-level path is resolved.
 
 `.claude/settings.local.json` keeps its place on the carried list, and for a
 different reason than it used to have: it no longer holds hooks, but it does

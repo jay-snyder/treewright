@@ -88,6 +88,49 @@ func TestAgentInitCoversEveryRepositoryByDefault(t *testing.T) {
 	}
 }
 
+// TestAgentInitFollowsTheAgentsConfigDirectory is the default placement for a
+// user who has moved the agent's configuration directory, which the XDG layout
+// does as a matter of course.
+//
+// It is here as a whole-command test and not only as the unit test in agentinit
+// because of how the bug presented: `agent-init` wrote a correct plugin, printed
+// the directory it wrote, and doctor compared that same wrong directory against
+// what it would write and called it current. Three reports of success and the
+// agent, reading the directory it had actually been pointed at, loaded nothing.
+// So the assertion that matters is the pair — installed where the variable says,
+// and *not* at the default the agent has stopped reading.
+func TestAgentInitFollowsTheAgentsConfigDirectory(t *testing.T) {
+	f := newFixture(t, "")
+	moved := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", moved)
+
+	r := f.exec("agent-init", "claude")
+	if r.err != nil {
+		t.Fatalf("agent-init claude: %v\n%s", r.err, r.both())
+	}
+	want := filepath.Join(moved, "skills", "treewright")
+	if got := strings.TrimSpace(r.stdout); got != want {
+		t.Errorf("stdout = %q, want the moved directory %q", got, want)
+	}
+	for _, rel := range pluginFiles(t) {
+		if _, err := os.Stat(filepath.Join(want, filepath.FromSlash(rel))); err != nil {
+			t.Errorf("%s was not installed where the agent reads: %v", rel, err)
+		}
+	}
+	// The default is where it used to go, and the agent is no longer looking
+	// there — a copy left behind would be the stale wiring nobody knows about.
+	stale := filepath.Join(os.Getenv("HOME"), ".claude", "skills", "treewright")
+	if _, err := os.Stat(stale); err == nil {
+		t.Errorf("the plugin was also written to %s, which the agent no longer reads", stale)
+	}
+
+	// And doctor agrees, which is the half that made the bug silent: it has to
+	// be asking about the same directory the install used.
+	if got := has(t, findings(t, f), "is not wired to report state"); got != "" {
+		t.Errorf("doctor reports the agent unwired (%s) after installing where it reads", got)
+	}
+}
+
 // TestAgentInitLocalInstallsThePluginIntoTheMainCheckout is the placement for a
 // machine where treewright's wiring should touch one repository and no other.
 // It is also the one with the carry trap in it, which is why it says so.
@@ -172,9 +215,13 @@ func TestAgentInitPrintWritesNothing(t *testing.T) {
 		t.Fatalf("agent-init claude --print: %v\n%s", r.err, r.both())
 	}
 	// Each file under the path it would be written to, which for the default
-	// placement is the user's own directory.
+	// placement is the user's own directory — resolved rather than left as a ~,
+	// because the whole question --print answers is where these are going, and
+	// the agent's config directory is movable enough that the unresolved form
+	// can name somewhere nothing will ever read.
+	userDir := filepath.Join(os.Getenv("HOME"), ".claude", "skills", "treewright")
 	for _, rel := range pluginFiles(t) {
-		if !strings.Contains(r.stdout, "==> ~/.claude/skills/treewright/"+rel+" <==") {
+		if !strings.Contains(r.stdout, "==> "+userDir+"/"+rel+" <==") {
 			t.Errorf("stdout does not announce %s:\n%s", rel, r.stdout)
 		}
 		if _, err := os.Stat(filepath.Join(os.Getenv("HOME"), ".claude", "skills", "treewright", filepath.FromSlash(rel))); err == nil {

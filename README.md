@@ -294,7 +294,9 @@ two commands that hand the work over instead. Reading another worktree is never
 blocked — that is how you review it.
 
 What it writes is a plugin — `~/.claude/skills/treewright/`, which claude loads
-whole on its next start. One copy, covering every worktree you'll ever make.
+whole on its next start. If you've moved claude's config directory with
+`CLAUDE_CONFIG_DIR`, it goes there instead; the path it printed is where it went.
+One copy, covering every worktree you'll ever make.
 Nothing else is edited: no settings file, no dotfile, no `.gitignore`. Repos you
 don't use treewright in are covered too, and that costs nothing: outside a
 treewright window, `signal` does nothing and says nothing.
@@ -383,6 +385,7 @@ tw rm <slug>                          # whatever prune left
 brew uninstall --cask treewright      # or: rm $(go env GOPATH)/bin/treewright
 rm -r ~/.config/treewright            # the registry
 rm -r ~/.claude/skills/treewright     # the agent plugin, if you installed it
+                                      # ($CLAUDE_CONFIG_DIR/skills/… if you set it)
 ```
 
 Then delete the `shell-init` line from your shell startup file and the
