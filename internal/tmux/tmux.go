@@ -42,7 +42,7 @@ import (
 type Spec struct {
 	Session string // the session it belongs in
 	Dir     string // the worktree it opens on
-	Name    string // as shown in the status line, e.g. "ENG-142"
+	Name    string // as shown in the status line, e.g. "eng-142"
 	Command string // what to run in it; blank leaves a shell
 
 	Repo   string // the config's name
@@ -85,7 +85,7 @@ var ErrNotFollowed = errors.New("no tmux client followed")
 type Window struct {
 	ID      string // "@3", unique across the server
 	Session string // the session holding it
-	Name    string // as shown in the status line, e.g. "ENG-142", minus any waiting marker
+	Name    string // as shown in the status line, e.g. "eng-142", minus any waiting marker
 	State   string // what the agent in it last signaled, "" when nothing has
 
 	// Worktree is the checkout treewright opened this window on, empty for a

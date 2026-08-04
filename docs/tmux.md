@@ -13,14 +13,14 @@ config: the base window in the main checkout, and one window per worktree.
 
 ```
 tmux session "storefront"                      tmux session "checkout-api"
-├── MAIN      ~/code/storefront                ├── MAIN    ~/code/checkout-api
-├── ENG-2318  ~/code/storefront-eng-2318       └── PAY-88  ~/code/checkout-api-pay-88
-└── ENG-2324  ~/code/storefront-eng-2324
+├── main      ~/code/storefront                ├── main    ~/code/checkout-api
+├── eng-2318  ~/code/storefront-eng-2318       └── pay-88  ~/code/checkout-api-pay-88
+└── eng-2324  ~/code/storefront-eng-2324
 ```
 
 The alternative — opening windows in whatever session the caller happens to be
-attached to — mixes repositories in one status line, where two windows named
-`MAIN` belong to different projects and a ticket key says nothing about which
+attached to — mixes repositories in one status line, where two windows both
+called `main` belong to different projects and a ticket key says nothing about which
 checkout it is in. Worse, it made `resume` a silent no-op across sessions:
 selecting a window in a session your client is not attached to succeeds and
 changes nothing you can see.

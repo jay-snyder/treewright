@@ -107,13 +107,13 @@ func windowStamp(t *testing.T, window, option string) string {
 // recorded on the window it opened. It returns the worktree they share.
 func twoWindowsInOneWorktree(t *testing.T, f *fixture) string {
 	t.Helper()
-	startShellSession(t, "proj", "MAIN", f.MainDir)
+	startShellSession(t, "proj", "main", f.MainDir)
 	if r := f.exec("new", "eng-1"); r.err != nil {
 		t.Fatalf("new: %v\n%s", r.err, r.both())
 	}
 	wt := f.DirFor("eng-1")
-	walkInto(t, "proj", "MAIN", wt)
-	swapWindows(t, "proj", "MAIN", "ENG-1")
+	walkInto(t, "proj", "main", wt)
+	swapWindows(t, "proj", "main", "eng-1")
 	return wt
 }
 
@@ -181,8 +181,8 @@ func TestRmClosesTheWindowOnTheRemovedWorktree(t *testing.T) {
 	f := newFixture(t, "")
 	wt := f.Worktree("winsome")
 
-	startSession(t, "proj", "MAIN", f.MainDir)
-	openWindowOn(t, "proj", "WINSOME", wt.Dir)
+	startSession(t, "proj", "main", f.MainDir)
+	openWindowOn(t, "proj", "winsome", wt.Dir)
 	if got := panesOn(t, wt.Dir); got != 1 {
 		t.Fatalf("%d panes in the worktree before removal, want 1", got)
 	}
@@ -198,7 +198,7 @@ func TestRmClosesTheWindowOnTheRemovedWorktree(t *testing.T) {
 		t.Errorf("%d panes still sitting in the deleted %s, want none", got, wt.Dir)
 	}
 	// And it says so, since a window closing is not something to do silently.
-	if !strings.Contains(r.stderr, "closed its tmux window WINSOME") {
+	if !strings.Contains(r.stderr, "closed its tmux window winsome") {
 		t.Errorf("stderr = %q, want the closed window named", r.stderr)
 	}
 }
@@ -210,7 +210,7 @@ func TestRmLeavesOtherWindowsAlone(t *testing.T) {
 	doomed := f.Worktree("doomed")
 	keeper := f.Worktree("keeper")
 
-	startSession(t, "proj", "MAIN", f.MainDir)
+	startSession(t, "proj", "main", f.MainDir)
 	openWindowOn(t, "proj", "DOOMED", doomed.Dir)
 	openWindowOn(t, "proj", "KEEPER", keeper.Dir)
 
@@ -250,14 +250,14 @@ func TestRmClosesTheWorktreesWindowNotAVisitor(t *testing.T) {
 		t.Fatalf("rm: %v\n%s", r.err, r.both())
 	}
 
-	if !strings.Contains(r.stderr, "closed its tmux window ENG-1") {
+	if !strings.Contains(r.stderr, "closed its tmux window eng-1") {
 		t.Errorf("stderr = %q, want the worktree's own window closed", r.stderr)
 	}
 	got := windowsIn(t, "proj")
-	if slices.Contains(got, "ENG-1") {
-		t.Errorf("windows in session proj = %v, want ENG-1 gone with its worktree", got)
+	if slices.Contains(got, "eng-1") {
+		t.Errorf("windows in session proj = %v, want eng-1 gone with its worktree", got)
 	}
-	if !slices.Contains(got, "MAIN") {
+	if !slices.Contains(got, "main") {
 		t.Errorf("windows in session proj = %v, want the visiting window left alone", got)
 	}
 }
@@ -268,7 +268,7 @@ func TestRmWithNoWindowOpenSaysNothing(t *testing.T) {
 	f := newFixture(t, "")
 	f.Worktree("quiet")
 
-	startSession(t, "proj", "MAIN", f.MainDir)
+	startSession(t, "proj", "main", f.MainDir)
 
 	t.Chdir(f.MainDir)
 	r := f.exec("rm", "--yes", "quiet")

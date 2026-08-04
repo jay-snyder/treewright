@@ -215,8 +215,8 @@ func TestAnOptionalClauseTakesALineOrNothing(t *testing.T) {
 		t.Errorf("under(%q) = %q, want nothing", "", got)
 	}
 	env, stderr := envWriting()
-	env.progressf("closed its tmux window (%s)%s", "ENG-1", under("it is the last in session proj"))
-	if got, want := stderr.String(), "closed its tmux window (ENG-1)\n  it is the last in session proj\n"; got != want {
+	env.progressf("closed its tmux window (%s)%s", "eng-1", under("it is the last in session proj"))
+	if got, want := stderr.String(), "closed its tmux window (eng-1)\n  it is the last in session proj\n"; got != want {
 		t.Errorf("stderr = %q, want %q", got, want)
 	}
 }

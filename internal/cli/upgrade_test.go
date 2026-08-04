@@ -338,7 +338,7 @@ func TestRefreshScopesTheWarningWhenWorktreesCannotBeListed(t *testing.T) {
 func TestDoctorTellsALoadedTmuxIntegrationFromACurrentOne(t *testing.T) {
 	requireTmux(t)
 	f := newFixture(t, "command = 'sleep 300'\n")
-	startSession(t, "proj", "MAIN", f.MainDir)
+	startSession(t, "proj", "main", f.MainDir)
 
 	// A binding an older treewright loaded: it reaches treewright, and it left no
 	// stamp because the treewright that wrote it had none to leave.
@@ -367,7 +367,7 @@ func TestDoctorTellsALoadedTmuxIntegrationFromACurrentOne(t *testing.T) {
 func TestRefreshReloadsTheBindingsOnTheKeysTheyAreOn(t *testing.T) {
 	requireTmux(t)
 	f := newFixture(t, "command = 'sleep 300'\n")
-	startSession(t, "proj", "MAIN", f.MainDir)
+	startSession(t, "proj", "main", f.MainDir)
 
 	if r := f.exec("tmux-init", "--apply", "--resume-key", "G", "--new-key", "C-n"); r.err != nil {
 		t.Fatalf("tmux-init --apply: %v\n%s", r.err, r.both())
@@ -409,7 +409,7 @@ func TestRefreshReloadsTheBindingsOnTheKeysTheyAreOn(t *testing.T) {
 func TestRefreshLoadsNoBindingsIntoAServerHoldingNone(t *testing.T) {
 	requireTmux(t)
 	f := newFixture(t, "command = 'sleep 300'\n")
-	startSession(t, "proj", "MAIN", f.MainDir)
+	startSession(t, "proj", "main", f.MainDir)
 
 	r := f.exec("refresh")
 	if r.err != nil {

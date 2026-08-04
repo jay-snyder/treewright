@@ -57,7 +57,7 @@ finds the scratch session's name different from the current one, and does exactl
 what it is for: `switch-client`. There is one client and it is the maintainer's.
 That is how a demo `new eng-1` against a repo in a scratchpad threw an attached
 maintainer out of their real treewright session into a fresh one holding a single
-ENG-1 window, with detach-and-reattach the only way back. `TREEWRIGHT_CONFIG_DIR`
+eng-1 window, with detach-and-reattach the only way back. `TREEWRIGHT_CONFIG_DIR`
 is the same argument one layer down: a scratch repo registered in the real
 registry is a repo that `ls`, `doctor` and every popup keep answering about long
 after the demo is gone.
@@ -269,10 +269,12 @@ on `!Explicit("ticket_pattern")` rather than on `== ""`, because `""` is how a
 repository that tracks no tickets turns the search off — collapsing that back to
 the usual `if x == "" { x = default }` removes the only way to opt out, and no
 test of the value alone can tell the two apart. `WindowName` then falls to
-`shorten`, which is the name for every worktree in such a repository: the same
-ten-column cap a ticket key gets, counted in runes, never leaving a hyphen
-against the `…`, and never returning something as wide as what it replaced. See
-"Naming a window, with or without a ticket" in `docs/design-notes.md`.
+`shorten`, which is the name for every worktree in such a repository: a
+fifteen-column cap counted in runes, never leaving a hyphen against the `…`, and
+never returning something as wide as what it replaced. The name keeps whatever
+case it was typed in — key, slug or `--window` override alike — so a window reads
+the way the thing it is named after reads. See "Naming a window, with or without
+a ticket" in `docs/design-notes.md`.
 
 **`{prompt}` is resolved by `fillPrompt`, everywhere.** Every consumer of
 `command` and `resume_command` fills the template before using it — `base`

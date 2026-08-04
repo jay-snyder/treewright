@@ -453,9 +453,9 @@ func TestDoctorWarnsWhenTheAgentReportsNoState(t *testing.T) {
 
 func TestDoctorNamesTheCarryTrap(t *testing.T) {
 	// No agent key and no carry entry — but the plugin sitting in the main
-	// checkout, where it reaches the MAIN window and no worktree at all. The
-	// module is sniffed from the default command, claude, which is the guess a
-	// warn-level hint is allowed to rest on.
+	// checkout, where it reaches the base checkout's window and no worktree at
+	// all. The module is sniffed from the default command, claude, which is the
+	// guess a warn-level hint is allowed to rest on.
 	f := newFixture(t, "")
 	f.mustRun("agent-init", "claude", "--local")
 

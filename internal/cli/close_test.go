@@ -27,13 +27,13 @@ func TestCloseClosesTheWorktreesWindow(t *testing.T) {
 	if r.stdout != "" {
 		t.Errorf("stdout = %q, want nothing — there is no answer here", r.stdout)
 	}
-	if !strings.Contains(r.stderr, "closing tmux window ENG-1") {
+	if !strings.Contains(r.stderr, "closing tmux window eng-1") {
 		t.Errorf("stderr = %q, want the window it closed named", r.stderr)
 	}
 
-	if got := windowsIn(t, "proj"); slices.Contains(got, "ENG-1") {
-		t.Errorf("windows = %v, want ENG-1 gone", got)
-	} else if !slices.Contains(got, "ENG-2") {
+	if got := windowsIn(t, "proj"); slices.Contains(got, "eng-1") {
+		t.Errorf("windows = %v, want eng-1 gone", got)
+	} else if !slices.Contains(got, "eng-2") {
 		t.Errorf("windows = %v, want the other worktree's window left alone", got)
 	}
 	// The worktree, its branch and anything in it are none of close's business.
@@ -61,7 +61,7 @@ func TestCloseWorksAfterTheWorktreeIsGone(t *testing.T) {
 	if f.Exists("eng-1") {
 		t.Fatal("the worktree is still there, so this proves nothing")
 	}
-	if got := windowsIn(t, "proj"); !slices.Contains(got, "ENG-1") {
+	if got := windowsIn(t, "proj"); !slices.Contains(got, "eng-1") {
 		t.Fatalf("windows = %v, want the stranded window still open", got)
 	}
 
@@ -76,7 +76,7 @@ func TestCloseWorksAfterTheWorktreeIsGone(t *testing.T) {
 	if r := f.exec("close", "eng-1"); r.err != nil {
 		t.Fatalf("close after rm: %v\n%s", r.err, r.both())
 	}
-	if got := windowsIn(t, "proj"); slices.Contains(got, "ENG-1") {
+	if got := windowsIn(t, "proj"); slices.Contains(got, "eng-1") {
 		t.Errorf("windows = %v, want the stranded window closed", got)
 	}
 }
@@ -114,7 +114,7 @@ func TestCloseNamesTheCallersOwnWindow(t *testing.T) {
 	f.mustRun("new", "eng-1")
 
 	insideSession(t, "proj")
-	t.Setenv("TMUX_PANE", paneIn(t, "proj", "ENG-1"))
+	t.Setenv("TMUX_PANE", paneIn(t, "proj", "eng-1"))
 
 	r := f.exec("close", "eng-1")
 	if r.err != nil {
@@ -123,7 +123,7 @@ func TestCloseNamesTheCallersOwnWindow(t *testing.T) {
 	if !strings.Contains(r.stderr, "nothing after this runs") {
 		t.Errorf("stderr = %q, want the caller told this is the last thing", r.stderr)
 	}
-	if got := windowsIn(t, "proj"); slices.Contains(got, "ENG-1") {
+	if got := windowsIn(t, "proj"); slices.Contains(got, "eng-1") {
 		t.Errorf("windows = %v, want the caller's own window closed as asked", got)
 	}
 }
@@ -144,11 +144,11 @@ func TestCloseWithNoWindowOpenSaysWhatIsOpen(t *testing.T) {
 	if !strings.Contains(msg, "no window is open on quiet") {
 		t.Errorf("error = %q, want the worktree named", msg)
 	}
-	if !strings.Contains(msg, "ENG-1") {
+	if !strings.Contains(msg, "eng-1") {
 		t.Errorf("error = %q, want the windows that are open listed", msg)
 	}
 	// The window that does exist is untouched by a call that found nothing.
-	if got := windowsIn(t, "proj"); !slices.Contains(got, "ENG-1") {
+	if got := windowsIn(t, "proj"); !slices.Contains(got, "eng-1") {
 		t.Errorf("windows = %v, want the unrelated window left alone", got)
 	}
 }
@@ -179,7 +179,7 @@ func TestCloseResolvesASlugPrefix(t *testing.T) {
 func TestCloseReachesTheBaseWindow(t *testing.T) {
 	requireTmux(t)
 	f := newFixture(t, "command = 'sleep 300'\n")
-	startSession(t, "proj", "MAIN", f.MainDir)
+	startSession(t, "proj", "main", f.MainDir)
 
 	if r := f.exec("close", "base"); r.err != nil {
 		t.Fatalf("close base: %v\n%s", r.err, r.both())
@@ -208,11 +208,11 @@ func TestCloseWarnsWhenTheAgentIsWorking(t *testing.T) {
 	if r.err != nil {
 		t.Fatalf("close: %v\n%s", r.err, r.both())
 	}
-	if !strings.Contains(r.stderr, "warning: the agent in ENG-1 says it is working") {
+	if !strings.Contains(r.stderr, "warning: the agent in eng-1 says it is working") {
 		t.Errorf("stderr = %q, want the working agent warned about", r.stderr)
 	}
 	// Warned, and then closed: this is not a refusal.
-	if got := windowsIn(t, "proj"); slices.Contains(got, "ENG-1") {
+	if got := windowsIn(t, "proj"); slices.Contains(got, "eng-1") {
 		t.Errorf("windows = %v, want the window closed as asked", got)
 	}
 	// And the warning arrives before the window does, since afterwards there may
@@ -266,7 +266,7 @@ func TestRmYesWarnsAboutAWorkingAgent(t *testing.T) {
 	if !strings.Contains(r.stderr, "says it is working") {
 		t.Errorf("stderr = %q, want the working agent warned about", r.stderr)
 	}
-	if !strings.Contains(r.stderr, "closed its tmux window ENG-1") {
+	if !strings.Contains(r.stderr, "closed its tmux window eng-1") {
 		t.Errorf("stderr = %q, want the window still closed", r.stderr)
 	}
 }

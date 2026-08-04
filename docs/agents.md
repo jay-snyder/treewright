@@ -44,7 +44,7 @@ one command deliberately outside the "a background failure needs somewhere to be
 reported" rule, and the reason is that a no-op signal is not a failure; a hook
 that warns is an integration that nags, and those get ripped out.
 
-**`waiting` — only waiting — marks the window's name** (`!ENG-2318`), because it
+**`waiting` — only waiting — marks the window's name** (`!eng-2318`), because it
 is the one state that needs to reach you across the room, and a name shows in
 any status line with nothing added to tmux.conf. The alternatives lose
 concretely: setting `window-status-format` overwrites a format that is the
@@ -452,10 +452,10 @@ question before it is asked.
 What per-repo costs is the other side of the ledger, and it recurs. That
 directory is uncommitted — treewright invented the path, so nothing ignores it
 and nothing tracks it until somebody says which — so **every worktree treewright
-creates starts without it**, and wiring placed there reaches the MAIN window and
-no worktree at all unless something carries it. Project-scope plugins loading
-from the start directory rather than the repository root make that exact, not
-approximate. The half-configured state looks finished, which is why `doctor`
+creates starts without it**, and wiring placed there reaches the base checkout's
+window and no worktree at all unless something carries it. Project-scope plugins
+loading from the start directory rather than the repository root make that exact,
+not approximate. The half-configured state looks finished, which is why `doctor`
 checks for it and why `agent = "claude"` exists to close it — but it is a second
 step, and the person who needs it is by definition the person who has not read
 this far. The user-level placement has no such step: it is current in every
