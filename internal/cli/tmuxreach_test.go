@@ -59,7 +59,7 @@ func insideSession(t *testing.T, session string) {
 func TestAttachSaysWhenYouAreAlreadyThere(t *testing.T) {
 	requireTmux(t)
 	f := newFixture(t, "command = 'sleep 300'\n")
-	startSession(t, "proj", "MAIN", f.MainDir)
+	startSession(t, "proj", "main", f.MainDir)
 	insideSession(t, "proj")
 
 	r := f.exec("attach")
@@ -82,7 +82,7 @@ func TestAttachSaysWhenYouAreAlreadyThere(t *testing.T) {
 func TestAttachDoesNotMistakeAnotherSessionForThisOne(t *testing.T) {
 	requireTmux(t)
 	f := newFixture(t, "command = 'sleep 300'\n")
-	startSession(t, "proj", "MAIN", f.MainDir)
+	startSession(t, "proj", "main", f.MainDir)
 	// Created after proj, so it is the one an untargeted question names.
 	startSession(t, "other", "DECOY", f.MainDir)
 	addConfig(t, f.registry, "second",
@@ -233,7 +233,7 @@ func TestTmuxInitRejectsAnUnusableKey(t *testing.T) {
 func TestTmuxInitApplyHonorsCustomKeys(t *testing.T) {
 	requireTmux(t)
 	f := newFixture(t, "command = 'sleep 300'\n")
-	startSession(t, "proj", "MAIN", f.MainDir)
+	startSession(t, "proj", "main", f.MainDir)
 
 	if r := f.exec("tmux-init", "--apply", "--resume-key", "G", "--new-key", ""); r.err != nil {
 		t.Fatalf("tmux-init --apply: %v\n%s", r.err, r.both())
@@ -258,7 +258,7 @@ func TestTmuxInitApplyLoadsTheBindings(t *testing.T) {
 	requireTmux(t)
 	f := newFixture(t, "command = 'sleep 300'\n")
 	// Key bindings live in a server, so there has to be one.
-	startSession(t, "proj", "MAIN", f.MainDir)
+	startSession(t, "proj", "main", f.MainDir)
 
 	r := f.exec("tmux-init", "--apply")
 	if r.err != nil {
@@ -319,7 +319,7 @@ func TestDoctorDoesNotStartATmuxServer(t *testing.T) {
 func TestDoctorReportsTheTmuxIntegration(t *testing.T) {
 	requireTmux(t)
 	f := newFixture(t, "command = 'sleep 300'\n")
-	startSession(t, "proj", "MAIN", f.MainDir)
+	startSession(t, "proj", "main", f.MainDir)
 
 	// Read through findings rather than off stdout: the check name and its
 	// detail are separate columns now, so the two are only one string once the

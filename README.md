@@ -28,7 +28,7 @@ That one line gets you:
 - a branch `john/eng-2318-cart-total-rounding`, forked off the latest `origin/main`
 - your gitignored `.env` files copied into it
 - `npm install` already running in the background
-- a tmux window called `ENG-2318` with your agent in it
+- a tmux window called `eng-2318` with your agent in it
 
 Add `--prompt "the cart total rounds down at checkout"` and the agent in that
 window starts on it before you've even switched to it — `tw new` stops being
@@ -49,17 +49,17 @@ windows never end up next to your payments service's:
 
 ```
 tmux session "storefront"
-├── MAIN      ~/code/storefront
-├── ENG-2295  ~/code/storefront-eng-2295-flaky-payment-test
-├── ENG-2318  ~/code/storefront-eng-2318-cart-total-rounding
-└── ENG-2324  ~/code/storefront-eng-2324-apple-pay-retry
+├── main      ~/code/storefront
+├── eng-2295  ~/code/storefront-eng-2295-flaky-payment-test
+├── eng-2318  ~/code/storefront-eng-2318-cart-total-rounding
+└── eng-2324  ~/code/storefront-eng-2324-apple-pay-retry
 
 tmux session "checkout-api"
-├── MAIN    ~/code/checkout-api
-└── PAY-88  ~/code/checkout-api-pay-88-idempotency-keys
+├── main    ~/code/checkout-api
+└── pay-88  ~/code/checkout-api-pay-88-idempotency-keys
 ```
 
-`MAIN` is home base, and `tw base` opens it from anywhere. It sits in the main
+`main` is home base, and `tw base` opens it from anywhere. It sits in the main
 checkout, parked on `main` — start new work there, ask your general questions
 there, and keep feature work out of it.
 
@@ -184,10 +184,10 @@ has demonstrably arrived on the other side.
 ```
 $ tw ls
    SLUG                          STATUS     AHEAD/BEHIND  WINDOW
-*  main                          base       +0/-2         MAIN
-   eng-2295-flaky-payment-test   merged     +1/-3         ENG-2295
-   eng-2318-cart-total-rounding  dirty (1)  +0/-3         ENG-2318
-   eng-2324-apple-pay-retry      active     +1/-3         ENG-2324
+*  main                          base       +0/-2         main
+   eng-2295-flaky-payment-test   merged     +1/-3         eng-2295
+   eng-2318-cart-total-rounding  dirty (1)  +0/-3         eng-2318
+   eng-2324-apple-pay-retry      active     +1/-3         eng-2324
 ```
 
 The `*` is where you're standing. `+1/-3` is how far ahead of and behind
@@ -210,10 +210,10 @@ Hit `prefix + T` and that same table becomes a menu, in a popup sized to fit it:
 
 ```
       SLUG                          STATUS     AHEAD/BEHIND  WINDOW
-1) *  main                          base       +0/-2         MAIN
-2)    eng-2295-flaky-payment-test   merged     +1/-3         ENG-2295
-3)    eng-2318-cart-total-rounding  dirty (1)  +0/-3         ENG-2318
-4)    eng-2324-apple-pay-retry      active     +1/-3         ENG-2324
+1) *  main                          base       +0/-2         main
+2)    eng-2295-flaky-payment-test   merged     +1/-3         eng-2295
+3)    eng-2318-cart-total-rounding  dirty (1)  +0/-3         eng-2318
+4)    eng-2324-apple-pay-retry      active     +1/-3         eng-2324
 
 select 1-4 (Esc to cancel):
 ```
@@ -285,7 +285,7 @@ both directions:
 - **Hooks in**, which fill the AGENT column and the `!`.
 - **A skill out**, teaching the agent to drive treewright: read what's in
   flight, spawn a sibling worktree with a prompt, respect the teardown guards.
-  Ask the agent in your MAIN window to farm three jobs out to three worktrees
+  Ask the agent in your `main` window to farm three jobs out to three worktrees
   and it knows exactly how.
 
 The hooks also hold the rule the skill teaches. A tool call that would change
@@ -303,7 +303,7 @@ treewright window, `signal` does nothing and says nothing.
 
 Want it in one repository and no other? `tw agent-init claude --local` puts the
 same plugin in your main checkout instead. Then set `agent = "claude"` in the
-config, or the wiring reaches your MAIN window and no worktree at all — and since
+config, or the wiring reaches your base window and no worktree at all — and since
 treewright won't write your `.gitignore` for you, that directory shows up as
 untracked until you decide what it is: ignore it and the wiring stays yours,
 commit it and everyone who clones gets it. `tw doctor` keeps mentioning both
@@ -409,9 +409,9 @@ No. Nothing reads a tracker or requires a key — a slug is just a name, and
 
 The only place a ticket shows up is the tmux window's name, which has to be
 short. treewright uses a leading key like `eng-142` when it finds one, and
-otherwise the slug, cut to ten characters with a `…`. Set `ticket_pattern = ""`
+otherwise the slug, cut to fifteen characters with a `…`. Set `ticket_pattern = ""`
 if your slugs sometimes *look* like keys and you'd rather they never be read as
-one, or name a window outright with `tw new dark-mode-toggle DARKMODE`.
+one, or name a window outright with `tw new dark-mode-toggle darkmode`.
 
 ### Do I need to be using an AI agent?
 

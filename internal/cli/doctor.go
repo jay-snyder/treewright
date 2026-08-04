@@ -558,8 +558,8 @@ const (
 // is: the agent's user-level skills directory covers every repository, and the
 // main checkout's covers this one — provided it reaches the worktrees, which is
 // the second check. A plugin in a gitignored directory with nothing carrying it
-// fires in the MAIN window and in no worktree at all: the half-configured state
-// that looks finished, which is what doctor is for.
+// fires in the base checkout's window and in no worktree at all: the
+// half-configured state that looks finished, which is what doctor is for.
 //
 // The staleness check is the one this command could not make before. When the
 // wiring was a fragment the user pasted into their own settings file, all

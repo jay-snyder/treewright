@@ -174,9 +174,9 @@ pull request you have fetched — it is checked out rather than recreated, so th
 also how you get a worktree onto an existing branch.
 
 The window is named after a ticket key found in the slug, or after the slug
-itself, cut to ten characters when it is longer, unless [window-name] overrides
-it. A repository that tracks no tickets sets ticket_pattern = "" and always gets
-the second.
+itself, cut to fifteen characters when it is longer, unless [window-name]
+overrides it. Either way it keeps the case you typed. A repository that tracks
+no tickets sets ticket_pattern = "" and always gets the second.
 
 --prompt hands the agent its first instruction, so the window opens already
 working rather than waiting to be told what the work is. The text lands where
@@ -394,7 +394,7 @@ the tmux server's, wherever that was started. A binding passes
 with an agent state — working, waiting, done, or clear — as the window option
 @treewright_agent_state. The state shows in the AGENT column of "treewright ls"
 and as agent_state in its JSON, and "waiting" also puts a marker on the window's
-name (!ENG-142), so the one window that needs a person shows in any status line
+name (!eng-142), so the one window that needs a person shows in any status line
 with nothing added to tmux.conf.
 
 This is for an agent's own hooks to run rather than for typing: a hook that

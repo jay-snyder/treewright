@@ -46,7 +46,7 @@ func TestSendTypesOneLineAtTheAgent(t *testing.T) {
 	if r.stdout != "" {
 		t.Errorf("stdout = %q, want nothing", r.stdout)
 	}
-	if !strings.Contains(r.stderr, "sent to ENG-1") {
+	if !strings.Contains(r.stderr, "sent to eng-1") {
 		t.Errorf("stderr = %q, want the window it reached named", r.stderr)
 	}
 }
@@ -59,7 +59,7 @@ func TestSendShowsThePaneBeforeItTypes(t *testing.T) {
 	requireTmux(t)
 	f := newFixture(t, "command = \"sh -c 'echo overwrite the config file? y/n; sleep 300'\"\n")
 	f.mustRun("new", "eng-1")
-	waitForPane(t, windowIDNamed(t, "proj", "ENG-1"), "overwrite the config file?")
+	waitForPane(t, windowIDNamed(t, "proj", "eng-1"), "overwrite the config file?")
 
 	r := f.exec("send", "eng-1", "y")
 	if r.err != nil {
@@ -159,7 +159,7 @@ func TestSendRefusesTheCallersOwnWindow(t *testing.T) {
 	f.mustRun("new", "eng-1")
 
 	insideSession(t, "proj")
-	t.Setenv("TMUX_PANE", paneIn(t, "proj", "ENG-1"))
+	t.Setenv("TMUX_PANE", paneIn(t, "proj", "eng-1"))
 
 	r := f.exec("send", "eng-1", "do the thing")
 	if r.err == nil {
@@ -200,7 +200,7 @@ func TestSendRefusesAWindowHeldOpenAfterItsCommandDied(t *testing.T) {
 	requireTmux(t)
 	f := newFixture(t, "command = 'echo no such model >&2; exit 12'\n")
 	f.mustRun("new", "eng-1")
-	waitForPane(t, windowIDNamed(t, "proj", "ENG-1"), heldOpenNotice)
+	waitForPane(t, windowIDNamed(t, "proj", "eng-1"), heldOpenNotice)
 
 	r := f.exec("send", "eng-1", "carry on")
 	if r.err == nil {
@@ -221,7 +221,7 @@ func TestSendRefusesAWindowHeldOpenAfterItsCommandDied(t *testing.T) {
 	if got := panesOn(t, f.DirFor("eng-1")); got != 1 {
 		t.Errorf("%d panes in the worktree, want the held window still open", got)
 	}
-	pane, _ := tmuxctl(t, "capture-pane", "-p", "-t", windowIDNamed(t, "proj", "ENG-1"))
+	pane, _ := tmuxctl(t, "capture-pane", "-p", "-t", windowIDNamed(t, "proj", "eng-1"))
 	if !strings.Contains(pane, "no such model") {
 		t.Errorf("pane = %q, want the failure still readable", pane)
 	}

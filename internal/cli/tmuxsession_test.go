@@ -86,8 +86,8 @@ func TestNewOpensItsWindowInTheRepoSession(t *testing.T) {
 		t.Errorf("stderr = %q, want the attach command", r.stderr)
 	}
 
-	if got := windowsIn(t, "proj"); len(got) != 1 || got[0] != "ENG-142" {
-		t.Errorf("windows in session proj = %v, want just ENG-142", got)
+	if got := windowsIn(t, "proj"); len(got) != 1 || got[0] != "eng-142" {
+		t.Errorf("windows in session proj = %v, want just eng-142", got)
 	}
 	// And the window is in the worktree, not wherever treewright was run.
 	if got := panesOn(t, f.DirFor("eng-142-white-screen")); got != 1 {
@@ -97,8 +97,8 @@ func TestNewOpensItsWindowInTheRepoSession(t *testing.T) {
 	// identifies it later however its shell wanders and wherever it is dragged to.
 	// Checked here because this is the call that creates the session, the other of
 	// the two paths a window is opened by.
-	if got, want := windowStamp(t, "ENG-142", "@treewright_worktree"), f.DirFor("eng-142-white-screen"); got != want {
-		t.Errorf("window ENG-142 records worktree %q, want %q", got, want)
+	if got, want := windowStamp(t, "eng-142", "@treewright_worktree"), f.DirFor("eng-142-white-screen"); got != want {
+		t.Errorf("window eng-142 records worktree %q, want %q", got, want)
 	}
 }
 
@@ -119,8 +119,8 @@ func TestNewRecordsTheWorktreeOnItsWindow(t *testing.T) {
 		"@treewright_branch":   f.BranchFor("eng-142-white-screen"),
 	}
 	for option, value := range want {
-		if got := windowStamp(t, "ENG-142", option); got != value {
-			t.Errorf("window ENG-142 has %s = %q, want %q", option, got, value)
+		if got := windowStamp(t, "eng-142", option); got != value {
+			t.Errorf("window eng-142 has %s = %q, want %q", option, got, value)
 		}
 	}
 }
@@ -132,15 +132,18 @@ func TestNewRecordsTheWorktreeOnItsWindow(t *testing.T) {
 // their own.
 //
 // ticket_pattern = "" is the opt-out, so "api-2-fix" — a slug the default
-// pattern would read as key API-2 — keeps its whole name here.
+// pattern would read as key api-2 — keeps its whole name here.
 func TestNewWorksFromADescriptionWithNoTicket(t *testing.T) {
 	requireTmux(t)
 	f := newFixture(t, "command = 'sleep 300'\nticket_pattern = ''\n")
 
+	// One slug over the cap and one under it, so this covers a description that
+	// is shortened as well as one that is not: "dark-mode-toggle" is a rune over
+	// and comes back whole, since marking it would cost the column it saved.
 	for _, tc := range []struct{ slug, window string }{
-		{"dark-mode-toggle", "DARK-MODE…"},
-		{"payment-retries", "PAYMENT-RE…"},
-		{"api-2-fix", "API-2-FIX"},
+		{"dark-mode-toggle", "dark-mode-toggle"},
+		{"payment-retries-audit", "payment-retries…"},
+		{"api-2-fix", "api-2-fix"},
 	} {
 		f.mustRun("new", tc.slug)
 
@@ -166,8 +169,8 @@ func TestNewShortensALongSlugUnderTheDefaultPattern(t *testing.T) {
 
 	f.mustRun("new", "flaky-payment-test")
 
-	if got := windowStamp(t, "FLAKY-PAYM…", "@treewright_slug"); got != "flaky-payment-test" {
-		t.Errorf("window FLAKY-PAYM… has @treewright_slug = %q, want %q", got, "flaky-payment-test")
+	if got := windowStamp(t, "flaky-payment-t…", "@treewright_slug"); got != "flaky-payment-test" {
+		t.Errorf("window flaky-payment-t… has @treewright_slug = %q, want %q", got, "flaky-payment-test")
 	}
 }
 
@@ -181,14 +184,14 @@ func TestTheBaseWindowRecordsNoWorktree(t *testing.T) {
 
 	f.mustRun("base")
 
-	if got, want := windowStamp(t, "MAIN", "@treewright_worktree"), f.MainDir; got != want {
+	if got, want := windowStamp(t, "main", "@treewright_worktree"), f.MainDir; got != want {
 		t.Errorf("base window records worktree %q, want the main checkout %q", got, want)
 	}
-	if got := windowStamp(t, "MAIN", "@treewright_repo"); got != "proj" {
+	if got := windowStamp(t, "main", "@treewright_repo"); got != "proj" {
 		t.Errorf("base window records repo %q, want proj", got)
 	}
 	for _, option := range []string{"@treewright_slug", "@treewright_branch"} {
-		if got := windowStamp(t, "MAIN", option); got != "" {
+		if got := windowStamp(t, "main", option); got != "" {
 			t.Errorf("base window has %s = %q, want it left unset", option, got)
 		}
 	}
@@ -210,8 +213,8 @@ func TestNewJoinsTheSessionAlreadyRunning(t *testing.T) {
 	}
 
 	got := windowsIn(t, "proj")
-	if len(got) != 2 || got[0] != "ENG-1" || got[1] != "ENG-2" {
-		t.Errorf("windows in session proj = %v, want ENG-1 and ENG-2", got)
+	if len(got) != 2 || got[0] != "eng-1" || got[1] != "eng-2" {
+		t.Errorf("windows in session proj = %v, want eng-1 and eng-2", got)
 	}
 }
 
@@ -228,8 +231,8 @@ func TestNewDoesNotJoinASimilarlyNamedSession(t *testing.T) {
 		t.Fatalf("new: %v\n%s", r.err, r.both())
 	}
 
-	if got := windowsIn(t, "proj"); len(got) != 1 || got[0] != "ENG-1" {
-		t.Errorf("windows in session proj = %v, want just ENG-1", got)
+	if got := windowsIn(t, "proj"); len(got) != 1 || got[0] != "eng-1" {
+		t.Errorf("windows in session proj = %v, want just eng-1", got)
 	}
 	if got := windowsIn(t, "projector"); len(got) != 1 || got[0] != "UNRELATED" {
 		t.Errorf("windows in session projector = %v, want it untouched", got)
@@ -254,17 +257,17 @@ func TestReposDoNotShareASession(t *testing.T) {
 		t.Fatalf("new in other: %v\n%s", r.err, r.both())
 	}
 
-	if got := windowsIn(t, "proj"); len(got) != 1 || got[0] != "ENG-1" {
+	if got := windowsIn(t, "proj"); len(got) != 1 || got[0] != "eng-1" {
 		t.Errorf("windows in session proj = %v, want only its own worktree", got)
 	}
-	if got := windowsIn(t, "other"); len(got) != 1 || got[0] != "ENG-2" {
+	if got := windowsIn(t, "other"); len(got) != 1 || got[0] != "eng-2" {
 		t.Errorf("windows in session other = %v, want only its own worktree", got)
 	}
 }
 
 // TestBaseSelectsTheOneBaseWindow covers what made two repositories in one
 // session unreadable: every repo's base window is named after its base branch, so
-// running base twice used to leave two windows called MAIN.
+// running base twice used to leave two windows called main.
 func TestBaseSelectsTheOneBaseWindow(t *testing.T) {
 	requireTmux(t)
 	f := newFixture(t, "command = 'sleep 300'\n")
@@ -276,8 +279,8 @@ func TestBaseSelectsTheOneBaseWindow(t *testing.T) {
 		t.Fatalf("base again: %v\n%s", r.err, r.both())
 	}
 
-	if got := windowsIn(t, "proj"); len(got) != 1 || got[0] != "MAIN" {
-		t.Errorf("windows in session proj = %v, want one MAIN", got)
+	if got := windowsIn(t, "proj"); len(got) != 1 || got[0] != "main" {
+		t.Errorf("windows in session proj = %v, want one main", got)
 	}
 	if got := panesOn(t, f.MainDir); got != 1 {
 		t.Errorf("%d panes in the main checkout, want 1", got)
@@ -304,7 +307,7 @@ func TestBaseDoesNotMistakeTheCallersOwnShellForTheBaseWindow(t *testing.T) {
 		t.Fatalf("base: %v\n%s", r.err, r.both())
 	}
 
-	if got := windowsIn(t, "proj"); len(got) != 1 || got[0] != "MAIN" {
+	if got := windowsIn(t, "proj"); len(got) != 1 || got[0] != "main" {
 		t.Errorf("windows in session proj = %v, want the base window opened", got)
 	}
 	if strings.Contains(r.stderr, "rather than proj") {
@@ -332,7 +335,7 @@ func TestBaseFromInsideTheBaseWindowStaysWhereItIs(t *testing.T) {
 		t.Fatalf("base again: %v\n%s", r.err, r.both())
 	}
 
-	if got := windowsIn(t, "proj"); len(got) != 1 || got[0] != "MAIN" {
+	if got := windowsIn(t, "proj"); len(got) != 1 || got[0] != "main" {
 		t.Errorf("windows in session proj = %v, want the one base window", got)
 	}
 	if got := panesOn(t, f.MainDir); got != 1 {
@@ -354,14 +357,14 @@ func TestResumeUsesTheWindowOpenInAnotherSession(t *testing.T) {
 	wt := f.Worktree("eng-9")
 
 	startSession(t, "elsewhere", "DECOY", f.Root)
-	openWindowOn(t, "elsewhere", "ENG-9", wt.Dir)
+	openWindowOn(t, "elsewhere", "eng-9", wt.Dir)
 
 	r := f.exec("resume", "eng-9")
 	if r.err != nil {
 		t.Fatalf("resume: %v\n%s", r.err, r.both())
 	}
 
-	if !strings.Contains(flat(r.stderr), "window ENG-9 is in session elsewhere, not proj") {
+	if !strings.Contains(flat(r.stderr), "window eng-9 is in session elsewhere, not proj") {
 		t.Errorf("stderr = %q, want the foreign session named", r.stderr)
 	}
 	// And the way in has to reach that session rather than this repository's,
@@ -378,8 +381,8 @@ func TestResumeUsesTheWindowOpenInAnotherSession(t *testing.T) {
 	if got := panesOn(t, wt.Dir); got != 1 {
 		t.Errorf("%d panes in the worktree, want 1 — a duplicate window was opened", got)
 	}
-	if got := activeWindowIn(t, "elsewhere"); got != "ENG-9" {
-		t.Errorf("active window in session elsewhere = %q, want ENG-9 selected", got)
+	if got := activeWindowIn(t, "elsewhere"); got != "eng-9" {
+		t.Errorf("active window in session elsewhere = %q, want eng-9 selected", got)
 	}
 }
 
@@ -392,15 +395,15 @@ func TestLsReportsTheOpenWindow(t *testing.T) {
 	mine := f.Worktree("eng-1")
 	stray := f.Worktree("eng-2")
 
-	startSession(t, "proj", "MAIN", f.MainDir)
-	openWindowOn(t, "proj", "ENG-1", mine.Dir)
-	startSession(t, "elsewhere", "ENG-2", stray.Dir)
+	startSession(t, "proj", "main", f.MainDir)
+	openWindowOn(t, "proj", "eng-1", mine.Dir)
+	startSession(t, "elsewhere", "eng-2", stray.Dir)
 
 	r := f.exec("ls")
 	if r.err != nil {
 		t.Fatalf("ls: %v\n%s", r.err, r.both())
 	}
-	for _, want := range []string{"ENG-1", "elsewhere:ENG-2"} {
+	for _, want := range []string{"eng-1", "elsewhere:eng-2"} {
 		if !strings.Contains(r.stdout, want) {
 			t.Errorf("table = %q, want %q in the WINDOW column", r.stdout, want)
 		}
@@ -419,11 +422,11 @@ func TestLsReportsTheOpenWindow(t *testing.T) {
 	for _, row := range rows {
 		switch row.Slug {
 		case "eng-1":
-			if row.Window != "ENG-1" || row.WindowSession != "proj" {
+			if row.Window != "eng-1" || row.WindowSession != "proj" {
 				t.Errorf("row = %+v, want the window named in session proj", row)
 			}
 		case "eng-2":
-			if row.Window != "ENG-2" || row.WindowSession != "elsewhere" {
+			if row.Window != "eng-2" || row.WindowSession != "elsewhere" {
 				t.Errorf("row = %+v, want the window named in session elsewhere", row)
 			}
 		}
@@ -450,14 +453,14 @@ func TestLsSaysWhichWindowIsYoursAndWhichEndsItsSession(t *testing.T) {
 	alone := f.Worktree("eng-2")
 
 	// proj holds two windows, so closing either leaves the session standing.
-	startSession(t, "proj", "MAIN", f.MainDir)
-	openWindowOn(t, "proj", "ENG-1", mine.Dir)
+	startSession(t, "proj", "main", f.MainDir)
+	openWindowOn(t, "proj", "eng-1", mine.Dir)
 	// A session of one, which is the case worth warning about.
-	startSession(t, "solo", "ENG-2", alone.Dir)
+	startSession(t, "solo", "eng-2", alone.Dir)
 
 	// Standing in the worktree's own window, as an agent running there is.
 	insideSession(t, "proj")
-	t.Setenv("TMUX_PANE", paneIn(t, "proj", "ENG-1"))
+	t.Setenv("TMUX_PANE", paneIn(t, "proj", "eng-1"))
 
 	rows := windowRows(t, f)
 	if got := rows["eng-1"]; !got.WindowIsCurrent {
@@ -556,16 +559,16 @@ func TestTheWorktreesWindowIsFoundHoweverWindowsAreArranged(t *testing.T) {
 		t.Fatalf("output is not valid JSON: %v\n%s", err, j.stdout)
 	}
 	for _, row := range rows {
-		if row.Slug == "eng-1" && row.Window != "ENG-1" {
-			t.Errorf("window for eng-1 = %q, want the worktree's own window ENG-1", row.Window)
+		if row.Slug == "eng-1" && row.Window != "eng-1" {
+			t.Errorf("window for eng-1 = %q, want the worktree's own window eng-1", row.Window)
 		}
 	}
 
 	if r := f.exec("resume", "eng-1"); r.err != nil {
 		t.Fatalf("resume: %v\n%s", r.err, r.both())
 	}
-	if got := activeWindowIn(t, "proj"); got != "ENG-1" {
-		t.Errorf("active window in session proj = %q, want ENG-1 rather than the window visiting it", got)
+	if got := activeWindowIn(t, "proj"); got != "eng-1" {
+		t.Errorf("active window in session proj = %q, want eng-1 rather than the window visiting it", got)
 	}
 	// Two panes stand in the worktree, and resuming must not make a third.
 	if got := panesOn(t, wt); got != 2 {
@@ -591,7 +594,7 @@ func TestABlankCommandLeavesAShellInTheWindow(t *testing.T) {
 		t.Fatalf("new: %v\n%s", r.err, r.both())
 	}
 
-	id := windowIDNamed(t, "proj", "ENG-1")
+	id := windowIDNamed(t, "proj", "eng-1")
 	shell, err := tmuxctl(t, "show-options", "-gv", "default-shell")
 	if err != nil {
 		t.Fatalf("ask tmux for its default shell: %v\n%s", shell, err)
@@ -606,7 +609,7 @@ func TestABlankCommandLeavesAShellInTheWindow(t *testing.T) {
 	}
 	// And it is a window like any other: found by the worktree treewright
 	// stamped on it, so resume switches to it rather than opening a second.
-	if stamped := windowStamp(t, "ENG-1", "@treewright_worktree"); stamped != f.DirFor("eng-1") {
+	if stamped := windowStamp(t, "eng-1", "@treewright_worktree"); stamped != f.DirFor("eng-1") {
 		t.Errorf("window records worktree %q, want %q", stamped, f.DirFor("eng-1"))
 	}
 }
@@ -627,7 +630,7 @@ func TestAFailingCommandKeepsItsWindowOpen(t *testing.T) {
 	// The command has to have run and failed before there is anything to see,
 	// and nothing waits for it — so wait for the wrapper's last line, then read
 	// the whole pane it is holding open.
-	id := windowIDNamed(t, "proj", "BOOM")
+	id := windowIDNamed(t, "proj", "boom")
 	waitForPane(t, id, "press Enter")
 	pane, err := tmuxctl(t, "capture-pane", "-p", "-t", id)
 	if err != nil {

@@ -15,8 +15,8 @@ import (
 //
 // The alternative — opening windows in whatever session the caller happens to be
 // attached to — mixes repositories together in one status line, where two windows
-// named MAIN belong to different repositories and a ticket key says nothing about
-// which checkout it is in. Worse, it made `resume` a silent no-op across
+// both called main belong to different repositories and a ticket key says nothing
+// about which checkout it is in. Worse, it made `resume` a silent no-op across
 // sessions: selecting a window in a session your client is not attached to
 // succeeds and changes nothing you can see.
 //

@@ -1190,7 +1190,7 @@ func openBaseWindow(env *Env, cfg *config.Config, run windowCommand) (created bo
 	if tmux.Available() {
 		return openWindow(env, cfg, tmux.Spec{
 			Dir:  cfg.MainDir,
-			Name: strings.ToUpper(cfg.BaseBranch),
+			Name: cfg.BaseBranch,
 		}, run)
 	}
 

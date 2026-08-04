@@ -951,10 +951,10 @@ func TestPruneLeavesTheWindowOfAWorktreeItCouldNotRemove(t *testing.T) {
 	}
 	// The removed worktree's window is the one now pointing at nothing, and the
 	// only one whose closing should be brought up.
-	if !strings.Contains(r.stderr, "tmux window REAPABLE now points at a deleted directory") {
+	if !strings.Contains(r.stderr, "tmux window reapable now points at a deleted directory") {
 		t.Errorf("stderr = %q, want the removed worktree's window offered", r.stderr)
 	}
-	if strings.Contains(r.stderr, "tmux window WEDGED") {
+	if strings.Contains(r.stderr, "tmux window wedged") {
 		t.Errorf("stderr offers the locked worktree's live window for closing:\n%s", r.stderr)
 	}
 }
@@ -980,7 +980,7 @@ func TestResume(t *testing.T) {
 		requireTmux(t)
 		out := f.mustRun("resume", "alpha")
 		// The window alpha's slug names, in the repository's own session.
-		want := "window ALPHA is open in tmux session proj"
+		want := "window alpha is open in tmux session proj"
 		if !strings.Contains(out, want) {
 			t.Errorf("output = %q, want %q", out, want)
 		}

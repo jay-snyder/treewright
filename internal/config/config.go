@@ -45,7 +45,7 @@ const (
 	//
 	// The key has to be a whole word — the trailing (?:-|$) — because without it
 	// the digits ended wherever they liked and ordinary English slugs came back
-	// as ticket keys: "fix-2fa-login" opened a window called FIX-2. A repository
+	// as ticket keys: "fix-2fa-login" opened a window called fix-2. A repository
 	// that does track work by ticket loses nothing to the anchor, since a key is
 	// followed by the description or by the end of the slug either way.
 	//
@@ -567,46 +567,65 @@ func (c *Config) AgentCarries() []string {
 	return out
 }
 
-// WindowName derives the tmux window name for a slug, uppercased.
+// WindowName derives the tmux window name for a slug.
 //
 // Precedence: an explicit override wins; else a ticket key matched by
-// TicketPattern (so "proj-142-white-screen" becomes "PROJ-142"); else the slug,
+// TicketPattern (so "proj-142-white-screen" becomes "proj-142"); else the slug,
 // shortened by shorten to keep the tmux status line readable.
+//
+// All three keep the case they were given. A window name is read beside the
+// thing it names — the slug in `tw ls` and in every command that takes one, the
+// branch in git, the key in whatever tracker it came from — and uppercasing
+// made the status line the one place that spelled any of them differently. The
+// ticket key is where that showed most, because DefaultTicketPattern is
+// case-insensitive by design: "PROJ-142-white-screen" gives PROJ-142 and
+// "proj-142-white-screen" gives proj-142, and which of those a person sees is a
+// fact about how their tracker writes keys rather than something for treewright
+// to settle on their behalf. Following what was typed is the rule nobody has to
+// learn.
 //
 // An empty TicketPattern is the opt-out, and reaches here only from a config
 // that wrote ticket_pattern = "" itself: no ticket scheme in this repository, so
 // nothing is looked for and the slug always names the window.
 func (c *Config) WindowName(slug, override string) string {
 	if override != "" {
-		return strings.ToUpper(override)
+		return override
 	}
 	if c.TicketPattern != "" {
 		// Compiled here rather than cached because this runs at most once per
 		// command; Load has already proven the pattern compiles.
 		if re, err := regexp.Compile(c.TicketPattern); err == nil {
 			if m := re.FindStringSubmatch(slug); len(m) > 1 && m[1] != "" {
-				return strings.ToUpper(m[1])
+				return m[1]
 			}
 		}
 	}
-	return strings.ToUpper(shorten(slug))
+	return shorten(slug)
 }
 
 // maxWindowName caps a window named after its slug, in columns of the tmux
 // status line those names share.
 //
-// Ten is a ticket key's width, and a slug-named window is held to the same one on
-// purpose: the status line is the same width whichever a repository uses, and a
-// name that fits is worth more than a name that is whole. A description is cut
-// mid-word by that, which is a real cost and the deliberate one.
+// The status line is still the constraint — several of these sit side by side in
+// it, and a name that fits is worth more there than a name that is whole.
+// Fifteen is what a description needs to survive being read at a glance, which
+// is the job a slug-named window has. It used to be ten, on the argument that a
+// ticket key is ten wide and a description should be held to the same: that
+// treated the key's width as a budget rather than as the length keys happen to
+// be, and a description cut to it mostly reported that something had been cut.
 //
-// Cutting at a word boundary instead was the alternative, and it loses at this
-// width. It has to give back a whole word to find the boundary, so
-// "flaky-payment-test" arrives as FLAKY… rather than FLAKY-PAYM…, and — because
-// cutting further escapes the guard below — "rewrite-css" arrives as REWRITE…
-// where the blunt cut hands it back whole. It only pays at a cap wide enough that
-// the nearest boundary is usually near it.
-const maxWindowName = 10
+// The cut is blunt, and the wider cap is not licence to revisit that. A
+// word-boundary cut has to give back a whole word to find a boundary, and the
+// names it takes that word from are the ones only just over the cap — where the
+// blunt cut, running into the guard below, hands the name back whole:
+// "dark-mode-toggle" is sixteen runes and arrives intact, where a boundary rule
+// would spend six columns that fit to arrive at "dark-mode…". Widening makes
+// that case more common rather than less: fewer slugs are cut at all, and a
+// larger share of the ones that are sit just over the line. What the boundary
+// rule buys in exchange is two columns and a stranded letter on a long name —
+// "flaky-payment…" where the blunt cut gives "flaky-payment-t…" — which is a
+// tidier name rather than a more useful one.
+const maxWindowName = 15
 
 // ellipsis marks a name something was dropped from. The character rather than
 // three periods, because it is one column where "..." is three and the whole
@@ -622,8 +641,9 @@ const ellipsis = "…"
 // both misjudge the width and split a multi-byte character down the middle.
 //
 // The result is used only when it is narrower than what it replaces, which is
-// what keeps an eleven-character slug whole: "rewrite-css" cut to ten and marked
-// is eleven columns again, one character spent to say a character is missing.
+// what keeps a sixteen-character slug whole: "dark-mode-toggle" cut to fifteen
+// and marked is sixteen columns again, one character spent to say a character is
+// missing.
 func shorten(slug string) string {
 	r := []rune(slug)
 	if len(r) <= maxWindowName {
@@ -631,8 +651,8 @@ func shorten(slug string) string {
 	}
 	// A cut landing just after a hyphen would leave one against the ellipsis,
 	// where it reads as punctuation rather than as part of the name —
-	// "dark-mode-toggle" as DARK-MODE-… rather than DARK-MODE…. A slug may not
-	// begin with a hyphen, so this can never trim everything away.
+	// "checkout-total-fix" as checkout-total-… rather than checkout-total…. A
+	// slug may not begin with a hyphen, so this can never trim everything away.
 	kept := r[:maxWindowName]
 	for len(kept) > 0 && kept[len(kept)-1] == '-' {
 		kept = kept[:len(kept)-1]

@@ -45,7 +45,7 @@ func TestSignalStampsTheWorktreesWindow(t *testing.T) {
 	requireTmux(t)
 	f := newFixture(t, "command = 'sleep 300'\n")
 	f.mustRun("new", "alpha")
-	id := windowIDNamed(t, "proj", "ALPHA")
+	id := windowIDNamed(t, "proj", "alpha")
 	t.Chdir(f.DirFor("alpha"))
 
 	r := f.exec("signal", "waiting")
@@ -62,12 +62,12 @@ func TestSignalStampsTheWorktreesWindow(t *testing.T) {
 	}
 	// waiting is the one state that must reach a status line, so the name
 	// carries it...
-	if got := rawNameOn(t, id); got != "!ALPHA" {
+	if got := rawNameOn(t, id); got != "!alpha" {
 		t.Errorf("window name = %q, want the waiting marker on it", got)
 	}
 	// ...but the marker is display, not identity: everything reading through
 	// the package sees the name underneath.
-	if got := tmux.Windows("proj")[f.DirFor("alpha")]; got.Name != "ALPHA" || got.State != "waiting" {
+	if got := tmux.Windows("proj")[f.DirFor("alpha")]; got.Name != "alpha" || got.State != "waiting" {
 		t.Errorf("window through the package = %+v, want the clean name with the state", got)
 	}
 
@@ -76,7 +76,7 @@ func TestSignalStampsTheWorktreesWindow(t *testing.T) {
 	if got := stateOn(t, id); got != "working" {
 		t.Errorf("agent state = %q, want %q", got, "working")
 	}
-	if got := rawNameOn(t, id); got != "ALPHA" {
+	if got := rawNameOn(t, id); got != "alpha" {
 		t.Errorf("window name = %q, want the marker gone", got)
 	}
 
@@ -108,7 +108,7 @@ func TestSignalReachesTheBaseWindow(t *testing.T) {
 	f.mustRun("base")
 
 	f.mustRun("signal", "working")
-	if got := stateOn(t, windowIDNamed(t, "proj", "MAIN")); got != "working" {
+	if got := stateOn(t, windowIDNamed(t, "proj", "main")); got != "working" {
 		t.Errorf("agent state on the base window = %q, want %q", got, "working")
 	}
 }
@@ -235,15 +235,15 @@ func TestAHeldOpenWindowShedsItsAgentState(t *testing.T) {
 	// own, through $TMUX_PANE, exactly as the wrapper's cleanup aims its calls.
 	f := newFixture(t,
 		"command = 'tmux set-window-option -t $TMUX_PANE "+tmux.AgentStateOption+" working"+
-			" && tmux rename-window -t $TMUX_PANE !BOOM && exit 3'\n")
+			" && tmux rename-window -t $TMUX_PANE !boom && exit 3'\n")
 	f.mustRun("new", "boom")
 
-	id := heldWindowID(t, "BOOM")
+	id := heldWindowID(t, "boom")
 	waitForPane(t, id, "press Enter")
 	if got := stateOn(t, id); got != "" {
 		t.Errorf("agent state on the held window = %q, want it shed with the agent", got)
 	}
-	if got := rawNameOn(t, id); got != "BOOM" {
+	if got := rawNameOn(t, id); got != "boom" {
 		t.Errorf("held window's name = %q, want the waiting marker shed too", got)
 	}
 }

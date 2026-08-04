@@ -669,10 +669,10 @@ func renderConfig(s configSettings) string {
 	}
 
 	fmt.Fprintf(&b, "# Regexp whose first submatch names the tmux window, so a slug like\n")
-	fmt.Fprintf(&b, "# eng-142-white-screen opens a window called ENG-142. Pin it to your own\n")
+	fmt.Fprintf(&b, "# eng-142-white-screen opens a window called eng-142. Pin it to your own\n")
 	fmt.Fprintf(&b, "# ticket scheme to stop it matching any letters-dash-digits word, or set\n")
 	fmt.Fprintf(&b, "# it to \"\" if this repository's work has no ticket behind it — then the\n")
-	fmt.Fprintf(&b, "# slug always names the window, cut to ten characters if it is longer.\n")
+	fmt.Fprintf(&b, "# slug always names the window, cut to fifteen characters if it is longer.\n")
 	if s.ticketPatternSet {
 		// Written on whether the key was there rather than on whether it holds
 		// anything: ticket_pattern = "" is the opt-out, and a refresh that dropped

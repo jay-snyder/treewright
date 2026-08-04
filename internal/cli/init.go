@@ -115,8 +115,9 @@ func cmdTmuxInit(env *Env, args []string) error {
 // wiring: a repository treewright does not manage has no window for `signal` to
 // find, so the hooks there cost nothing and say nothing. What per-repo costs is
 // real and recurs, since that directory is one every worktree starts without:
-// the plugin reaches the MAIN window and nowhere else until `agent = "claude"`
-// carries it, which is a second step nobody is told about until doctor says so.
+// the plugin reaches the base checkout's window and nowhere else until
+// `agent = "claude"` carries it, which is a second step nobody is told about
+// until doctor says so.
 // One install that covers every checkout, made and to be made, has no such
 // gap. --local is still there for a machine where treewright's wiring should
 // touch one repository and no other. See "Where the wiring goes" in

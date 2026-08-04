@@ -52,10 +52,10 @@ func TestParsePanes(t *testing.T) {
 	}{
 		{
 			name:   "one pane",
-			out:    pane("@3", "myrepo", "ENG-1", "/Users/x/code/repo"),
+			out:    pane("@3", "myrepo", "eng-1", "/Users/x/code/repo"),
 			prefer: "myrepo",
 			want: map[string]Window{
-				"/Users/x/code/repo": {ID: "@3", Session: "myrepo", Name: "ENG-1", SessionWindows: 2},
+				"/Users/x/code/repo": {ID: "@3", Session: "myrepo", Name: "eng-1", SessionWindows: 2},
 			},
 		},
 		{
@@ -158,37 +158,37 @@ func TestParsePanes(t *testing.T) {
 		},
 		{
 			// The everyday collision: `treewright cd eng-1` leaves the base window's
-			// shell standing in the worktree, so MAIN and ENG-1 both report
+			// shell standing in the worktree, so main and eng-1 both report
 			// the same directory. The window treewright opened there is the worktree's,
 			// whichever of them the listing reaches first.
 			name: "the window opened on the worktree wins over one standing in it",
-			out: pane("@1", "myrepo", "MAIN", "/wt/eng-1") + "\n" +
-				stamped("@2", "myrepo", "ENG-1", "/wt/eng-1", "/wt/eng-1"),
+			out: pane("@1", "myrepo", "main", "/wt/eng-1") + "\n" +
+				stamped("@2", "myrepo", "eng-1", "/wt/eng-1", "/wt/eng-1"),
 			prefer: "myrepo",
 			want: map[string]Window{
-				"/wt/eng-1": {ID: "@2", Session: "myrepo", Name: "ENG-1", Worktree: "/wt/eng-1", SessionWindows: 2},
+				"/wt/eng-1": {ID: "@2", Session: "myrepo", Name: "eng-1", Worktree: "/wt/eng-1", SessionWindows: 2},
 			},
 		},
 		{
 			// Even from another session, which is the case `resume` already reports
 			// and switches to rather than duplicating.
 			name: "the window opened on the worktree wins from another session",
-			out: pane("@1", "myrepo", "MAIN", "/wt/eng-1") + "\n" +
-				stamped("@2", "elsewhere", "ENG-1", "/wt/eng-1", "/wt/eng-1"),
+			out: pane("@1", "myrepo", "main", "/wt/eng-1") + "\n" +
+				stamped("@2", "elsewhere", "eng-1", "/wt/eng-1", "/wt/eng-1"),
 			prefer: "myrepo",
 			want: map[string]Window{
-				"/wt/eng-1": {ID: "@2", Session: "elsewhere", Name: "ENG-1", Worktree: "/wt/eng-1", SessionWindows: 2},
+				"/wt/eng-1": {ID: "@2", Session: "elsewhere", Name: "eng-1", Worktree: "/wt/eng-1", SessionWindows: 2},
 			},
 		},
 		{
 			// A worktree's window is still its own after its shell walks off, so
 			// nothing opens a second window on a worktree that already has one.
 			name:   "a window opened on a worktree answers for it after its pane moves",
-			out:    stamped("@2", "myrepo", "ENG-1", "/wt/eng-1", "/somewhere/else"),
+			out:    stamped("@2", "myrepo", "eng-1", "/wt/eng-1", "/somewhere/else"),
 			prefer: "myrepo",
 			want: map[string]Window{
-				"/wt/eng-1":       {ID: "@2", Session: "myrepo", Name: "ENG-1", Worktree: "/wt/eng-1", SessionWindows: 2},
-				"/somewhere/else": {ID: "@2", Session: "myrepo", Name: "ENG-1", Worktree: "/wt/eng-1", SessionWindows: 2},
+				"/wt/eng-1":       {ID: "@2", Session: "myrepo", Name: "eng-1", Worktree: "/wt/eng-1", SessionWindows: 2},
+				"/somewhere/else": {ID: "@2", Session: "myrepo", Name: "eng-1", Worktree: "/wt/eng-1", SessionWindows: 2},
 			},
 		},
 		{
@@ -196,12 +196,12 @@ func TestParsePanes(t *testing.T) {
 			// loses to one that claims nothing, since closing or switching to the
 			// other worktree's window in this one's name is the damaging mistake.
 			name: "a window opened on another worktree loses to an unstamped one",
-			out: stamped("@1", "myrepo", "ENG-2", "/wt/eng-2", "/wt/eng-1") + "\n" +
+			out: stamped("@1", "myrepo", "eng-2", "/wt/eng-2", "/wt/eng-1") + "\n" +
 				pane("@5", "myrepo", "VISITOR", "/wt/eng-1"),
 			prefer: "myrepo",
 			want: map[string]Window{
 				"/wt/eng-1": {ID: "@5", Session: "myrepo", Name: "VISITOR", SessionWindows: 2},
-				"/wt/eng-2": {ID: "@1", Session: "myrepo", Name: "ENG-2", Worktree: "/wt/eng-2", SessionWindows: 2},
+				"/wt/eng-2": {ID: "@1", Session: "myrepo", Name: "eng-2", Worktree: "/wt/eng-2", SessionWindows: 2},
 			},
 		},
 		{
@@ -227,10 +227,10 @@ func TestParsePanes(t *testing.T) {
 			// The agent state rides the same listing the worktree stamp does, so
 			// one tmux invocation still answers for every window.
 			name:   "an agent state is read back",
-			out:    signaled("@2", "myrepo", "ENG-1", "/wt/eng-1", "waiting", "/wt/eng-1"),
+			out:    signaled("@2", "myrepo", "eng-1", "/wt/eng-1", "waiting", "/wt/eng-1"),
 			prefer: "myrepo",
 			want: map[string]Window{
-				"/wt/eng-1": {ID: "@2", Session: "myrepo", Name: "ENG-1", State: "waiting", Worktree: "/wt/eng-1", SessionWindows: 2},
+				"/wt/eng-1": {ID: "@2", Session: "myrepo", Name: "eng-1", State: "waiting", Worktree: "/wt/eng-1", SessionWindows: 2},
 			},
 		},
 		{
@@ -238,10 +238,10 @@ func TestParsePanes(t *testing.T) {
 			// so every message, table cell, and JSON field carries the name
 			// underneath treewright's own punctuation.
 			name:   "the waiting marker is stripped from the name",
-			out:    signaled("@2", "myrepo", "!ENG-1", "/wt/eng-1", "waiting", "/wt/eng-1"),
+			out:    signaled("@2", "myrepo", "!eng-1", "/wt/eng-1", "waiting", "/wt/eng-1"),
 			prefer: "myrepo",
 			want: map[string]Window{
-				"/wt/eng-1": {ID: "@2", Session: "myrepo", Name: "ENG-1", State: "waiting", Worktree: "/wt/eng-1", SessionWindows: 2},
+				"/wt/eng-1": {ID: "@2", Session: "myrepo", Name: "eng-1", State: "waiting", Worktree: "/wt/eng-1", SessionWindows: 2},
 			},
 		},
 		{
@@ -249,10 +249,10 @@ func TestParsePanes(t *testing.T) {
 			// worktrees can say which of their windows would take a session
 			// down with it without a round trip per row.
 			name:   "a lone window reports the session it would end",
-			out:    inSession(1, "@2", "myrepo", "ENG-1", "/wt/eng-1", "", "/wt/eng-1"),
+			out:    inSession(1, "@2", "myrepo", "eng-1", "/wt/eng-1", "", "/wt/eng-1"),
 			prefer: "myrepo",
 			want: map[string]Window{
-				"/wt/eng-1": {ID: "@2", Session: "myrepo", Name: "ENG-1", Worktree: "/wt/eng-1", SessionWindows: 1},
+				"/wt/eng-1": {ID: "@2", Session: "myrepo", Name: "eng-1", Worktree: "/wt/eng-1", SessionWindows: 1},
 			},
 		},
 		{
@@ -260,10 +260,10 @@ func TestParsePanes(t *testing.T) {
 			// leaves the count at zero, which reads as "not the last window".
 			// Saying nothing is the right way to be wrong about a caveat.
 			name:   "an unreadable count is not a claim",
-			out:    inSession(0, "@2", "myrepo", "ENG-1", "/wt/eng-1", "", "/wt/eng-1"),
+			out:    inSession(0, "@2", "myrepo", "eng-1", "/wt/eng-1", "", "/wt/eng-1"),
 			prefer: "myrepo",
 			want: map[string]Window{
-				"/wt/eng-1": {ID: "@2", Session: "myrepo", Name: "ENG-1", Worktree: "/wt/eng-1"},
+				"/wt/eng-1": {ID: "@2", Session: "myrepo", Name: "eng-1", Worktree: "/wt/eng-1"},
 			},
 		},
 		{
@@ -295,15 +295,15 @@ func TestParsePanes(t *testing.T) {
 // offered to close.
 func TestParsePanesIgnoresWindowOrder(t *testing.T) {
 	lines := []string{
-		pane("@1", "proj", "MAIN", "/wt/eng-1"), // the base window, after `treewright cd eng-1`
-		stamped("@2", "proj", "ENG-1", "/wt/eng-1", "/wt/eng-1"),
-		stamped("@3", "proj", "ENG-2", "/wt/eng-2", "/wt/eng-2"),
+		pane("@1", "proj", "main", "/wt/eng-1"), // the base window, after `treewright cd eng-1`
+		stamped("@2", "proj", "eng-1", "/wt/eng-1", "/wt/eng-1"),
+		stamped("@3", "proj", "eng-2", "/wt/eng-2", "/wt/eng-2"),
 		pane("@4", "elsewhere", "HAND-MADE", "/wt/eng-2"),
 	}
 
 	want := parsePanes(strings.Join(lines, "\n"), "proj")
-	if got := want["/wt/eng-1"].Name; got != "ENG-1" {
-		t.Fatalf("window for /wt/eng-1 = %q, want the worktree's own window ENG-1", got)
+	if got := want["/wt/eng-1"].Name; got != "eng-1" {
+		t.Fatalf("window for /wt/eng-1 = %q, want the worktree's own window eng-1", got)
 	}
 
 	// Every arrangement of the same windows has to answer the same way, so this

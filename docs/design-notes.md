@@ -116,7 +116,7 @@ that way twice.
 
 **The pattern matched things that were not keys.** `(?i)^([a-z]+-[0-9]+)` let the
 digits end anywhere, so `fix-2fa-login` — work on two-factor login — opened a
-window called `FIX-2`. The fix is to require the key to be a whole word, `(?:-|$)`
+window called `fix-2`. The fix is to require the key to be a whole word, `(?:-|$)`
 at the end, which costs a real key nothing: a key is followed by the description
 or by the end of the slug in either case. What survives is genuine ambiguity —
 `refactor-2-pass-parser` is a ticket key to any pattern that does not know the
@@ -170,29 +170,49 @@ stopped the carry and the module's defaults, and left `DefaultCommand`, which is
 `claude {prompt}`. You got claude either way. It now says to set `command = ""`
 as well, which is the thing that is actually true.
 
-**The fallback spent characters saying characters were missing.** `rewrite-css` is
-eleven characters and arrived as `REWRITE-CS...` — thirteen, to save one. So
-`shorten` now keeps a shortened name only when it is genuinely narrower than what
-it replaced, which is what hands that slug back whole.
+**The fallback spent characters saying characters were missing.** At the
+ten-column cap this was written for, `rewrite-css` — eleven characters — arrived
+as `REWRITE-CS…`: eleven columns again, one of them spent to report that a
+character was missing. So `shorten` keeps a shortened name only when it is
+genuinely narrower than what it replaced. The cap has moved since and the guard
+has not; at fifteen the slug it hands back whole is `dark-mode-toggle`.
 
-The cap stays at ten. It is a ticket key's width, and holding a description to the
-same one is the point rather than an oversight: the status line is as wide for a
-repository that names work by description as for one that names it by key, and a
-name that fits is worth more there than a name that is whole. Cutting mid-word is
-the cost, and it is the cheaper one.
+**The cap is fifteen, and the status line is what sets it.** Several of these
+names sit side by side there, so a name that fits is worth more than a name that
+is whole — that part has not changed. The number has. It was ten on the argument
+that a ticket key is ten wide and a description should be held to the same, which
+took a key's width for a budget rather than for the length keys happen to be. A
+description is not a key: it is read for what the work is, and cut to ten it
+mostly reported that something had been cut. Fifteen is what one needs to survive
+being read at a glance.
 
-Cutting at a word boundary instead was tried, and it loses at this width. It has to
-give back a whole word to find the boundary, so `flaky-payment-test` arrives as
-`FLAKY…` rather than `FLAKY-PAYM…`, and — because cutting further escapes the
-guard above — `rewrite-css` arrives as `REWRITE…` where the blunt cut hands it back
-whole. It pays only at a cap wide enough that the nearest boundary is usually near
-it, which is an argument for a wider cap and not for the rule. The one thing kept
-from it is a trailing hyphen trim, since a cut landing after one leaves it against
-the mark: `dark-mode-toggle` as `DARK-MODE…` rather than `DARK-MODE-…`.
+**The cut is blunt, and the wider cap is not licence to revisit that.** Cutting at
+a word boundary has to give back a whole word to find one, and the names it takes
+that word from are the ones only just over the cap — where the blunt cut runs into
+the guard above and hands the name back whole. `dark-mode-toggle` is that case:
+sixteen characters, intact, where a boundary rule would spend six that fit to
+arrive at `dark-mode…`. Widening makes it more common rather than less, since
+fewer slugs are cut at all and a larger share of the ones that are sit just over
+the line. What the boundary rule buys in exchange is two columns and a stranded
+letter on a long name — `flaky-payment…` where the blunt cut gives
+`flaky-payment-t…`. The one thing kept from it is a trailing hyphen trim, since a
+cut landing after one leaves it against the mark: `checkout-total-fix` as
+`checkout-total…` rather than `checkout-total-…`.
+
+**The name keeps the case it was typed in.** It used to be uppercased —
+`ENG-2318`, `MAIN`, `FLAKY-PAYM…` — on the reasoning that a status line reads
+better with one shape in it. What that cost is a window spelling its own subject
+differently from everywhere else the subject appears: the slug in `tw ls` and in
+every command that takes one, the branch in git, the key in whatever tracker it
+came from. The key is where it showed most, because `ticket_pattern` matches
+case-insensitively by design — a team whose keys are lower-case got them back
+shouting, and a team whose keys are upper-case could not tell whether treewright
+had read the shape or imposed it. Which of the two a person sees is a fact about
+their tracker, and following what was typed is the rule that needs no explaining.
 
 The mark is `…` rather than `...`: one column instead of three, in the one place
-where columns are the whole problem, and three of a ten-column budget is a lot to
-spend. That makes the calculation a matter of runes rather than bytes — `refname`
+where columns are the whole problem, and three of a fifteen-column budget is a lot
+to spend. That makes the calculation a matter of runes rather than bytes — `refname`
 forbids control characters and git's own metacharacters, not the rest of Unicode,
 so a slug may legitimately hold multi-byte characters, and a byte-wise cut would
 misjudge the width and split one down the middle. `ui.Table` already measures in
@@ -227,13 +247,14 @@ literally. Composing a personal prefix with a kind-of-work prefix would be a rul
 to learn in a file whose whole point is that it is data.
 
 The prefix reaches the branch and stops there. The worktree stays
-`<repo>-eng-2318`, the window stays `ENG-2318`, and `resume`, `cd` and `rm` still
+`<repo>-eng-2318`, the window stays `eng-2318`, and `resume`, `cd` and `rm` still
 take the slug alone. Folding the kind of work into the directory name was the
 alternative, and it loses on all three of its own terms: `ticket_pattern` stops
-matching (`feature-eng-142-white-screen` has no ticket key at its head, so every
-window would be called `FEATURE-EN…`), every row of the table grows a word
-that repeats down the column, and you would have to remember which kind of work
-something was to reopen it — a question git already answers. Two worktrees whose
+matching (`feature-eng-142-white-screen` has no ticket key at its head, so the
+window falls to a cut description — `feature-eng-142…`, which spends more than
+half its width on a word every other window has too), every row of the table grows
+a word that repeats down the column, and you would have to remember which kind of
+work something was to reopen it — a question git already answers. Two worktrees whose
 slugs are both `auth` therefore collide whatever their prefixes, and `new` says so
 and names the command that opens the one that exists. Slugs that carry a ticket
 key never reach that case, and two pieces of work that really are both called

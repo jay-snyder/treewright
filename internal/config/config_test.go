@@ -285,8 +285,8 @@ func TestAgentKeyIsADefaultsBundle(t *testing.T) {
 			bare.Command, bare.ResumeCommand, DefaultCommand, DefaultResumeCommand)
 	}
 	// Every per-project artifact the module has, not just its settings: the
-	// plugin placed in the main checkout and not carried would reach the MAIN
-	// window and no worktree, which is the trap the carry closes. A tree is
+	// plugin placed in the main checkout and not carried would reach the base
+	// checkout's window and no worktree, which is the trap the carry closes. A tree is
 	// carried file by file, since a directory is not what carry_files copies —
 	// so all three of the plugin's files are named here, and a worktree cannot
 	// arrive with the skill and no hooks.
@@ -610,43 +610,54 @@ func TestWindowName(t *testing.T) {
 		override string
 		want     string
 	}{
-		{"ticket key", DefaultTicketPattern, "proj-142-fix", "", "PROJ-142"},
-		{"ticket key alone", DefaultTicketPattern, "bug-7", "", "BUG-7"},
-		{"short slug as-is", DefaultTicketPattern, "hotfix", "", "HOTFIX"},
-		{"override wins", DefaultTicketPattern, "proj-1", "billing", "BILLING"},
-		{"exactly the cap is not shortened", DefaultTicketPattern, "abcdefghij", "", "ABCDEFGHIJ"},
+		{"ticket key", DefaultTicketPattern, "proj-142-fix", "", "proj-142"},
+		{"ticket key alone", DefaultTicketPattern, "bug-7", "", "bug-7"},
+		{"short slug as-is", DefaultTicketPattern, "hotfix", "", "hotfix"},
+		{"override wins", DefaultTicketPattern, "proj-1", "billing", "billing"},
+		{"exactly the cap is not shortened", DefaultTicketPattern, "abcdefghijklmno", "", "abcdefghijklmno"},
+
+		// The name keeps the case it was given, and a ticket key is where that
+		// shows: the default pattern matches case-insensitively, so one slug
+		// spelled two ways gives two window names, each reading the way the
+		// tracker it came from writes keys. An override is likewise used as
+		// typed rather than normalized on the way through.
+		{"an upper-case key stays upper", DefaultTicketPattern, "PROJ-142-fix", "", "PROJ-142"},
+		{"a lower-case key stays lower", DefaultTicketPattern, "proj-142-fix", "", "proj-142"},
+		{"an override is used verbatim", DefaultTicketPattern, "proj-1", "Billing", "Billing"},
+
 		// The default pattern accepts any issue-key scheme, which means any
 		// whole letters-dash-digits word reads as a ticket. A repo that wants
 		// stricter matching pins its own pattern, and one that tracks no tickets
 		// at all turns the pattern off — both below.
-		{"generalized default matches any key", DefaultTicketPattern, "fix-2-bugs", "", "FIX-2"},
-		{"pinned pattern ignores other keys", `(?i)^(proj-[0-9]+)`, "fix-2-bugs", "", "FIX-2-BUGS"},
-		{"pinned pattern matches its own", `(?i)^(proj-[0-9]+)`, "proj-142-fix", "", "PROJ-142"},
+		{"generalized default matches any key", DefaultTicketPattern, "fix-2-bugs", "", "fix-2"},
+		{"pinned pattern ignores other keys", `(?i)^(proj-[0-9]+)`, "fix-2-bugs", "", "fix-2-bugs"},
+		{"pinned pattern matches its own", `(?i)^(proj-[0-9]+)`, "proj-142-fix", "", "proj-142"},
 
 		// A digit run that does not end the word is part of a description, not a
 		// key: "fix-2fa-login" is work on two-factor login, and naming its window
-		// FIX-2 named nothing. It is shortened like any other description.
-		{"digits mid-word are not a key", DefaultTicketPattern, "fix-2fa-login", "", "FIX-2FA-LO…"},
+		// fix-2 named nothing. It is named like any other description, which at
+		// this cap means it arrives whole.
+		{"digits mid-word are not a key", DefaultTicketPattern, "fix-2fa-login", "", "fix-2fa-login"},
 
 		// Work with no ticket behind it: the slug is the whole name, and the same
 		// cap applies to it, because the status line is the same width either way.
-		{"no pattern leaves the slug alone", "", "proj-1-fix", "", "PROJ-1-FIX"},
-		{"long slug is cut at the cap", "", "flaky-payment-test", "", "FLAKY-PAYM…"},
+		{"no pattern leaves the slug alone", "", "proj-1-fix", "", "proj-1-fix"},
+		{"long slug is cut at the cap", "", "flaky-payment-test", "", "flaky-payment-t…"},
 
 		// A cut landing just after a hyphen would leave one against the mark,
 		// where it reads as punctuation rather than as part of the name.
-		{"no hyphen is left against the mark", "", "dark-mode-toggle", "", "DARK-MODE…"},
+		{"no hyphen is left against the mark", "", "checkout-total-fix", "", "checkout-total…"},
 
 		// One over the cap is where the guard against shortening to the same width
-		// bites: ten runes and a mark is eleven columns, which is what it started
-		// at.
-		{"shortening never lengthens", "", "rewrite-css", "", "REWRITE-CSS"},
-		{"one over the cap is left whole", "", "abcdefghijk", "", "ABCDEFGHIJK"},
+		// bites: fifteen runes and a mark is sixteen columns, which is what it
+		// started at.
+		{"shortening never lengthens", "", "dark-mode-toggle", "", "dark-mode-toggle"},
+		{"one over the cap is left whole", "", "abcdefghijklmnop", "", "abcdefghijklmnop"},
 
 		// Counted in runes, not bytes. refname forbids control characters and
 		// git's metacharacters, not the rest of Unicode, so a byte-wise cut here
 		// would both misjudge the width and split the "é" in half.
-		{"multi-byte slug is cut by rune", "", "café-refactor-plan", "", "CAFÉ-REFAC…"},
+		{"multi-byte slug is cut by rune", "", "café-refactor-plan", "", "café-refactor-p…"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -676,9 +687,9 @@ func TestLoadKeepsAnEmptyTicketPatternEmpty(t *testing.T) {
 	if off.TicketPattern != "" {
 		t.Errorf("ticket_pattern = '' loaded as %q, want it left empty", off.TicketPattern)
 	}
-	// A slug the default pattern would have read as key PROJ-1, kept short enough
+	// A slug the default pattern would have read as key proj-1, kept short enough
 	// that the cap is not what this test ends up measuring.
-	if got, want := off.WindowName("proj-1-fix", ""), "PROJ-1-FIX"; got != want {
+	if got, want := off.WindowName("proj-1-fix", ""), "proj-1-fix"; got != want {
 		t.Errorf("WindowName with matching off = %q, want %q", got, want)
 	}
 

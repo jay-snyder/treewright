@@ -45,7 +45,7 @@ func TestPopupSizeCoversTheTable(t *testing.T) {
 					Status:   git.StatusDirty, DirtyFiles: 42, Compared: true,
 				},
 			},
-			window: tmux.Window{ID: "@1", Session: "another-session", Name: "ENG-1675"},
+			window: tmux.Window{ID: "@1", Session: "another-session", Name: "eng-1675"},
 		},
 		{
 			name:  "one short slug, where the prompt is the widest line",
@@ -59,7 +59,21 @@ func TestPopupSizeCoversTheTable(t *testing.T) {
 				Worktree: git.Worktree{Slug: "eng-1675-cold-start-checklist-boost", Dir: "/wt/a"},
 				Status:   git.StatusActive, Compared: true,
 			}},
-			window: tmux.Window{ID: "@1", Session: "another-session", Name: "ENG-1675", State: "working"},
+			window: tmux.Window{ID: "@1", Session: "another-session", Name: "eng-1675", State: "working"},
+		},
+		{
+			// The widest the WINDOW column itself gets: a repository naming work
+			// by description rather than by ticket key, so the name is a slug cut
+			// to maxWindowName and marked. The mark is the one character the two
+			// sides could disagree about — ui.Table pads by rune, popupSize counts
+			// bytes, and the ellipsis is three of them — so the estimate runs two
+			// cells wide here, which is the direction it is meant to err in.
+			name: "a window named after a slug cut to the cap",
+			infos: []git.Info{{
+				Worktree: git.Worktree{Slug: "flaky-payment-test", Dir: "/wt/a"},
+				Status:   git.StatusUnpushed, Unpushed: 123, Compared: true, Ahead: 999, Behind: 999,
+			}},
+			window: tmux.Window{ID: "@1", Session: "another-session", Name: "flaky-payment-t…"},
 		},
 		{
 			name: "ten of them, so the index column grows a digit",
