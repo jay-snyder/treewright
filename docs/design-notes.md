@@ -750,6 +750,64 @@ reading it, and `agent-init` and `tmux-init` are where that decision belongs.
 parent, so `refresh` reports a stale wrapper and names the fix — a new terminal
 — which is the whole of what is available to it.
 
+### What the cask says after an upgrade
+
+Homebrew prints a cask's caveats on an upgrade exactly as it prints them on a
+first install: `Cask::Upgrade` calls `caveats` on the incoming cask and `puts`
+the result, near the top of the run and before the fetch. So one fixed string
+spends the only moment an upgrader is reading treewright's output on the steps
+they took months ago — add the shell-init line, run `tw setup`, both long done —
+while the three integrations above are all still running the version that was
+just replaced, and nothing has said so.
+
+The caveats cannot put any of that right. They are text, and the one thing text
+can do is name the command, so the cask asks which of the two is happening and
+says the other thing on an upgrade: `tw refresh`, what it rewrites and reloads, a
+new terminal because only a shell can replace its own functions, and `tw doctor`
+for whatever is still behind. It is the same advice `refresh` itself would give,
+arriving at the one moment somebody is looking at treewright's output without
+having asked it anything.
+
+**The question is asked of the Caskroom, not of the cask.**
+`cask.installed_version` is a directory read — the version whose metadata is on
+disk while the incoming cask is being loaded — so it is nil on a first install
+and the outgoing version on an upgrade. What it is compared against is
+GoReleaser's `{{ .Version }}`, interpolated into the Ruby at generation time, and
+deliberately *not* the cask's own `version` stanza. GoReleaser emits
+`custom_block` at the top of the cask, a cask body is `instance_eval`'d top to
+bottom, and `caveats` evaluates its block immediately rather than at print time —
+so `version` is still nil that early, and comparing against it silently never
+matches. Nothing raises. The two arms just collapse into "is anything installed
+at all", and the cost lands on the cases nobody tests: `brew info` and
+`brew reinstall` on an installed cask both read as an upgrade. Reaching for
+`version` there is the obvious tidy-up, and it is the bug.
+
+**A caveats block that raises is the failure to design against.** It does not
+print a bad message — it stops the cask from loading, and `brew upgrade` breaks
+for everybody who has the tap. That is why the Ruby is a nil check and a string
+compare and nothing else, and why what it compares against is a literal
+GoReleaser has already resolved rather than anything worked out on the user's
+machine.
+
+There is also no `caveats:` key beside the block, and that is not tidiness. A
+cask accumulates every `caveats` stanza it is given rather than the last one
+winning, so a key left in place would print underneath the block — the install
+text and the upgrade text together, on every install and every upgrade alike.
+That is what rules out the other way round the load order, too: GoReleaser
+renders `caveats:` last and its heredoc interpolates, so `custom_block` could
+define a lambda for the key to call, and the whole of what that buys is a
+`version` stanza that has run by then. It splits one message across two stanzas
+in two halves of the file to learn something a generation-time literal already
+knows.
+
+What the approach gives up is that versions are all the cask can see. Somebody
+who installed treewright and never added the shell line gets the upgrade text on
+their next `brew upgrade`, because from the Caskroom that is exactly what they are
+doing, and the first-install advice they still need is left to `doctor`. Nor does
+any of this reach a Linux install, which arrives by `go install` or a tarball and
+has no caveats to print — one more reason `refresh` and `doctor` have to carry the
+same information on their own.
+
 ### Checking for a newer release
 
 Explicit only: `doctor` asks, `version --check` asks, and nothing else ever
