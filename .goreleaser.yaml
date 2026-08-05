@@ -78,10 +78,66 @@ homebrew_casks:
     description: Give every ticket its own git worktree, tmux window, and agent session
     license: MIT
     binaries: [treewright]
+    # Raw Ruby, for two stanzas GoReleaser cannot express.
+    #
     # tw is the everyday name: a second link to the same binary, so it works
     # even before the shell integration (which also defines tw) is loaded.
+    #
+    # And the caveats, which brew prints on an upgrade exactly as it prints them
+    # on an install — so a fixed string spends the one moment an upgrader is
+    # reading on the steps they took months ago, and says nothing about the
+    # worktrees, the tmux server and the shell that are still running the
+    # version they just replaced. GoReleaser's `caveats:` key renders as a
+    # heredoc and cannot ask which is happening; the block form can.
+    #
+    # `installed_version` reads the Caskroom while the cask is being loaded, so
+    # it is nil on a first install and the version being replaced on an upgrade.
+    # Equal to the version arriving means neither — `brew info`, or a reinstall —
+    # and those get the install text, since somebody who is not moving between
+    # versions has nothing to refresh.
+    #
+    # The version arriving is spelled as GoReleaser's own `{{ .Version }}`,
+    # interpolated into the Ruby here, and deliberately not as the cask's
+    # `version` stanza. GoReleaser emits custom_block at the *top* of the cask, a
+    # cask body is instance_eval'd top to bottom, and `caveats` evaluates its
+    # block immediately rather than at print time (`cask/dsl/caveats.rb`) — so
+    # `version` is still nil this early, and comparing against it silently never
+    # matches. That failure is invisible in review and quiet in use: the text is
+    # only wrong on the two cases nobody tests, so `brew info` on an installed
+    # cask reads as an upgrade. Reaching for `version` here is the natural
+    # tidy-up; it is the bug. Verified against Homebrew 6.0.15.
     custom_block: |
       binary "treewright", target: "tw"
+
+      caveats do
+        replacing = cask.installed_version
+        if replacing.nil? || replacing.to_s == "{{ .Version }}"
+          <<~FIRST_INSTALL
+            Add the shell integration to your shell's startup file:
+              eval "$(treewright shell-init zsh)"     # or bash
+              treewright shell-init fish | source
+
+            Then register a repository by running "tw setup" inside it.
+            (tw is the installed short name; every command answers to it.)
+          FIRST_INSTALL
+        else
+          <<~AFTER_UPGRADE
+            The new binary is in place. Nothing that loaded the old one knows yet,
+            so from a repository you use treewright in:
+
+              tw refresh
+
+            That rewrites every copy of the agent plugin — the user-level one, and
+            any a worktree was given when it was created, which nothing has looked
+            at since — and reloads the tmux key bindings into the server you are
+            attached to.
+
+            Open a new terminal as well: only a shell can replace its own
+            functions, so this one keeps the old wrapper until it restarts.
+            "tw doctor" says whether anything is still behind.
+          AFTER_UPGRADE
+        end
+      end
     dependencies:
       - formula: git
       - formula: tmux
@@ -93,10 +149,6 @@ homebrew_casks:
           if system_command("/usr/bin/xattr", args: ["-h"]).exit_status == 0
             system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/treewright"]
           end
-    caveats: |
-      Add the shell integration to your shell's startup file:
-        eval "$(treewright shell-init zsh)"     # or bash
-        treewright shell-init fish | source
-
-      Then register a repository by running "tw setup" inside it.
-      (tw is the installed short name; every command answers to it.)
+    # No `caveats:` key — the cask's caveats are the block in custom_block
+    # above. The two would both be printed: a cask accumulates every caveats
+    # stanza it is given rather than the last one winning.

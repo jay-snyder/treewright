@@ -137,7 +137,22 @@ mean the whole integration silently left the run. A full local run wants `git`,
 
 Releases are tag-driven: push `v*`, GoReleaser builds the binaries, publishes a
 Homebrew cask to `jay-snyder/homebrew-tap`, and stamps `main.version` via
-ldflags. Validate config changes with `goreleaser check`.
+ldflags. Validate config changes with `goreleaser check`, and read the final cask
+with `goreleaser release --snapshot --skip=publish,validate --clean` — `dist/` is
+gitignored.
+
+**The Ruby in `custom_block` is load-bearing and is not a `caveats:` key waiting
+to be tidied back into one.** It branches on `cask.installed_version` so that a
+`brew upgrade` is told to run `tw refresh` rather than the first-install steps,
+which is a question GoReleaser's `caveats:` key cannot ask — and a key added
+beside the block would not replace it but print underneath it, casks accumulating
+caveats stanzas rather than the last one winning. It compares against the
+templated `{{ .Version }}` rather than the cask's `version` stanza because the
+block runs before that stanza is set; substituting `version` there breaks nothing
+loudly and silently disables the branch. See "What the cask says after an upgrade"
+in `docs/design-notes.md` before editing it, and keep the Ruby trivial: a block
+that *raises* does not print a bad message, it stops the cask from loading and
+breaks `brew upgrade` for everyone.
 
 ## Layout
 
