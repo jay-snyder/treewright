@@ -442,4 +442,7 @@ terminal in a repo's session when you want one. Without the shell integration,
   does — with [`docs/tmux.md`](docs/tmux.md) for sessions, windows and key
   bindings, and [`docs/agents.md`](docs/agents.md) for how an agent reports what
   it's doing.
+- [`docs/compatibility.md`](docs/compatibility.md) for what you can build on —
+  treewright is 0.x, so nothing is frozen yet, and that file says what 1.0 would
+  freeze.
 - [`CLAUDE.md`](CLAUDE.md) if you're working on treewright itself.

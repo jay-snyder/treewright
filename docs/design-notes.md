@@ -14,6 +14,12 @@ Two subsystems are large enough, and separate enough, to be read on their own:
 - **[`agents.md`](agents.md)** — the agent-state protocol, the agent modules and
   the plugin they install, and the kickoff prompt.
 
+A fourth file is not a subsystem but a commitment about all of them:
+**[`compatibility.md`](compatibility.md)** — which of the surfaces described
+here are contracts, what a version number promises about them, and how a break
+is made when one is needed. Where the two disagree, this file is the definition
+and that one is the promise.
+
 What stays here is everything else: what a worktree and its branch are called,
 what the commands promise their output looks like, what refuses to run, and how
 a repository is configured.

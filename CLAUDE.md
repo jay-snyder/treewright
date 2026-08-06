@@ -10,7 +10,7 @@ companions:
 - **`README.md`** — the user-facing tour: pitch, install, quickstart, command and
   config reference. Deliberately short and non-technical. When user-visible
   behavior changes, it changes with it — but keep new rationale out of it.
-- **`docs/`** — why the behavior is what it is, in three files. Read the relevant
+- **`docs/`** — why the behavior is what it is, in four files. Read the relevant
   section before changing behavior in that area; add to it when you decide
   something a future reader would otherwise re-litigate.
   - **`design-notes.md`** — the base checkout, worktree and window naming, branch
@@ -21,6 +21,8 @@ companions:
     sizing and the key bindings.
   - **`agents.md`** — the agent-state protocol, agent modules and the plugin
     they install, the kickoff prompt.
+  - **`compatibility.md`** — which surfaces are contracts and which are not, what
+    0.x promises and what 1.0 would freeze, how a break is made and announced.
 
 ## Committing is the maintainer's call, every time
 
