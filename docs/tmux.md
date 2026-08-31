@@ -28,7 +28,7 @@ changes nothing you can see.
 What follows from it:
 
 - **`new` creates the session** when it is not running yet, so the first command
-  of the day establishes it. `resume` and `base` do the same.
+  of the day establishes it. `resume`, `base` and `restore` do the same.
 - **`base` is the same window every time.** A window already sitting in the main
   checkout is selected rather than a second one opened beside it — and being the
   session's first window, it is what keeps the session alive as worktrees come
@@ -66,6 +66,40 @@ silently drop its windows into the other project's session. Every session target
 `internal/tmux` is therefore written in tmux's exact form, `=api`. The one
 command that does not understand that form is `set-option`, which is why nothing
 in that package sets session options.
+
+## After a restart
+
+A tmux server does not outlive a reboot; the checkouts it had windows on do. So a
+repository's session is something you reopen, and `tw restore` reopens all of one
+at once — the base window, a window per worktree, each running `resume_command`
+with `command` behind it, and then this terminal attached to the session. What it
+opens is what `tw ls` lists. Why nothing is saved, and why it stays out of the
+session on the one run that has something to report, is in
+[`design-notes.md`](design-notes.md).
+
+**One tab per repository is the pattern, and generating it is not treewright's
+job.** `restore` takes one repository, so the terminal side is a tab per
+repository with its working directory set and `treewright restore` as what it
+runs — a kitty session file, a WezTerm config, an iTerm arrangement, a script
+that opens tabs, whichever your terminal has. As a kitty session file:
+
+```
+# ~/.config/kitty/after-reboot.conf — kitty --session after-reboot.conf
+new_tab storefront
+cd ~/code/storefront
+launch treewright restore
+
+new_tab checkout-api
+cd ~/code/checkout-api
+launch treewright restore
+```
+
+A launcher with no working directory to set names the repository instead —
+`treewright restore storefront` — which is why the positional is there.
+
+Generating that file is deliberately left out: it would be a promise to generate
+one for the next terminal emulator, and for the one after that, in exchange for
+six lines a person writes once.
 
 ## Window identity
 

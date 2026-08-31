@@ -80,6 +80,103 @@ ambiguous — an unregistered repository exits 1 with `no registered config
 matches repo <path> (have: …)` — so the fault was not an unanswerable question
 but one schema with two shapes.
 
+## Putting a session back after a restart
+
+A tmux session does not survive a reboot while a checkout on disk does — the
+sentence the base checkout's place in the resume menu comes from. `restore` is
+that sentence applied to the whole list at once: the base window, then one window
+per worktree, each running `resume_command` with `command` behind it, and then
+this terminal attached to the session.
+
+The morning it replaces is `tw base`, `tw attach`, and one `tw resume` per
+worktree, in a terminal tab per repository. Three repositories with three
+worktrees each is fifteen commands to arrive back where you were.
+
+**Nothing is saved, and nothing may be.** The worktrees on disk are the record,
+and restore reads them. Recording the live layout and replaying it is the obvious
+alternative, and it loses on every count:
+
+- to cover the reboot that actually hurts — the unexpected one — the snapshot
+  would have to be rewritten by every command that opens or closes a window;
+- it would drift the moment somebody rearranged tmux by hand, which is a thing
+  people do to a session all day;
+- it could point at a worktree since removed;
+- it cuts against the precedent in [`agents.md`](agents.md) that keeps agent
+  state on the window and never on disk;
+- and it is not even free in the registry: `config.Names` globs `*.toml` and
+  `doctor`'s registry check calls anything else a stray, so a snapshot would need
+  a directory of its own to live in.
+
+So what you get is a **tidied session rather than a photocopy** of the one you
+lost: the base window first, then the worktrees in slug order, without your
+window order or your splits. The name risks promising the photocopy, which is why
+the help says this out loud. **What restore opens is what `tw ls` lists**, and
+that is also why there is no `--dry-run` — the listing is the preview. A window
+already open on a worktree is left exactly as it is, which makes `tw restore` a
+reasonable thing to type in a session that is already up, where it means "open
+whatever is missing here".
+
+**One repository per invocation.** There is no `--all`. A terminal tab per
+repository is the shape of the day anyway, so batching across repositories would
+save one command per tab and in exchange would spin up sessions and agents for
+every repository ever registered. The optional `[repo]` is the same positional
+`base`, `attach`, `ls` and `prune` take, and it is there because a terminal tab
+launches in no particular directory — see the one-tab-per-repo pattern in
+[`tmux.md`](tmux.md).
+
+**It attaches by default, and `-d, --detached` opts out.** The common caller is a
+person in a fresh tab who wants to land in their session; the scripted caller is
+the exception and can pay for a flag. `--detached` is tmux's own word for the
+state it leaves you in — a session running with nobody watching — and it is
+literal rather than a metaphor. Not `--no-attach`: there is no `--no-*` flag
+anywhere in the tool.
+
+**And it attaches only on a clean restore, which is what makes the report
+readable.** The objection to attaching by default is that tmux paints over the
+screen before you can read what restore reported. It dissolves: on a clean
+restore there is nothing to read, because the report would say "opened five
+windows" to somebody who is about to look at five windows — the session is its
+own report. So when every window opened, restore attaches at once and prints
+nothing. When any window did not, it prints the report, stays out of the session,
+and names `tw attach <repo>` as the way in. The one time there is something to
+read is the one time you are not swallowed by the session; no pause, and no
+"press Enter" gate.
+
+Each failure is also reported where it happened, naming the worktree, and the
+worktrees behind it still get their windows. One window failing is not the rest
+of them failing, and the ones behind it are exactly what the reader would
+otherwise be opening by hand.
+
+**Not a terminal means do not attach, and do not fail.** Outside tmux the attach
+is a foreground `tmux attach-session`, which takes stdin and stdout over and
+cannot take a pipe. A scripted restore whose author forgot `-d` would otherwise
+do every bit of the work correctly and then exit non-zero on the last line, so
+the check is treewright's: `term.IsTerminal` on both streams, then the attach
+skipped and said out loud. That is the pattern `ui.Picker` already uses for the
+same reason. Inside tmux the question is not asked at all — there the attach is a
+`switch-client`, which needs no terminal.
+
+**No `--prompt` and no picker.** A prompt broadcast to eight agents is not a
+thing, and a command that has to be safe to run from a startup file cannot stop
+to ask a question. `--fresh` is worth taking, for symmetry with `resume`: it runs
+`command` rather than `resume_command`, a new agent session in every window.
+
+Inside the code, the one thing restore needed that nothing else did is a way to
+open a window without moving the client — `arrival` in `session.go`, and
+`tmux.Select` under it. Focusing a dozen windows in turn is a `switch-client` per
+window, which for an attached client is the session flickering past under their
+hands and landing wherever the loop ended. The window it should land on is the
+base window, so that one is selected once every window is there.
+
+**A warning that is not a failure is the one thing a restore can lose.** A
+worktree whose `post_create` failed is reported as `resume` and `cd` report it,
+and it must not hold you out of the session — so on the attaching path it is on
+screen for the instant before tmux takes the screen. One line through tmux's own
+status bar after you land is the only channel that would survive, and it is not
+built: `display-message` needs a client, and outside tmux the attach blocks until
+you detach, so saying it afterwards means saying it to somebody who has already
+left. It is readable under `-d`, and on the failure path, where nothing attaches.
+
 ## Naming a worktree
 
 `rm`, `resume` and `cd` take an unambiguous prefix of a slug, because a slug
@@ -437,6 +534,7 @@ stdout carries the answer and nothing else, so any command can be piped:
 | `agent-init` | the plugin directory it installed into, or the plugin's files with `--print` — with what it wrote, and where else it could go, on stderr |
 | `send` | nothing — there is no answer, only something done; what the window was showing and what was typed go to stderr |
 | `close` | nothing — there is no answer, only a window that is gone; what it closed and what that cost go to stderr |
+| `restore` | nothing — there is no answer, only a session that is back; what it could not open, and the way in when it stayed out, go to stderr |
 | `signal` | nothing — the answer is the stamp on the window, and out of scope it is silent on stderr too |
 | `guard` | nothing — the answer is the exit code, that being what a PreToolUse hook reads, and the refusal it carries goes to stderr for the agent |
 | `session-start` | what each optional feature did, one message per feature — the reader is the agent, whose SessionStart hook adds a hook's stdout to the session as context, and with nothing to report it prints nothing at all |

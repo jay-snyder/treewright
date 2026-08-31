@@ -28,6 +28,7 @@ _treewright() {
     'send:type one line at the agent in a worktree window'
     'cd:move your shell into a worktree'
     'base:open a window on the main checkout'
+    'restore:reopen every window of a repository after a restart, and attach'
     'popup:run a treewright command in a tmux popup sized to its output'
     'attach:attach this terminal to the repository tmux session'
     'signal:record the state of the agent running in this worktree'
@@ -67,7 +68,7 @@ _treewright() {
     new|move)                    compadd -S '' -- ${(f)"$(command treewright __complete prefixes 2>/dev/null)"} ;;
     rm)                          compadd -- ${(f)"$(command treewright __complete slugs 2>/dev/null)"} ;;
     resume|cd|send|close)        compadd -- ${(f)"$(command treewright __complete targets 2>/dev/null)"} ;;
-    ls|prune|base|config|attach|refresh) compadd -- ${(f)"$(command treewright __complete repos 2>/dev/null)"} ;;
+    ls|prune|base|restore|attach|config|refresh) compadd -- ${(f)"$(command treewright __complete repos 2>/dev/null)"} ;;
     shell-init)                  compadd -- ${(f)"$(command treewright __complete shells 2>/dev/null)"} ;;
     signal)                      compadd -- ${(f)"$(command treewright __complete states 2>/dev/null)"} ;;
     agent-init)                  compadd -- ${(f)"$(command treewright __complete agents 2>/dev/null)"} ;;

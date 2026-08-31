@@ -197,7 +197,7 @@ func openWorktreeWindow(env *Env, cfg *config.Config, w worktreeWindow) {
 		Name:   w.Name,
 		Slug:   w.Slug,
 		Branch: w.Branch,
-	}, windowCommand{Command: w.Command})
+	}, windowCommand{Command: w.Command}, bringToFront)
 	if err != nil {
 		env.warnf("%v", err)
 	}
@@ -834,7 +834,7 @@ func cmdResume(env *Env, args []string) error {
 	var prompt, promptFile string
 	var fresh bool
 	positional, err := parseArgs("resume", args,
-		map[string]*bool{"--fresh": &fresh}, promptValues(&prompt, &promptFile), 1)
+		map[string]*bool{freshFlag: &fresh}, promptValues(&prompt, &promptFile), 1)
 	if err != nil {
 		return err
 	}
@@ -901,7 +901,7 @@ func cmdResume(env *Env, args []string) error {
 	// and one whose agent left no session behind dead-ends there exactly as a
 	// worktree does.
 	if target.Base {
-		created, err := openBaseWindow(env, cfg, run)
+		created, err := openBaseWindow(env, cfg, run, bringToFront)
 		warnIfPromptUndelivered(env, prompt, created, err)
 		return err
 	}
@@ -916,10 +916,15 @@ func cmdResume(env *Env, args []string) error {
 		Name:   cfg.WindowName(target.Slug, ""),
 		Slug:   target.Slug,
 		Branch: target.Branch,
-	}, run)
+	}, run, bringToFront)
 	warnIfPromptUndelivered(env, prompt, created, err)
 	return err
 }
+
+// freshFlag is spelled once because two commands take it and mean the same
+// thing by it: run command rather than resume_command. `resume` asks that of one
+// worktree and `restore` of every window it opens.
+const freshFlag = "--fresh"
 
 // resumeCommandPair is how the length check names what a resume window runs,
 // which is two settings rather than one. Spelled to read as a subject in both
@@ -1153,7 +1158,7 @@ func cmdBase(env *Env, args []string) error {
 	if err != nil {
 		return err
 	}
-	_, err = openBaseWindow(env, cfg, windowCommand{Command: command})
+	_, err = openBaseWindow(env, cfg, windowCommand{Command: command}, bringToFront)
 	return err
 }
 
@@ -1170,7 +1175,11 @@ func cmdBase(env *Env, args []string) error {
 //
 // The disagreement shows once and then never again: every later call finds the
 // window by its directory and switches to it, whatever it was started with.
-func openBaseWindow(env *Env, cfg *config.Config, run windowCommand) (created bool, err error) {
+//
+// The arrival is the caller's for the same reason, and only `restore` asks for
+// the unusual one: it opens a window per worktree behind this one, so nothing may
+// move the client until they are all there.
+func openBaseWindow(env *Env, cfg *config.Config, run windowCommand, arrive arrival) (created bool, err error) {
 	if branch, err := git.CurrentBranch(cfg.MainDir); err == nil && branch != cfg.BaseBranch {
 		where := branch
 		if where == "" {
@@ -1191,7 +1200,7 @@ func openBaseWindow(env *Env, cfg *config.Config, run windowCommand) (created bo
 		return openWindow(env, cfg, tmux.Spec{
 			Dir:  cfg.MainDir,
 			Name: cfg.BaseBranch,
-		}, run)
+		}, run, arrive)
 	}
 
 	// A blank command is the setting that leaves a window holding a shell, and
@@ -1228,9 +1237,10 @@ func openBaseWindow(env *Env, cfg *config.Config, run windowCommand) (created bo
 // it has to name the session exactly, and under TREEWRIGHT_TMUX_LABEL it has to
 // reach a server the default `tmux attach` never looks at.
 //
-// It deliberately does not create the session. `base` is the command that opens a
-// repository's first window, and two commands that both bring a session into
-// existence — with different windows in it — is one more than the tool needs.
+// It deliberately does not create the session. `base` and `restore` are the
+// commands that open a repository's windows, and a third that brought the session
+// into existence with some other set of windows in it is one more than the tool
+// needs.
 func cmdAttach(env *Env, args []string) error {
 	positional, err := parseArgs("attach", args, nil, nil, 1)
 	if err != nil {
@@ -1246,31 +1256,16 @@ func cmdAttach(env *Env, args []string) error {
 
 	session := sessionFor(cfg)
 	if !tmux.HasSession(session) {
+		// `restore` rather than `base`, because a session that is not running is
+		// nearly always a machine that has restarted, and the windows the reader
+		// wants back are all of them rather than the one. `base` is still what a
+		// repository's first window of all is opened with, and restore's help says
+		// so; this is the answer to why `attach` had nothing to attach to.
 		return fmt.Errorf("no tmux session %s is running%s", session,
-			asFields(field("open one with", env.copyable(env.Argv0+" base "+cfg.Name))))
+			asFields(field("open one with", env.copyable(env.Argv0+" restore "+cfg.Name))))
 	}
 
-	// Inside tmux there is already a client holding this terminal, and attaching a
-	// second one to it is the nesting tmux warns about. Moving the client is the
-	// same thing from where the user sits, and it leaves the session's own current
-	// window current — arriving where you left off is the difference between this
-	// and `resume`.
-	if tmux.Inside() {
-		if tmux.CurrentSession() == session {
-			env.progressf("already attached to %s", session)
-			return nil
-		}
-		return tmux.SwitchTo(session)
-	}
-
-	// Outside it, tmux wants the terminal for as long as the client stays
-	// attached, so it inherits treewright's own worktrees rather than the pipes every
-	// other tmux call here runs through, and this returns when the user detaches.
-	attach := exec.Command("tmux", tmux.AttachArgs(session)...)
-	attach.Stdin, attach.Stdout, attach.Stderr = os.Stdin, os.Stdout, os.Stderr
-	if err := attach.Run(); err != nil {
-		// tmux has already said what went wrong, on the stderr it was handed.
-		return ErrSilent
-	}
-	return nil
+	// Arriving on whichever window was current there is what makes this different
+	// from `resume`, that being a request for one particular worktree.
+	return attachTo(env, session)
 }

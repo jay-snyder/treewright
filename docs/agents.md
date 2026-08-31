@@ -742,6 +742,13 @@ the window is held open, and nothing is erased.
 **It runs once.** A `command` that also fails at once is held open, not tried
 again, and the line naming what exited names whichever of the two it was.
 
+**`restore` hands every window it opens the same pair**, built by the same
+function rather than assembled a second time. That is what makes a restored
+session honest: after a restart some worktrees have a conversation to continue
+and some do not, and the ones that do not get an agent rather than a window
+parked on an error in a session nobody has looked at yet. `--fresh` reaches all
+of them at once.
+
 **The base checkout gets all of this**, which is the half the mechanism this
 replaces could never reach. That mechanism was a marker file —
 `.git/treewright/no-agent-yet-<slug>`, written by `new` and removed once a

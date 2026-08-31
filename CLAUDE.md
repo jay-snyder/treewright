@@ -166,12 +166,13 @@ breaks `brew upgrade` for everyone.
 | `internal/cli/move.go` | `move`: uncommitted work out of the base checkout and into a worktree. |
 | `internal/cli/send.go` | `send`: one line typed at the agent in an open window. |
 | `internal/cli/close.go` | `close`: the tmux window on a worktree, gone worktree or not. |
+| `internal/cli/restore.go` | `restore`: every window a repository's session should have, after a restart. |
 | `internal/cli/prompt.go` | `{prompt}`, the two flags that fill it, and what `--prompt-file` builds. |
 | `internal/cli/setup.go` | `setup` (config generation, `--refresh`) and `config`. |
 | `internal/cli/refresh.go` | `refresh`: the one post-upgrade action. |
 | `internal/cli/release.go` | Whether a newer treewright exists, and how this one was installed. |
 | `internal/cli/doctor.go` | `doctor`: the four-way health check. |
-| `internal/cli/session.go` | One session per repo; `openWindow`/`focusWindow`. |
+| `internal/cli/session.go` | One session per repo; `openWindow`/`focusWindow`, `arrival`, `attachTo`. |
 | `internal/cli/render.go` | Tables, JSON, `parseArgs`, slug resolution. |
 | `internal/cli/message.go` | How a message is shaped on the way out: `progressf`/`warnf`/`errorf`, the continuation indent, `asLines`, `under`, `count`. |
 | `internal/cli/popup.go` | `popup`, popup sizing, the no-worktrees message. |
@@ -251,6 +252,19 @@ there is where the user already is, and "switching" to it is a no-op dressed up
 as an action. That is how `tw base`, typed in the main checkout from a session of
 the user's own, came to warn about switching to a session that did not exist and
 then do nothing at all — no session, no window, no agent.
+
+**A command that opens many windows moves no client.** `openWindow` takes an
+`arrival`: `bringToFront` for every command that was asked for one window, and
+`leaveTheClient` for `restore`, which opens one per worktree. Focusing each in
+turn is a `switch-client` per window — the session flickering past under an
+attached client's hands and landing wherever the loop ended, which is the
+surprise the scratch-server section above is a warning about. So the window a
+restored session should open on is selected once, at the end, through
+`tmux.Select` — `Focus` without the `switch-client` half. `restore` then attaches
+itself, through the same `attachTo` that `attach` runs, and only on a clean run:
+tmux paints over the screen, so the one report worth reading is the one where
+nothing attached. See "Putting a session back after a restart" in
+`docs/design-notes.md`.
 
 **Branches always fork from `origin/<base_branch>`.** No flag overrides this;
 offline falls back to the local base branch and says so.
@@ -408,8 +422,9 @@ ran and then died leaves output the fresh agent's alternate screen would erase,
 and that is the case that must not regress. It runs once, it reaches the base
 row, and `--fresh` is the same request made deliberately. The clock is
 `date +%s`, and no clock means no fallback. `new`, `move` and `base` run
-`command` already and pass no `Fresh`. See "When there is nothing to resume" in
-`docs/agents.md`.
+`command` already and pass no `Fresh`, while `restore` hands every window it
+opens the same pair through the same `resumeCommand`. See "When there is nothing
+to resume" in `docs/agents.md`.
 
 **`move` touches the base checkout last, and only after the work has been seen
 somewhere else.** The base checkout is the only copy of uncommitted work until

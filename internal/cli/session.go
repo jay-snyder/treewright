@@ -3,6 +3,8 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"os"
+	"os/exec"
 	"strconv"
 	"strings"
 
@@ -22,7 +24,8 @@ import (
 //
 // So one function does the work for `new`, `resume` and `base` alike: find the
 // window already sitting in a directory, or make one in the right session, and
-// then bring it to the foreground.
+// then bring it to the foreground. `restore` is the one caller that asks for
+// every part of that except the last — see arrival.
 
 // sessionFor names the tmux session holding a repository's windows: the config's
 // own name, unless the config chose one with tmux_session.
@@ -31,6 +34,46 @@ func sessionFor(cfg *config.Config) string {
 		return tmux.SessionName(name)
 	}
 	return tmux.SessionName(cfg.Name)
+}
+
+// arrival is what a caller wants done about the client once the window exists.
+//
+// Every command that opens one window wants the same thing — the window was what
+// was asked for, so arriving in it is the answer — and for a long time that was
+// the only answer openWindow knew how to give. `restore` opens a window per
+// worktree in one run, and there the same behavior is a client dragged through a
+// dozen windows as they are created, which is the surprise switch-client is
+// capable of and the scratch-server rule in CLAUDE.md is a warning about.
+type arrival int
+
+const (
+	// bringToFront moves the client to the window, following it into another
+	// session if that is where it turned out to be.
+	bringToFront arrival = iota
+
+	// leaveTheClient creates or finds the window and moves nobody. `restore`
+	// selects the window it means the session to open on — the base window —
+	// itself, once every window is there.
+	leaveTheClient
+)
+
+// reach brings the window to the foreground, or leaves the client where it is.
+func (a arrival) reach(env *Env, cfg *config.Config, w tmux.Window, command string) {
+	if a == leaveTheClient {
+		return
+	}
+	focusWindow(env, cfg, w, command)
+}
+
+// note is what the warning about a window in another session says happened to it
+// next. The warning itself is worth printing either way — a window of this
+// repository's sitting in somebody else's session is a fact the reader has not
+// been told — but what treewright did about it is the half that differs.
+func (a arrival) note() string {
+	if a == leaveTheClient {
+		return "leaving it where it is"
+	}
+	return "switching to it there"
 }
 
 // openWindow puts a window on spec.Dir in the repository's session — or focuses
@@ -51,7 +94,7 @@ func sessionFor(cfg *config.Config) string {
 // two differ in the one thing a caller cannot see: only a created window runs
 // the command. A caller that folded something into that command — a kickoff
 // prompt — needs to know when it never ran.
-func openWindow(env *Env, cfg *config.Config, spec tmux.Spec, run windowCommand) (created bool, err error) {
+func openWindow(env *Env, cfg *config.Config, spec tmux.Spec, run windowCommand, arrive arrival) (created bool, err error) {
 	if !tmux.Available() {
 		// The two things to type get a labelled line each, because that is what
 		// they are: a directory to move to and a command to run there, both long
@@ -81,10 +124,10 @@ func openWindow(env *Env, cfg *config.Config, spec tmux.Spec, run windowCommand)
 			// Someone's own window, or one opened before this repo had a session
 			// of its own. Switching to it is still better than opening a second
 			// window on the same directory, but it is worth saying where it went.
-			env.warnf("window %s is in session %s, not %s\nswitching to it there",
-				w.Name, w.Session, spec.Session)
+			env.warnf("window %s is in session %s, not %s\n%s",
+				w.Name, w.Session, spec.Session, arrive.note())
 		}
-		focusWindow(env, cfg, w, command)
+		arrive.reach(env, cfg, w, command)
 		return false, nil
 	}
 
@@ -100,7 +143,7 @@ func openWindow(env *Env, cfg *config.Config, spec tmux.Spec, run windowCommand)
 	if err != nil {
 		return false, err
 	}
-	focusWindow(env, cfg, w, command)
+	arrive.reach(env, cfg, w, command)
 	return true, nil
 }
 
@@ -435,4 +478,51 @@ func attachHint(env *Env, cfg *config.Config, session string) string {
 		return env.Argv0 + " attach " + cfg.Name
 	}
 	return "tmux " + strings.Join(tmux.AttachArgs(session), " ")
+}
+
+// attachCommand is the repository's session spelled as the command that reaches
+// it, for the messages that have to hand a reader the way in — `attach` itself
+// when a window failed, `restore` when it decided not to attach.
+//
+// The same spelling attachHint gives the repository's own session, and named
+// separately because the two are asked different questions: that one is handed a
+// session and works out whether `attach` can reach it, while this one already
+// knows it is talking about this repository.
+func attachCommand(env *Env, cfg *config.Config) string {
+	return env.copyable(env.Argv0 + " attach " + cfg.Name)
+}
+
+// attachTo puts this terminal in a session, or moves the client already holding
+// it.
+//
+// Both `attach` and `restore` end here, which is what keeps the three cases from
+// being decided twice. The middle one is the trap: inside tmux there is already a
+// client on this terminal, and attaching a second to the same session is the
+// nesting tmux warns about — so the client is moved instead, which is the same
+// thing from where the user sits and leaves the session's own current window
+// current.
+//
+// The caller decides whether attaching is wanted at all. `restore` holds itself
+// out of a session it could not finish opening, and skips this entirely without a
+// terminal to hand over; nothing about that judgment belongs in here.
+func attachTo(env *Env, session string) error {
+	if tmux.Inside() {
+		if tmux.CurrentSession() == session {
+			env.progressf("already attached to %s", session)
+			return nil
+		}
+		return tmux.SwitchTo(session)
+	}
+
+	// Outside it, tmux wants the terminal for as long as the client stays
+	// attached, so it inherits treewright's own streams rather than the pipes
+	// every other tmux call here runs through, and this returns when the user
+	// detaches.
+	attach := exec.Command("tmux", tmux.AttachArgs(session)...)
+	attach.Stdin, attach.Stdout, attach.Stderr = os.Stdin, os.Stdout, os.Stderr
+	if err := attach.Run(); err != nil {
+		// tmux has already said what went wrong, on the stderr it was handed.
+		return ErrSilent
+	}
+	return nil
 }
