@@ -145,13 +145,27 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      # Pinned, and this is the one job where "stable" is the wrong choice. The
+      # linter below is a prebuilt binary compiled against a particular Go, and
+      # it cannot parse sources from a newer one: golangci-lint v2.12.2 is built
+      # with 1.26, so the day 1.27 became stable this job began failing with
+      # "file requires newer Go version go1.27 (application built with go1.26)"
+      # on every pull request, including ones that changed nothing. It failed
+      # only on a cold cache, which is what made it invisible locally — a warm
+      # GOCACHE hands the linter export data, so it never parses the stdlib.
+      #
+      # So this is the pin above applied to the other half of the pair. Raise it
+      # with the linter version, not on its own, and keep it satisfying the go
+      # directive in go.mod. `test` deliberately stays on stable: exercising
+      # treewright against a new Go release is the point of that job, and it
+      # compiles rather than typechecking somebody else's sources.
       - uses: actions/setup-go@v7
         with:
-          go-version: stable
+          go-version: "1.26.x"
           cache: true
       # Pinned rather than floating, so a new release of the linter does not fail a
       # build nobody changed. The version here is the one .golangci.yaml was
-      # written against; raise both together.
+      # written against; raise both together — and with the Go version above.
       - uses: golangci/golangci-lint-action@v9
         with:
           version: v2.12.2
