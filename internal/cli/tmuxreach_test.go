@@ -18,9 +18,10 @@ import (
 
 // ---- attach ------------------------------------------------------------------
 
-// TestAttachWithoutASession covers the deliberate gap between attach and base.
-// Attaching does not create a session, because base is the command that opens a
-// repository's first window — so the error has to hand the reader that.
+// TestAttachWithoutASession covers the deliberate gap between attach and the
+// commands that open windows. Attaching creates no session, so the error has to
+// hand the reader one that does — and the one it names is restore, a session that
+// is not running being nearly always a machine that has restarted.
 func TestAttachWithoutASession(t *testing.T) {
 	requireTmux(t)
 	f := newFixture(t, "command = 'sleep 300'\n")
@@ -29,7 +30,7 @@ func TestAttachWithoutASession(t *testing.T) {
 	if r.err == nil {
 		t.Fatalf("attach with no session succeeded, want an error\n%s", r.both())
 	}
-	if !strings.Contains(r.err.Error(), "treewright base proj") {
+	if !strings.Contains(r.err.Error(), "treewright restore proj") {
 		t.Errorf("error = %q, want it to name the command that opens the session", r.err)
 	}
 	if r.stdout != "" {

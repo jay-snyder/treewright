@@ -272,7 +272,7 @@ what that buys and what it leaves you to clean up.`,
 			flags: []flagDoc{
 				{promptFlagNames, "text for the resumed agent, placed at the command's {prompt}"},
 				promptFileDoc,
-				{"--fresh", "start a new session: run command rather than resume_command"},
+				{freshFlag, "start a new session: run command rather than resume_command"},
 			},
 			run: cmdResume,
 		},
@@ -342,6 +342,45 @@ command, for a general-purpose window, where resume runs resume_command.`,
 			run: cmdBase,
 		},
 		{
+			name:    "restore",
+			args:    "[-d] [--fresh] " + argRepo,
+			summary: "reopen a repository's windows after a restart, and attach to them",
+			long: `Opens the windows a repository's session should have after the
+machine has restarted: the base window in the main checkout, then one window
+per worktree, each running resume_command with command behind it — the same
+"carry on where I left off" that "treewright resume" gives one worktree at a
+time. Then attaches this terminal to the session.
+
+What it opens is what "treewright ls" lists, which is why there is nothing to
+preview and no --dry-run: the listing is the answer.
+
+Nothing is saved and nothing is replayed. The worktrees on disk are the record,
+so what you get is a tidied session — the base window first, then the worktrees
+in the order ls prints them — rather than a photocopy of the session you lost,
+with its window order and its splits.
+
+A window already open on a worktree is left exactly as it is, so this is also
+what to type in a session that is already up: it opens whatever is missing.
+
+On a clean restore it attaches at once and says nothing, the session being its
+own report. Where a window could not be opened it stays out instead, so that
+report can be read, and names "treewright attach <repo>" as the way in. -d asks
+to be left out either way. Without a terminal to hand tmux — a startup file, a
+script — the attach is skipped and said rather than failed.
+
+--fresh runs command rather than resume_command, as it does for resume: a new
+agent session in every window, however much there was to continue.
+
+One repository per invocation, and one terminal tab per repository is the shape
+this is for. "treewright base" remains the way to open a repository's very first
+window.`,
+			flags: []flagDoc{
+				{"-d, --detached", "leave the session running and stay out of it"},
+				{freshFlag, "start new agent sessions: run command rather than resume_command"},
+			},
+			run: cmdRestore,
+		},
+		{
 			name:    "attach",
 			args:    argRepo,
 			summary: "attach this terminal to a repository's tmux session",
@@ -352,8 +391,9 @@ resume, that being a request for one particular worktree.
 Inside tmux the client is moved instead, since attaching a second client to a
 session the first one is already in is the nesting tmux warns about.
 
-The session has to exist. "treewright base" is what opens a repository's first
-window, and so what brings its session into being.`,
+The session has to exist. "treewright restore" is what opens a repository's
+windows after a restart, and so what usually brings its session back; "treewright
+base" opens the first window of all.`,
 			run: cmdAttach,
 		},
 		{

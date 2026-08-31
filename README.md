@@ -63,6 +63,11 @@ tmux session "checkout-api"
 checkout, parked on `main` — start new work there, ask your general questions
 there, and keep feature work out of it.
 
+A reboot takes the sessions and leaves the checkouts. `tw restore` puts one
+repository's session back — the base window, a window per worktree, each agent
+picking up the conversation it was having — and drops you into it. One terminal
+tab per repo, one command in each, and you are back where you were.
+
 ## Install
 
 ```sh

@@ -21,7 +21,7 @@ treewright() {
 _treewright_completions() {
   local cur="${COMP_WORDS[COMP_CWORD]}"
   if [[ $COMP_CWORD -eq 1 ]]; then
-    COMPREPLY=($(compgen -W "new move resume send cd base attach popup signal guard session-start ls rm prune close setup config doctor shell-init tmux-init agent-init refresh version" -- "$cur"))
+    COMPREPLY=($(compgen -W "new move resume send cd base restore attach popup signal guard session-start ls rm prune close setup config doctor shell-init tmux-init agent-init refresh version" -- "$cur"))
     return
   fi
   if [[ "$cur" == -* ]]; then
@@ -46,7 +46,7 @@ _treewright_completions() {
       ;;
     rm)                          candidates="$(command treewright __complete slugs 2>/dev/null)" ;;
     resume|cd|send|close)        candidates="$(command treewright __complete targets 2>/dev/null)" ;;
-    ls|prune|base|config|attach|refresh) candidates="$(command treewright __complete repos 2>/dev/null)" ;;
+    ls|prune|base|restore|attach|config|refresh) candidates="$(command treewright __complete repos 2>/dev/null)" ;;
     shell-init)                  candidates="$(command treewright __complete shells 2>/dev/null)" ;;
     signal)                      candidates="$(command treewright __complete states 2>/dev/null)" ;;
     agent-init)                  candidates="$(command treewright __complete agents 2>/dev/null)" ;;

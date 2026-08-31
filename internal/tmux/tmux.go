@@ -598,13 +598,32 @@ func CurrentWindow() string {
 // later arrives on it. switch-client is the part that needs a client, and is
 // skipped when the window is already in the session this one is in.
 func Focus(w Window) error {
-	if _, err := run("select-window", "-t", w.ID); err != nil {
+	if err := Select(w); err != nil {
 		return err
 	}
 	if !Inside() || w.Session == "" || w.Session == CurrentSession() {
 		return nil
 	}
 	return SwitchTo(w.Session)
+}
+
+// Select makes a window current in its own session and moves no client to it.
+// It is Focus without the switch-client half.
+//
+// What wants it is a caller opening many windows at once. `restore` opens one
+// per worktree, and focusing each in turn would drag an attached client through
+// every one of them — a switch-client per window, arriving as the session
+// flickering past under somebody's hands. The window it should end on is the
+// base window, and this is how that is said: the others are created, this one is
+// selected, and whoever attaches lands there.
+//
+// tmux makes a new window current in its session by itself, so selecting the
+// last one opened would be a no-op — which is exactly why this is needed. Left
+// alone, the window a restored session opens on is whichever worktree sorted
+// last.
+func Select(w Window) error {
+	_, err := run("select-window", "-t", w.ID)
+	return err
 }
 
 // SwitchTo moves the calling client to a session, leaving whichever window is
