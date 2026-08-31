@@ -512,6 +512,21 @@ func (r Repo) Fetch(remote, ref string) error {
 	return err
 }
 
+// FastForward advances the branch this checkout has out to ref, or reports why
+// it could not.
+//
+// --ff-only is the whole of the safety and not a stylistic preference. It moves
+// a branch that has only fallen behind and refuses everything else — a branch
+// that has diverged, a branch with local changes standing in the way — rather
+// than resolving the difference into a merge commit nobody asked for.
+// treewright moving somebody's checkout without being asked at that moment is
+// defensible exactly while the move is one it could not have got wrong, and
+// this flag is what makes that true.
+func (r Repo) FastForward(ref string) error {
+	_, err := r.run("merge", "--ff-only", "--quiet", ref)
+	return err
+}
+
 // FetchPrune drops remote-tracking refs whose upstream branch is gone.
 func (r Repo) FetchPrune(remote string) error {
 	_, err := r.run("fetch", "--prune", "--quiet", remote)

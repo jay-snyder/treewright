@@ -177,10 +177,12 @@ breaks `brew upgrade` for everyone.
 | `internal/cli/popup.go` | `popup`, popup sizing, the no-worktrees message. |
 | `internal/cli/signal.go` | `signal`: the agent-state protocol's one verb, run by agent hooks. |
 | `internal/cli/guard.go` | `guard`: the PreToolUse decision, run by agent hooks — which tool calls may change another worktree, and the shell reader that answers it. |
+| `internal/cli/features.go` | `session-start`: the one verb every optional behavior runs behind, run by agent hooks — and what each of them does. |
 | `internal/cli/eval.go` | The eval-file protocol and shell quoting. |
 | `internal/cli/init.go` | `shell-init`, `tmux-init`, `agent-init`, `__complete`. |
 | `internal/cli/version.go` | What `version` reports: the ldflags stamp, else the build info — and `--check`. |
 | `internal/config` | TOML loading, defaults, and which config applies. |
+| `internal/feature` | The optional behaviors' vocabulary: name, moment, summary, and the prose a generated config explains them with. |
 | `internal/refname` | git's branch-name rules, restated for slugs and prefixes. |
 | `internal/git` | Every git call, including merged/unpushed/dirty logic. |
 | `internal/tmux` | Every tmux call, window identity, popups. |
@@ -499,6 +501,33 @@ command has already been found reaching into somebody else's worktree. The
 plugin's PreToolUse matcher and `guardedTools` must name the same tools, which
 `TestTheGuardAndItsMatcherAgree` holds. See "Enforcing the handoff" in
 `docs/agents.md`.
+
+**A feature's toggle is read when the hook fires, never installed into the
+hook.** `features` is a flat list of names in the config; `session-start` is the
+one verb every one of them runs behind, wired from the agent module's
+`SessionStart`. Both halves of that follow from one fact: the plugin's default
+placement is user-level, **one copy serving every repository**, and a worktree's
+copy is a snapshot made once by the carry. So the enabled list cannot live in the
+hook JSON — that would be one machine-wide answer to a per-repository question —
+and there cannot be a verb per feature, because every feature shipped after a
+copy was installed would be a hook that copy does not have: enabled in the
+config, silent in practice, nothing to say so. Adding a feature means a registry
+entry in `internal/feature` and a `sessionStartFeatures` entry in
+`internal/cli/features.go`, and nothing in any agent module. That pair is held
+together by `TestEveryFeatureHasAnImplementation` rather than by an interface,
+for the reason the guard and its matcher are: a list on each side, and a test
+that names the missing half.
+
+Everything about it is a silence except being invoked wrong — `signal`'s
+discipline, since the same hooks fire in every session the agent has — and the
+answer goes to **stdout**, which is the output contract kept rather than broken:
+a `SessionStart` hook's plain stdout is added to the session as context, so the
+consumer is a program. The matcher is `startup|resume|clear` and the omissions
+are load-bearing: `compact` and `fork` fire mid-session, where a feature that
+moves a checkout would move it under a working agent. `fresh-base` is
+`--ff-only` and acts only in the base checkout, on `base_branch` — treewright
+moving somebody's checkout unasked is defensible exactly while the move is one it
+could not have got wrong. See "Optional behaviors" in `docs/design-notes.md`.
 
 **An integration that propagates an upgrade must be able to say which
 treewright it came from.** The shim, the tmux snippet and the plugin all follow

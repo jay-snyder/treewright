@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -604,8 +605,11 @@ func TestSetupWritesTheConfigVersion(t *testing.T) {
 	f := newFixture(t, "")
 
 	body := f.exec("setup", "-n", "proj").stdout
-	if !strings.Contains(body, "version = 1") {
-		t.Errorf("generated config = %q, want the format version recorded", body)
+	// Against the constant rather than a literal: the number moves whenever the
+	// generator learns a key, and a test pinning the old one fails on the change
+	// it is meant to be indifferent to.
+	if want := fmt.Sprintf("version = %d", config.FormatVersion); !strings.Contains(body, want) {
+		t.Errorf("generated config = %q, want %q recorded", body, want)
 	}
 	// And it has to be a key Load accepts, or every generated config is refused
 	// by the very next command.
@@ -855,8 +859,8 @@ func TestSetupRefreshDryRunWritesNothing(t *testing.T) {
 	if r.err != nil {
 		t.Fatalf("setup --refresh -n: %v\n%s", r.err, r.both())
 	}
-	if !strings.Contains(r.stdout, "version = 1") {
-		t.Errorf("stdout = %q, want the config it would write", r.stdout)
+	if want := fmt.Sprintf("version = %d", config.FormatVersion); !strings.Contains(r.stdout, want) {
+		t.Errorf("stdout = %q, want the config it would write, holding %q", r.stdout, want)
 	}
 	if !strings.Contains(r.stderr, "nothing was written") {
 		t.Errorf("stderr = %q, want it said that nothing was written", r.stderr)

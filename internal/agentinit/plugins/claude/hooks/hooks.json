@@ -15,6 +15,12 @@
     "Stop": [
       { "hooks": [{ "type": "command", "command": "treewright signal done" }] }
     ],
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear",
+        "hooks": [{ "type": "command", "command": "treewright session-start" }]
+      }
+    ],
     "SessionEnd": [
       { "hooks": [{ "type": "command", "command": "treewright signal clear" }] }
     ]

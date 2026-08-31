@@ -239,6 +239,22 @@ func TestLoadRejectsBadConfigs(t *testing.T) {
 			wantErr: "want one command or a list of them",
 		},
 		{
+			// A closed vocabulary like `agent`, and refused for the same reason: a
+			// misspelled feature is indistinguishable by behavior from a feature
+			// that is simply off, so nothing about the running system would ever
+			// say where to look.
+			name:    "unknown feature",
+			body:    "main_dir = \"/tmp/repo\"\nfeatures = [\"fresh-bass\"]\n",
+			wantErr: "unknown feature",
+		},
+		{
+			// As branch_prefixes' duplicate is: it changes nothing about what
+			// runs, and is always half of an edit somebody did not finish.
+			name:    "duplicate feature",
+			body:    "main_dir = \"/tmp/repo\"\nfeatures = [\"fresh-base\", \"fresh-base\"]\n",
+			wantErr: `lists "fresh-base" twice`,
+		},
+		{
 			name:    "malformed toml",
 			body:    "main_dir = = \"/tmp/repo\"",
 			wantErr: "",
@@ -809,5 +825,57 @@ func TestExplicitDistinguishesSettingFromDefaulting(t *testing.T) {
 	}
 	if got, want := c.Path(), filepath.Join(dir, "proj.toml"); got != want {
 		t.Errorf("Path = %q, want %q", got, want)
+	}
+}
+
+// TestFeaturesAreOffUnlessNamed pins the key's whole shape: membership is the
+// switch, and both spellings of "nothing here" mean off.
+//
+// `features = []` and an absent key are deliberately the same value, unlike
+// ticket_pattern and the command keys, where an empty value is a setting of its
+// own. There is no third state for an empty list to express — a feature is on or
+// it is not — so nothing is lost by collapsing them, and the generator writes
+// the commented example for both.
+func TestFeaturesAreOffUnlessNamed(t *testing.T) {
+	dir := registry(t, map[string]string{
+		"on":    "main_dir = '/tmp/repo'\nfeatures = ['fresh-base']\n",
+		"empty": "main_dir = '/tmp/repo'\nfeatures = []\n",
+		"unset": "main_dir = '/tmp/repo'\n",
+	})
+	load := func(name string) *Config {
+		t.Helper()
+		c, err := Load(filepath.Join(dir, name+".toml"))
+		if err != nil {
+			t.Fatalf("Load(%s): %v", name, err)
+		}
+		return c
+	}
+
+	if on := load("on"); !on.Enabled("fresh-base") {
+		t.Error("a config naming fresh-base does not report it enabled")
+	}
+	for _, name := range []string{"empty", "unset"} {
+		c := load(name)
+		if c.Enabled("fresh-base") {
+			t.Errorf("%s reports fresh-base enabled", name)
+		}
+		if len(c.Features) != 0 {
+			t.Errorf("%s: Features = %v, want nothing", name, c.Features)
+		}
+	}
+	// A name nothing in the registry matches is never enabled, which is the
+	// property Load's own check makes unreachable — asserted anyway, since
+	// Enabled is called with a caller's string and not only with a registry
+	// constant.
+	if load("on").Enabled("fresh-bass") {
+		t.Error("Enabled answered true for a name that is not a feature")
+	}
+	// Explicit is what `setup --refresh` and `treewright config` read, and it
+	// answers about the key rather than about the value.
+	if !load("empty").Explicit("features") {
+		t.Error("features = [] reads as a key that was never written")
+	}
+	if load("unset").Explicit("features") {
+		t.Error("a file that never mentions features reads as having set it")
 	}
 }

@@ -11,6 +11,7 @@ import (
 
 	"github.com/jay-snyder/treewright/internal/agentinit"
 	"github.com/jay-snyder/treewright/internal/config"
+	"github.com/jay-snyder/treewright/internal/feature"
 	"github.com/jay-snyder/treewright/internal/git"
 	"github.com/jay-snyder/treewright/internal/ui"
 )
@@ -248,6 +249,12 @@ func settingsFrom(cfg *config.Config) configSettings {
 	if cfg.Explicit("post_create") {
 		s.postCreate = cfg.PostCreate
 	}
+	// Copied unconditionally, and this is the one key where that is right rather
+	// than the collapse the comment above forbids. Nothing here has a default to
+	// be overwritten by: features are off, an absent key and an empty list say
+	// so identically, and there is no value the generator could pin in that the
+	// file did not already hold.
+	s.features = cfg.Features
 	// The one setting whose empty value is a decision: ticket_pattern = "" is how
 	// a repository that tracks no tickets turns the search off, so what is kept
 	// is whether the key was written, not whether it holds anything.
@@ -490,6 +497,14 @@ type configSettings struct {
 	ticketPattern    string
 	ticketPatternSet bool
 	tmuxSession      string
+
+	// features needs no paired Set field, unlike the three above it: an empty
+	// list and an absent key are the same thing here, both meaning that this
+	// repository switched nothing on. There is no third state for one to
+	// distinguish, so `features = []` comes back as the commented example — the
+	// file says exactly what it said before, in the spelling the generator uses
+	// for "nothing here yet".
+	features []string
 }
 
 // renderConfig writes the config file's text. prefixFromOrigin says which of
@@ -666,6 +681,37 @@ func renderConfig(s configSettings) string {
 	default:
 		fmt.Fprintf(&b, "# post_create = \"npm install\"\n")
 		fmt.Fprintf(&b, "# post_create = [\"npm install\", \"npm run codegen\"]\n\n")
+	}
+
+	// After post_create and before ticket_pattern, because the two above it read
+	// together: post_create is extra work treewright does per worktree, and this
+	// is extra work it does per repository.
+	fmt.Fprintf(&b, "# Optional behaviors, switched on by name and off in every config that\n")
+	fmt.Fprintf(&b, "# does not name them. Each one is work treewright starts on its own, at a\n")
+	fmt.Fprintf(&b, "# moment nobody typed anything, so none of them is ever on by default.\n")
+	fmt.Fprintf(&b, "# They run from the coding agent's own hooks, which \"treewright agent-init\"\n")
+	fmt.Fprintf(&b, "# installs — without those a name listed here never fires, and\n")
+	fmt.Fprintf(&b, "# \"treewright doctor\" says so.\n")
+	// Rendered from the registry rather than written out here, so a feature added
+	// two releases from now explains itself in every config a --refresh rewrites
+	// — the file being where somebody decides whether to switch one on, and the
+	// only place that decision gets made with the prose in front of them.
+	for _, f := range feature.All() {
+		fmt.Fprintf(&b, "#\n")
+		fmt.Fprintf(&b, "#   %s — %s\n", f.Name, f.Summary)
+		for _, line := range f.Doc {
+			fmt.Fprintf(&b, "#     %s\n", line)
+		}
+	}
+	// A bare "#" between the last feature's indented prose and the key, which the
+	// blocks above do without: theirs run flush against the setting because
+	// their prose is flush too, where a key at the margin directly under an
+	// indented paragraph reads as the paragraph continuing.
+	fmt.Fprintf(&b, "#\n")
+	if len(s.features) > 0 {
+		fmt.Fprintf(&b, "features = [%s]\n\n", tomlList(s.features))
+	} else {
+		fmt.Fprintf(&b, "# features = [%s]\n\n", tomlList(feature.Names()))
 	}
 
 	fmt.Fprintf(&b, "# Regexp whose first submatch names the tmux window, so a slug like\n")
@@ -909,6 +955,11 @@ func cmdConfig(env *Env, args []string) error {
 	// stack reads as a sequence where a single line reads as a set. The arrows
 	// went with the joining — a column of steps is already in order.
 	addSetting("post_create", strings.Join(cfg.PostCreate, "\n"), cfg.Explicit("post_create"))
+	// One per line, like post_create and carry_files above it. A repository that
+	// switched several on has a list, and the list is what a reader came to
+	// check — comma-joined it is one cell competing with a column of paths for
+	// the width the table has left.
+	addSetting("features", strings.Join(cfg.Features, "\n"), cfg.Explicit("features"))
 	addSetting("ticket_pattern", cfg.TicketPattern, cfg.Explicit("ticket_pattern"))
 	// The session name in force, not the raw setting: what a reader wants to know
 	// is which session their windows land in, which is the config's name until

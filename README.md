@@ -233,7 +233,7 @@ One TOML file per repo, written by `tw setup`, in
 commands that take a `[repo]`.
 
 ```toml
-version        = 1                    # which layout tw setup wrote; doctor checks it
+version        = 2                    # which layout tw setup wrote; doctor checks it
 main_dir       = "~/code/storefront"  # required: your main checkout
 base_branch    = "staging"            # fork from and compare against this (default: main)
 branch_prefix  = "john/"              # branch is <prefix><slug> (default: none)
@@ -243,6 +243,7 @@ agent          = "claude"             # fills in the two commands, carries its s
 command        = "claude {prompt}"    # what the window launches; "" for a shell and no agent
 resume_command = "claude --continue {prompt}"
 post_create    = "npm install"        # background setup after `new`; a list runs in order
+features       = ["fresh-base"]       # optional extras, off unless you name them (see below)
 ticket_pattern = '(?i)^(eng-[0-9]+)'  # names the window; "" if you don't track work by ticket
 tmux_session   = "shop"               # session for this repo (default: this file's name)
 ```
@@ -253,6 +254,17 @@ sure what's in effect? `tw config` prints the lot with defaults filled in, and
 `tw doctor` checks it. Misspell a key and you get an error rather than a setting
 that silently does nothing — and if the key came from a newer treewright than
 the one you're running, the error says so.
+
+`features` switches on things treewright will do without being asked at the time.
+Nothing here is on by default. There is one so far:
+
+- **`fresh-base`** — when an agent session starts in your main checkout on
+  `base_branch`, fetch and fast-forward it, so work never begins on a stale
+  trunk. Fast-forward only: a branch that has diverged is reported and left
+  alone. A session in a worktree never touches your main checkout.
+
+They run from your agent's hooks, so `tw agent-init` has to have installed those
+— `tw doctor` tells you if you have switched one on with nothing to run it.
 
 Nothing that runs for you fails quietly:
 
@@ -292,6 +304,9 @@ The hooks also hold the rule the skill teaches. A tool call that would change
 *another* worktree from outside its window is refused, and the refusal names the
 two commands that hand the work over instead. Reading another worktree is never
 blocked — that is how you review it.
+
+They are also how anything in `features` gets its chance: whatever you switched
+on runs as the session starts, and tells the agent what it did.
 
 What it writes is a plugin — `~/.claude/skills/treewright/`, which claude loads
 whole on its next start. If you've moved claude's config directory with
