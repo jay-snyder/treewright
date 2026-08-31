@@ -21,6 +21,7 @@ import (
 	"github.com/BurntSushi/toml"
 
 	"github.com/jay-snyder/treewright/internal/agentinit"
+	"github.com/jay-snyder/treewright/internal/feature"
 	"github.com/jay-snyder/treewright/internal/refname"
 )
 
@@ -69,7 +70,13 @@ const (
 // It is deliberately not a migration hook. No key has ever been renamed, and a
 // rename table would be machinery built for a hypothetical — what this supports
 // is one warning naming one command.
-const FormatVersion = 1
+//
+// 2 is the `features` key: the generator writes it, and writes the registry's
+// own prose above it, which is the one place somebody decides whether to switch
+// a feature on. A config written before it is a config where that decision was
+// never offered — so it is exactly the case the number exists to name, and
+// `setup --refresh` is exactly the answer doctor gives it.
+const FormatVersion = 2
 
 // Config is one repository's settings.
 type Config struct {
@@ -153,6 +160,19 @@ type Config struct {
 	// created, for dependency installation. It runs in the background, and may be
 	// written as one command or as a list of them to run in order.
 	PostCreate Commands `toml:"post_create"`
+
+	// Features are the optional behaviors this repository has switched on, by
+	// name — the registry is internal/feature. Absent and empty both mean off,
+	// which is the default and stays the default: what these do is act on a
+	// checkout at a moment nobody typed anything, and that is a thing to opt
+	// into once, in writing, rather than to discover.
+	//
+	// A closed vocabulary like `agent`, and validated the same way. An unknown
+	// name is a load error naming the built-ins, because a misspelled feature
+	// is indistinguishable by behavior from a feature that is simply off — the
+	// repository looks configured, nothing happens, and there is nothing to
+	// find. Read through Enabled rather than by scanning the slice.
+	Features []string `toml:"features"`
 
 	// TicketPattern is a regular expression whose first submatch names the tmux
 	// window when it matches a slug. Defaults to DefaultTicketPattern.
@@ -357,6 +377,26 @@ func Load(path string) (*Config, error) {
 		}
 	}
 
+	// Validated like the agent key, and for the same reason: the whole value of
+	// an entry is the behavior it names, so a name nothing matches leaves the
+	// repository looking configured and behaving as though the key were absent.
+	// There is nothing to notice and nowhere to look — which is exactly the
+	// state the unknown-key check two dozen lines up exists to prevent.
+	//
+	// A duplicate is refused as branch_prefixes' is. It changes nothing about
+	// what runs, and is always half of an edit somebody did not finish.
+	enabled := make(map[string]bool, len(c.Features))
+	for _, name := range c.Features {
+		if _, ok := feature.Lookup(name); !ok {
+			return nil, fmt.Errorf("%s: unknown feature %q (built-in features: %s)",
+				filepath.Base(path), name, strings.Join(feature.Names(), ", "))
+		}
+		if enabled[name] {
+			return nil, fmt.Errorf("%s: features lists %q twice", filepath.Base(path), name)
+		}
+		enabled[name] = true
+	}
+
 	if c.BaseBranch == "" {
 		c.BaseBranch = DefaultBaseBranch
 	}
@@ -483,6 +523,15 @@ func (c *Config) Explicit(key string) bool { return c.explicit[key] }
 // module has filled a blank, `command = ""` and no command key at all are the
 // same value under two different answers from Explicit.
 func (c *Config) AgentFilled(key string) bool { return c.agentFilled[key] }
+
+// Enabled reports whether this repository switched the named feature on.
+//
+// Membership in the list rather than a field per feature, because the list is
+// the file's own shape and the registry of names is internal/feature's. A bool
+// field here for each would be a second copy of that registry, kept in step by
+// hand — and the first one to fall behind would be a feature a config could
+// name, that Load would accept, and that nothing would ever run.
+func (c *Config) Enabled(name string) bool { return slices.Contains(c.Features, name) }
 
 // DirFor returns the worktree directory a slug maps to.
 func (c *Config) DirFor(slug string) string { return c.MainDir + "-" + slug }

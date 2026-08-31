@@ -86,6 +86,46 @@ pattern the repo already had twice: like the shell shims and the tmux snippet,
 the wiring is emitted by the binary (`agent-init claude`), so it can never drift
 from the `signal` vocabulary it targets.
 
+### Which of the agent's hooks a module wires
+
+Six, for claude. Four are the agent-state protocol above — `UserPromptSubmit`,
+`Notification`, `Stop` and `SessionEnd` each report the matching `signal` state.
+`PreToolUse` runs the other way and is the subject of "Enforcing the handoff"
+below. The sixth is `SessionStart`, and it runs `treewright session-start`: the
+one verb behind every optional behavior a config switched on (see "Optional
+behaviors" in `docs/design-notes.md`).
+
+**`SessionStart` still carries no agent state, and that part has not changed.** A
+fresh window sits at the agent's prompt because a human just made it, so
+signalling `waiting` there would make every `new` open a window already demanding
+attention. What is new is that the event carries a *different* verb — one that
+asks whether this repository wanted anything done before its agent starts
+reading.
+
+**A verb rather than a feature per hook**, because the plugin copy is a snapshot.
+It is installed once, carried into worktrees, and rewritten only by `agent-init`
+or `refresh`. A hook per feature would mean every feature shipped after the copy
+was made is a hook that copy does not have: enabled in the config, silent in
+practice, with nothing to say so. One verb makes the line a constant, so a
+feature added two releases from now runs in wiring installed today — and for the
+same reason the *toggle* is not in the JSON either. The plugin's default
+placement is user-level, one copy for every repository, so `features` is read
+when the hook fires rather than baked in at install time.
+
+**The matcher is `startup|resume|clear`, and the omissions are load-bearing.**
+Claude Code fires `SessionStart` with source `startup`, `resume`, `clear`,
+`compact` or `fork`. The first three are a session beginning. `compact` and
+`fork` fire in the *middle* of one — so a feature that moves a checkout would
+move it underneath an agent already using it, which is precisely the case the
+moment was chosen to avoid. Widening this matcher reads like widening coverage
+and is the safety going away; `TestTheSessionStartHookSkipsMidSessionSources`
+says so in a form that fails rather than in a comment that can be skimmed.
+
+**A `SessionStart` hook's plain stdout is added to the session as context**,
+which is why `session-start` prints its answer to stdout and needs no JSON
+envelope of its own. Core stays agent-agnostic: it writes plain text, and the
+agent decides what to do with it.
+
 ### The wiring is a plugin, not a paste
 
 For a long time `agent-init` printed a JSON hooks fragment and named a settings

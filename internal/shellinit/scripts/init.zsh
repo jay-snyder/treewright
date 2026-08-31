@@ -32,6 +32,7 @@ _treewright() {
     'attach:attach this terminal to the repository tmux session'
     'signal:record the state of the agent running in this worktree'
     'guard:refuse a tool call that would mutate another worktree'
+    'session-start:run the optional features this repository switched on'
     'ls:list worktrees with their status'
     'rm:tear down a worktree and its branch'
     'prune:remove every merged, clean worktree'

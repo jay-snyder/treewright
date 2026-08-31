@@ -11,6 +11,7 @@ import (
 
 	"github.com/jay-snyder/treewright/internal/agentinit"
 	"github.com/jay-snyder/treewright/internal/config"
+	"github.com/jay-snyder/treewright/internal/feature"
 	"github.com/jay-snyder/treewright/internal/git"
 	"github.com/jay-snyder/treewright/internal/shellinit"
 	"github.com/jay-snyder/treewright/internal/tmux"
@@ -500,8 +501,66 @@ func checkConfig(env *Env, r *report, name string) *config.Config {
 		}
 	}
 
+	checkFeatures(env, r, cfg)
 	checkAgentWiring(env, r, cfg)
 	return cfg
+}
+
+// checkFeatures reports a config that switched optional behaviors on with
+// nothing on the machine able to run them.
+//
+// That is the trap the key has, and it is a bad one. The moment a feature runs
+// at is an agent hook, so a repository that lists `features` but names no agent
+// module — or names one whose plugin was never installed — has switched
+// something on that will never happen. Every command succeeds, `config` shows
+// the setting, the file reads as configured, and the behavior is simply absent.
+// Nothing distinguishes that from a feature that ran and found nothing to do,
+// which is exactly the half-configured state doctor exists to name.
+//
+// Silent when nothing is enabled, unlike the checks around it: a repository that
+// wants none of this would otherwise carry a line forever to say so.
+//
+// Staleness is deliberately not reported here. checkAgentWiring already answers
+// whether the plugin is what this treewright would write, and a second finding
+// about the same bytes would say the same sentence twice with a different check
+// name in front of it.
+func checkFeatures(env *Env, r *report, cfg *config.Config) {
+	// Registry order rather than the file's, so two configs listing the same
+	// features in different orders read alike.
+	var enabled []string
+	for _, f := range feature.All() {
+		if cfg.Enabled(f.Name) {
+			enabled = append(enabled, f.Name)
+		}
+	}
+	if len(enabled) == 0 {
+		return
+	}
+	// What is wrong, what it costs, then what to type — the order every finding
+	// in this report takes, so the copyable part is the last thing on the last
+	// line.
+	module, ok := agentModuleFor(cfg)
+	switch {
+	// The modules are joined with `" or "` rather than indexed, so the line is
+	// pasteable while there is one module and honest once there are two — and
+	// so the advice does not depend on a registry being non-empty.
+	case !ok || len(module.Plugin) == 0:
+		r.addf(levelWarn, "features", "%s enabled, and no agent module to run them\n"+
+			"features fire from the agent's own hooks, so none of these happens\n"+
+			"name one in the config:  agent = \"%s\"%s",
+			count(len(enabled), "feature", "features"),
+			strings.Join(agentinit.Names(), `" or "`), asLines(enabled))
+	case inspectPlugin(module, filepath.Join(cfg.MainDir, filepath.FromSlash(module.ProjectPlugin))) == pluginAbsent &&
+		inspectPlugin(module, module.UserPluginDir()) == pluginAbsent:
+		r.addf(levelWarn, "features", "%s enabled, and the %s plugin is installed nowhere\n"+
+			"features fire from that plugin's hooks, so none of these happens\n"+
+			"install it:  %s agent-init %s%s",
+			count(len(enabled), "feature", "features"), module.Name,
+			env.Argv0, module.Name, asLines(enabled))
+	default:
+		r.addf(levelOK, "features", "%s enabled%s",
+			count(len(enabled), "feature", "features"), asLines(enabled))
+	}
 }
 
 // checkConfigVersion reports a config file written for a different revision of

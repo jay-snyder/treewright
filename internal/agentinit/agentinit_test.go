@@ -57,17 +57,37 @@ func TestClaudeHooksParseAsJSON(t *testing.T) {
 		"Stop":             "done",
 		"SessionEnd":       "clear",
 	}
-	// PreToolUse is the one hook that is not the state protocol: it asks rather
-	// than tells, and internal/cli holds it to the guard's own list of tools.
-	// Every other event has to be one of the four, so a fifth signal wired here
-	// by accident still fails.
+	// Two hooks are not the state protocol, and each runs its own verb.
+	// PreToolUse asks rather than tells, and internal/cli holds it to the
+	// guard's own list of tools; SessionStart runs the features a config
+	// switched on. Every other event has to be one of the four, so a fifth
+	// signal wired here by accident still fails.
+	otherVerbs := map[string]string{
+		"PreToolUse":   "treewright guard",
+		"SessionStart": "treewright session-start",
+	}
 	for event := range settings.Hooks {
-		if _, ok := want[event]; !ok && event != "PreToolUse" {
-			t.Errorf("the hooks wire %s, which is neither a state transition nor the guard", event)
+		_, isState := want[event]
+		_, isOther := otherVerbs[event]
+		if !isState && !isOther {
+			t.Errorf("the hooks wire %s, which is neither a state transition, the guard, nor the feature dispatch", event)
 		}
 	}
-	if len(settings.Hooks) != len(want)+1 {
-		t.Errorf("the hooks wire %d events, want %d: %v", len(settings.Hooks), len(want)+1, settings.Hooks)
+	if len(settings.Hooks) != len(want)+len(otherVerbs) {
+		t.Errorf("the hooks wire %d events, want %d: %v", len(settings.Hooks), len(want)+len(otherVerbs), settings.Hooks)
+	}
+	for event, verb := range otherVerbs {
+		found := false
+		for _, m := range settings.Hooks[event] {
+			for _, h := range m.Hooks {
+				if h.Type == "command" && h.Command == verb {
+					found = true
+				}
+			}
+		}
+		if !found {
+			t.Errorf("%s does not run %q: %+v", event, verb, settings.Hooks[event])
+		}
 	}
 	for event, state := range want {
 		matchers, ok := settings.Hooks[event]
@@ -91,6 +111,43 @@ func TestClaudeHooksParseAsJSON(t *testing.T) {
 		}
 		if !found {
 			t.Errorf("%s does not run %q: %+v", event, command, matchers)
+		}
+	}
+}
+
+// TestTheSessionStartHookSkipsMidSessionSources pins the one thing about the
+// SessionStart wiring that is a safety property rather than a preference.
+//
+// Claude Code fires SessionStart with source startup, resume, clear, compact or
+// fork. The first three are a session beginning; compact and fork happen in the
+// *middle* of one. A feature that moves a checkout — which is what the moment
+// exists for — would move it underneath an agent already working in it, so the
+// matcher names the three and excludes the two. Widening it reads like widening
+// coverage and is the safety going away, which is why this is a test and not
+// only a comment.
+func TestTheSessionStartHookSkipsMidSessionSources(t *testing.T) {
+	var settings struct {
+		Hooks map[string][]struct {
+			Matcher string `json:"matcher"`
+		} `json:"hooks"`
+	}
+	if err := json.Unmarshal([]byte(pluginBody(t, "hooks/hooks.json")), &settings); err != nil {
+		t.Fatalf("the claude hooks file is not valid JSON: %v", err)
+	}
+	matchers := settings.Hooks["SessionStart"]
+	if len(matchers) != 1 {
+		t.Fatalf("SessionStart wiring = %+v, want one matcher", matchers)
+	}
+	sources := strings.Split(matchers[0].Matcher, "|")
+	for _, source := range []string{"startup", "resume", "clear"} {
+		if !slices.Contains(sources, source) {
+			t.Errorf("the matcher %q omits %s, a session actually beginning", matchers[0].Matcher, source)
+		}
+	}
+	for _, source := range []string{"compact", "fork"} {
+		if slices.Contains(sources, source) {
+			t.Errorf("the matcher %q fires on %s, which is mid-session — a feature would move a checkout under a working agent",
+				matchers[0].Matcher, source)
 		}
 	}
 }

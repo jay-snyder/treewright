@@ -38,7 +38,7 @@ import _ "embed"
 // manifest turns the directory treewright was already writing into a place the
 // hooks can live too, which makes the wiring treewright's to keep current.
 //
-// Four of the five hooks are the agent-state protocol: each fires on one of the
+// Four of the six hooks are the agent-state protocol: each fires on one of the
 // agent's own transitions and reports the matching signal state, so the AGENT
 // column of `ls` answers which window wants a person.
 //
@@ -47,11 +47,23 @@ import _ "embed"
 //	Stop              the agent finished responding; there is a result
 //	SessionEnd        the claude process ended while its window lives on
 //
-// SessionStart deliberately maps to nothing. A fresh window sits at the
-// agent's prompt because the human just made it, and signaling `waiting` there
-// would make every `new` open a window already demanding attention.
+// SessionStart carries no agent state, and that is still deliberate. A fresh
+// window sits at the agent's prompt because the human just made it, and
+// signaling `waiting` there would make every `new` open a window already
+// demanding attention. What it carries instead is `treewright session-start`,
+// the one verb every optional feature runs behind — so a config that switched
+// `fresh-base` on gets a base checkout brought up to date before its agent
+// reads a line of it, and a feature added two releases from now runs in this
+// same wiring without the copy on anybody's disk being rewritten.
 //
-// The fifth runs the other way. `PreToolUse` is asked rather than told: it
+// Its matcher is `startup|resume|clear` and the omissions are the point.
+// SessionStart also fires on `compact` and on `fork`, both of which happen in
+// the *middle* of a session — so a feature that moves a checkout would move it
+// underneath an agent already working in it, which is the one thing the moment
+// is chosen to avoid. Widening this matcher is not a widening of coverage; it
+// is the safety going away.
+//
+// The sixth runs the other way. `PreToolUse` is asked rather than told: it
 // hands the tool call to `treewright guard`, which refuses one that would
 // mutate a worktree other than the one this agent is standing in. The skill
 // teaches the same rule in prose, and prose alone did not hold it — see

@@ -440,6 +440,33 @@ the reason goes to stderr for the agent to read. Nothing is printed to stdout.`,
 			run: cmdGuard,
 		},
 		{
+			name:    "session-start",
+			summary: "run the optional features this repository switched on",
+			long: `Runs whichever of a repository's optional features are due at the start of
+an agent session, and prints what each of them did.
+
+This is for an agent's own hooks to run rather than for typing. A SessionStart
+hook's plain stdout is added to the session as context, so what this prints is
+addressed to the agent: it is how the agent learns that the checkout it is
+about to work in moved under it.
+
+Features are off unless a config lists them by name, and off is the permanent
+default — each one is work treewright does on its own initiative, at a moment
+nobody typed anything:
+
+    features = ["fresh-base"]
+
+The features that exist:
+
+` + featureHelp() + `
+Anywhere out of scope — outside a registered repository, in a repository that
+switched nothing on, in a checkout a feature does not apply to, or with a
+feature that found nothing to do — it exits 0 and prints nothing. Agent hooks
+fire in every session the agent has, and most of those are in repositories
+treewright has never heard of.`,
+			run: cmdSessionStart,
+		},
+		{
 			name:    "ls",
 			aliases: []string{"list", "status"},
 			args:    "[--json] " + argRepo,

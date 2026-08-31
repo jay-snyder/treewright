@@ -439,6 +439,7 @@ stdout carries the answer and nothing else, so any command can be piped:
 | `close` | nothing — there is no answer, only a window that is gone; what it closed and what that cost go to stderr |
 | `signal` | nothing — the answer is the stamp on the window, and out of scope it is silent on stderr too |
 | `guard` | nothing — the answer is the exit code, that being what a PreToolUse hook reads, and the refusal it carries goes to stderr for the agent |
+| `session-start` | what each optional feature did, one message per feature — the reader is the agent, whose SessionStart hook adds a hook's stdout to the session as context, and with nothing to report it prints nothing at all |
 
 Progress, warnings, prompts, and errors go to stderr, prefixed `warning:` or
 `error:` following git's convention, and unprefixed when it is just narration. So
@@ -917,6 +918,23 @@ Closing a session's last window ends the session, which moves an attached client
 elsewhere or detaches it, so the prompt says when that is what is about to
 happen. Normally it is not: the base window outlives every worktree.
 
+**An optional behavior moves somebody's checkout, which is new — and what makes
+it defensible is that the move is one treewright could not have got wrong.**
+Everything above is treewright refusing to destroy something without being asked
+twice; `features` is the first setting under which treewright changes a working
+tree at a moment nobody typed anything. Three things carry it. It is off unless a
+config named it, and it never becomes on by default. The move is
+`git merge --ff-only`, which advances a branch that has only fallen behind and
+refuses a branch that has diverged or has local changes in the way — so the worst
+outcome is a message and a checkout exactly as it was. And it happens only in the
+base checkout, on `base_branch`, at the start of a session: never in a worktree,
+which is the case `guard` refuses on an agent's behalf, and never mid-session,
+which is why the hook's matcher excludes `compact` and `fork`.
+
+The refusal is reported rather than swallowed, and so is a fetch that could not
+reach origin. Silence there would say "you are current" to an agent about to
+trust the checkout, which is the one wrong answer available.
+
 ## What treewright is allowed to write
 
 Setup touches as few files outside a repository as it can, and never a file it
@@ -1047,6 +1065,14 @@ file that never set one gets the commented default back, never a live line,
 because a default written into the file as a setting is one that stops
 following treewright's own changes.
 
+`features` is the one key copied back unconditionally, and that is not the
+collapse the rule above forbids: nothing there has a default to be overwritten
+by, an absent key and an empty list say the same thing, and there is no value
+the generator could pin in that the file did not already hold. Adding the key was
+what first moved the version, from 1 to 2 — the generator now writes the
+registry's own prose above it, and a config written before that is a config where
+the decision was never offered.
+
 Which config applies, in order: an explicit name; the config whose `main_dir` is
 the repository you are standing in; the only config, when the registry holds
 exactly one; otherwise an error listing the names. A broken config elsewhere in
@@ -1094,6 +1120,120 @@ is otherwise indistinguishable from one still being written. The log lives in
 untracked file and make the tree read as dirty — and rather than nowhere, which is
 what discarding the output would leave you with when an install fails. How the
 failure reaches the user is below.
+
+### Optional behaviors
+
+`features` is a flat list of names, and everything about the setting follows from
+what the entries are: work treewright starts on its own initiative, at a moment
+nobody typed anything.
+
+```toml
+features = ["fresh-base"]
+```
+
+**Opt-in, and permanently so.** Every other thing treewright does is asked for at
+the moment it happens — a command is typed, or an agent hook reports a transition
+that has just occurred and treewright writes it down. A feature is the other
+shape, and a tool that fetches and moves somebody's checkout is welcome exactly
+when they asked for it and alarming otherwise. So nothing here is on by default
+and nothing here ever becomes so, and a name nothing in the registry matches is a
+load error rather than a no-op: a misspelled feature is indistinguishable by
+behavior from a feature that is off, which leaves a repository looking configured
+with nothing to find.
+
+**A list of names and not a `[features]` boolean table**, and the reason is
+mechanical rather than aesthetic. A TOML table swallows every bare key written
+after it, so a table would have to be rendered last in the generated file for
+ever — a constraint `renderConfig` and `setup --refresh` would both have to hold,
+and one nothing in the file's text would announce when it broke. A flat list is
+order-free, renders with the `tomlList` that already exists, and validates
+against a closed vocabulary the way `agent` does. An absent key and
+`features = []` are deliberately the same value: a feature is on or it is not, so
+there is no third state for an empty list to express, unlike `ticket_pattern`
+and the command keys where an empty value is a setting of its own.
+
+**One dispatch verb, `treewright session-start`, and not one command per
+feature.** This is the decision the whole shape rests on, and it is the
+compatibility argument made elsewhere about the plugin. The agent wiring lives in
+a plugin copy on somebody's disk: installed once, carried into worktrees as a
+snapshot, and rewritten only when its owner runs `agent-init` or `refresh`. A
+verb per feature would mean every feature shipped after that copy was made is a
+hook the copy does not have — enabled in the config, silent in practice, with
+nothing to say so. One verb makes the plugin's line a constant, so a feature
+added two releases from now runs in wiring installed today.
+
+**The toggle is read when the hook fires, never installed into the hook.** The
+plugin's default placement is user-level — one copy covering every repository —
+so putting the enabled list in the hook JSON would mean one machine-wide answer
+to a per-repository question. `features` is read at the moment the hook runs,
+which is `signal`'s discipline exactly: the same hooks fire in every session the
+agent has, most of them in repositories treewright has never heard of, and what
+decides whether anything happens is the config found from where the session is.
+
+**Everything out of scope is a silence.** A hook that narrated its own no-op
+would narrate it at the start of every session in every repository on the
+machine. So an unregistered directory, a repository that switched nothing on, and
+a feature that found nothing to do all exit 0 and print nothing.
+
+**What it prints goes to stdout.** A `SessionStart` hook's plain stdout is added
+to the session as context, so the reader is the agent rather than a person, and
+this is one of the few messages whose whole point is being machine-consumed.
+stderr would put it in a transcript for a human and nowhere else — which for
+"the checkout under you just moved" is the wrong audience entirely.
+
+**The moment excludes the middle of a session.** `SessionStart` fires with source
+`startup`, `resume`, `clear`, `compact` or `fork`; the module's matcher names the
+first three. `compact` and `fork` happen *mid-session*, so a feature that moves a
+checkout would move it underneath an agent already working in it. That is not a
+narrower matcher for tidiness — see `docs/agents.md`.
+
+#### `fresh-base`
+
+Fetch `origin` and fast-forward, when an agent session starts in the base
+checkout with `base_branch` checked out. It generalizes a hook a repository can
+already write by hand, and everything such a hook hard-codes — the checkout, the
+branch, which repositories it applies to — treewright already knows.
+
+**`--ff-only` is the whole of the safety and not a stylistic preference.** It
+moves a branch that has only fallen behind and refuses everything else: a branch
+that has diverged, a branch with local changes standing in the way. treewright
+moving somebody's checkout without being asked *at that moment* is defensible
+exactly while the move is one it could not have got wrong, and this flag is what
+makes that true. A refusal is reported and the checkout is left exactly as it
+was.
+
+**It acts only in the base checkout, and only on `base_branch`.** A session in a
+worktree is an agent working somewhere else, and moving a checkout it is not
+standing in is the very thing `guard` refuses on an agent's behalf — worse here,
+since the base checkout may have an agent of its own with work in flight. And the
+base checkout is the one place a person switches branches by hand, so a checkout
+parked somewhere else is parked there deliberately.
+
+**The failed fetch is the one out-of-scope-looking case that speaks**, because it
+is not out of scope: the session *is* in a repository that asked for this, and
+the honest answer is that freshness is now unknown. Saying nothing there would be
+indistinguishable from saying "you are current", which is the one wrong thing to
+tell an agent about to read the checkout.
+
+#### Where a feature's parts live
+
+`internal/feature` holds the vocabulary — the name a config writes, the moment it
+runs at, the summary and the prose the generated config explains it with — and
+`internal/cli/features.go` holds the behavior. The split is `agentinit`'s: facts
+in one package, behavior in the other, because `internal/config` validates the
+names and must not depend on `internal/git`.
+
+What holds the two together is `TestEveryFeatureHasAnImplementation` rather than
+a shared interface, for the same reason the guard and its matcher are held
+together by a test: the coupling is a list on each side, and a test that names
+the missing half is a better failure than a signature nobody can implement
+wrong. A registered feature with nothing wired to run it is the failure mode
+worth catching — the config loads, the hook fires, and nothing happens.
+
+The generated config's commentary is rendered from the registry, so a feature
+added later documents itself in every config `setup --refresh` rewrites. That
+file is where somebody decides whether to switch one on, which makes it the one
+place the prose has to be complete.
 
 ## The shell integration
 
