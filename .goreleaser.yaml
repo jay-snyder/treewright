@@ -35,7 +35,14 @@ checksum:
 changelog:
   sort: asc
   filters:
+    # The other half of the prefixes CLAUDE.md asks non-user-facing work to
+    # carry. A prefix means nothing until it is excluded here, and "^ci:" was
+    # absent from this list from the initial commit: v0.1.0 published three of
+    # them, and v0.4.0 would have published a linter pin to people reading for
+    # what changed in the tool. Adding a prefix to the convention is half the
+    # change; this list is the other half.
     exclude:
+      - "^ci:"
       - "^docs:"
       - "^test:"
       - "^chore:"
