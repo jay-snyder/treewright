@@ -116,7 +116,10 @@ func freshBase(cfg *config.Config) string {
 	if !repo.HasRemote("origin") {
 		return ""
 	}
-	if err := repo.Fetch("origin", cfg.BaseBranch); err != nil {
+	// FetchRetrying, as `new` does: this is the second of the two places where a
+	// fetch that failed once leaves the caller acting on something unverified
+	// rather than merely waiting longer for it.
+	if err := repo.FetchRetrying("origin", cfg.BaseBranch); err != nil {
 		return fmt.Sprintf("could not reach origin, so whether %s is current here is unknown\n"+
 			"check before relying on anything you read in this checkout", cfg.BaseBranch)
 	}

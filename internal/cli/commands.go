@@ -147,16 +147,26 @@ func createWorktree(env *Env, cfg *config.Config, prefix, slug string) (dir, bra
 		}
 	default:
 		// Refresh the base branch so the fork point is the latest commit, not
-		// whatever this checkout last happened to fetch.
-		if err := repo.Fetch("origin", cfg.BaseBranch); err == nil {
+		// whatever this checkout last happened to fetch. FetchRetrying rather
+		// than Fetch because this is one of the two places a fetch that failed
+		// once changes what the user gets rather than what they wait for.
+		if err := repo.FetchRetrying("origin", cfg.BaseBranch); err == nil {
 			env.progressf("creating branch %s off origin/%s", branch, cfg.BaseBranch)
 			if err := repo.AddWorktreeNewBranch(dir, branch, "origin/"+cfg.BaseBranch); err != nil {
 				return "", "", err
 			}
 			warnIfBaseIsAhead(env, repo, cfg)
 		} else if repo.BranchExists(cfg.BaseBranch) {
-			// Offline: a local base branch is a stale but usable fork point.
-			env.warnf("origin unreachable — forking from the local %s instead\nit may be behind what is on origin", cfg.BaseBranch)
+			// A local base branch is a stale but usable fork point. Why the fetch
+			// failed is git's to say and not this message's to guess: it used to
+			// report the network as unreachable, which is one of several things it
+			// can be — a base_branch that is not on origin, a repository that was
+			// renamed, credentials that expired, a deadline — and each of those
+			// sends the reader somewhere different. So the warning says what it
+			// did, what that costs, and then quotes git.
+			env.warnf("could not fetch origin/%s — forking from the local %s instead\n"+
+				"the fork point may be behind what is on origin%s",
+				cfg.BaseBranch, cfg.BaseBranch, asFields(field("git said", git.Said(err))))
 			if err := repo.AddWorktreeNewBranch(dir, branch, cfg.BaseBranch); err != nil {
 				return "", "", err
 			}
