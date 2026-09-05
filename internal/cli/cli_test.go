@@ -386,8 +386,11 @@ func TestNewCreatesWorktreeAndBranch(t *testing.T) {
 	f := newFixture(t, "")
 
 	out := f.mustRun("new", "feature")
-	if !strings.Contains(out, "creating branch x/feature off origin/main") {
-		t.Errorf("output = %q, want the fork point reported", out)
+	// The repository owns the fork point in the message as well as in fact: a
+	// branch name and a base branch identify a repository only to a reader who
+	// already knows which one they are looking at.
+	if !strings.Contains(out, "creating branch x/feature off proj's origin/main") {
+		t.Errorf("output = %q, want the fork point reported with its repository", out)
 	}
 	if !f.Exists("feature") {
 		t.Fatalf("worktree %s was not created", f.DirFor("feature"))
@@ -456,7 +459,10 @@ func TestNewQuotesGitWhenTheFetchFails(t *testing.T) {
 		t.Fatalf("new: %v\n%s", r.err, r.both())
 	}
 	stderr := flat(r.stderr)
-	if !strings.Contains(stderr, "could not fetch origin/main") {
+	// The repository owns the ref, here as everywhere the fork point is named:
+	// "origin/main" alone identifies a repository only to a reader who already
+	// knows whose it is.
+	if !strings.Contains(stderr, "could not fetch proj's origin/main") {
 		t.Errorf("stderr = %q, want the fetch named as the thing that failed", r.stderr)
 	}
 	// The claim that could not be supported: a failed fetch is not evidence of
@@ -527,7 +533,7 @@ func TestNewPicksTheBranchPrefixTheSlugNames(t *testing.T) {
 	f := newPrefixFixture(t, "feature/", "bug/")
 
 	out := f.mustRun("new", "bug/eng-1")
-	if !strings.Contains(out, "creating branch bug/eng-1 off origin/main") {
+	if !strings.Contains(out, "creating branch bug/eng-1 off proj's origin/main") {
 		t.Errorf("output = %q, want the named prefix in the branch", out)
 	}
 	if !f.Exists("eng-1") {
@@ -858,7 +864,7 @@ func TestRmInARepositoryWithNoWorktreesPointsAtNew(t *testing.T) {
 	if !strings.Contains(msg, "no worktrees at all") {
 		t.Errorf("error = %q, want the empty repository named as the state", msg)
 	}
-	if !strings.Contains(flat(msg), "new ghost") {
+	if !strings.Contains(flat(msg), "new --repo proj ghost") {
 		t.Errorf("error = %q, want new named as the way to a first worktree", msg)
 	}
 }
@@ -1254,7 +1260,7 @@ func TestDispatch(t *testing.T) {
 		if err == nil {
 			t.Error("want a non-zero exit")
 		}
-		if !strings.Contains(out, "new [-p <text>] <slug>") {
+		if !strings.Contains(out, "new [-p <text>] [--repo <name>] <slug>") {
 			t.Errorf("output = %q, want the command overview", out)
 		}
 	})
@@ -1264,7 +1270,7 @@ func TestDispatch(t *testing.T) {
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
 		}
-		if !strings.Contains(out, "resume [-p <text>] [--fresh] [slug]") {
+		if !strings.Contains(out, "resume [-p <text>] [--fresh] [--repo <name>] [slug]") {
 			t.Errorf("output = %q, want the command overview", out)
 		}
 	})

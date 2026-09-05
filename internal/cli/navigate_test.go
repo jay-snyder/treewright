@@ -230,7 +230,7 @@ func TestNewOnAnExistingWorktreePointsAtResume(t *testing.T) {
 		t.Fatal("want an error")
 	}
 	msg := r.err.Error()
-	if !strings.Contains(msg, "already exists") || !strings.Contains(msg, "treewright resume feature") {
+	if !strings.Contains(msg, "already exists") || !strings.Contains(msg, "treewright resume --repo proj feature") {
 		t.Errorf("err = %v, want it to name the command that opens the existing worktree", r.err)
 	}
 	// The failure has to precede the narration, or the output reads as though the

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/jay-snyder/treewright/internal/config"
 	"github.com/jay-snyder/treewright/internal/tmux"
 )
 
@@ -32,9 +33,10 @@ const capturedLines = 20
 
 func cmdSend(env *Env, args []string) error {
 	var dry bool
+	var repoName string
 	positional, err := parseArgs("send", args, map[string]*bool{
 		"-n": &dry, "--dry-run": &dry,
-	}, nil, 2)
+	}, repoValues(&repoName, nil), 2)
 	if err != nil {
 		return err
 	}
@@ -57,7 +59,7 @@ func cmdSend(env *Env, args []string) error {
 			"put the text in a file and send one line naming it, as --prompt-file does")
 	}
 
-	cfg, err := resolveConfig("")
+	cfg, err := resolveConfig(repoName)
 	if err != nil {
 		return err
 	}
@@ -87,8 +89,8 @@ func cmdSend(env *Env, args []string) error {
 	}
 	window := tmux.Windows(sessionFor(cfg))[target.Dir]
 	if window.ID == "" {
-		return fmt.Errorf("no window is open on %s, so there is no agent to reach%s",
-			name, asFields(field("open one with", env.copyable(env.Argv0+" resume "+name))))
+		return fmt.Errorf("no window is open on %s in %s, so there is no agent to reach%s",
+			name, cfg.Name, asFields(field("open one with", hint(env, cfg, "resume", name))))
 	}
 	// An agent typing at itself is a real footgun and a hard one to notice from
 	// the inside: the message arrives in this very session, ahead of whatever is
@@ -110,9 +112,9 @@ func cmdSend(env *Env, args []string) error {
 	}
 	// The pane's text is an argument rather than part of the format, so a % in
 	// what the agent happened to print stays a %.
-	env.progressf("%s shows:\n%s", window.Name, pane)
+	env.progressf("%s in %s shows:\n%s", window.Name, cfg.Name, pane)
 
-	if err := refuseHeldOpen(env, window, pane, name); err != nil {
+	if err := refuseHeldOpen(env, cfg, window, pane, name); err != nil {
 		return err
 	}
 	if dry {
@@ -131,6 +133,7 @@ func cmdSend(env *Env, args []string) error {
 	// which is the protocol working as designed; a sender that stamped the
 	// window would be guessing at a state only the agent can report.
 	env.progressf("sent to %s%s", window.Name, asFields(
+		field("repository", cfg.Name),
 		field("worktree", name),
 		field("message", message),
 	))
@@ -155,14 +158,14 @@ func cmdSend(env *Env, args []string) error {
 // apart. The notice is the last line such a window shows, and the match is
 // against the last line rather than the whole capture, so an agent that happens
 // to print those words mid-screen is not mistaken for a dead one.
-func refuseHeldOpen(env *Env, window tmux.Window, pane, name string) error {
+func refuseHeldOpen(env *Env, cfg *config.Config, window tmux.Window, pane, name string) error {
 	lines := strings.Split(pane, "\n")
 	if len(lines) == 0 || strings.TrimSpace(lines[len(lines)-1]) != heldOpenNotice {
 		return nil
 	}
 	return fmt.Errorf("%s has no agent in it — its command exited and the window is being held open%s\n"+
 		"a message would reach the shell holding it, and the Enter after it would close the window\n"+
-		"close it and start again:  %s",
+		"close it and start again:  %s && %s",
 		window.Name, asFields(field("window", window.ID)),
-		env.copyable(env.Argv0+" close "+name+" && "+env.Argv0+" resume "+name))
+		hint(env, cfg, "close", name), hint(env, cfg, "resume", name))
 }

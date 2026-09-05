@@ -50,13 +50,18 @@ import (
 // this terminal to it.
 func cmdRestore(env *Env, args []string) error {
 	var detached, fresh bool
+	var repoName string
 	positional, err := parseArgs("restore", args, map[string]*bool{
 		"-d": &detached, "--detached": &detached, freshFlag: &fresh,
-	}, nil, 1)
+	}, repoValues(&repoName, nil), 1)
 	if err != nil {
 		return err
 	}
-	cfg, err := resolveConfig(at(positional, 0))
+	named, err := namedRepo(env, "restore", repoName, at(positional, 0))
+	if err != nil {
+		return err
+	}
+	cfg, err := resolveConfig(named)
 	if err != nil {
 		return err
 	}

@@ -35,6 +35,12 @@ _treewright_completions() {
     COMPREPLY=($(compgen -f -- "$cur"))
     return
   fi
+  # --repo takes a registered config name on any command, which is the same list
+  # the repo-taking commands complete their positional from.
+  if [[ "${COMP_WORDS[COMP_CWORD-1]}" == --repo ]]; then
+    COMPREPLY=($(compgen -W "$(command treewright __complete repos 2>/dev/null)" -- "$cur"))
+    return
+  fi
   local candidates=""
   case "${COMP_WORDS[1]}" in
     new|move)

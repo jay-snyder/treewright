@@ -881,11 +881,16 @@ func abbreviateHome(path string) string {
 // which of several configs applies depends on where you are standing. This
 // answers all three at once.
 func cmdConfig(env *Env, args []string) error {
-	positional, err := parseArgs("config", args, nil, nil, 1)
+	var repoName string
+	positional, err := parseArgs("config", args, nil, repoValues(&repoName, nil), 1)
 	if err != nil {
 		return err
 	}
-	cfg, err := resolveConfig(at(positional, 0))
+	named, err := namedRepo(env, "config", repoName, at(positional, 0))
+	if err != nil {
+		return err
+	}
+	cfg, err := resolveConfig(named)
 	if err != nil {
 		return err
 	}

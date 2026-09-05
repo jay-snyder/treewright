@@ -34,7 +34,8 @@ What follows from it:
   session's first window, it is what keeps the session alive as worktrees come
   and go.
 - **Commands follow their window across sessions.** Resuming a worktree while
-  attached to another repository's session switches you there.
+  attached to another repository's session switches you there — unless the
+  repository was named, which is the next section.
 - **Outside tmux nothing is skipped.** The session and window are created
   detached, and treewright says to run `treewright attach` — its own command
   rather than a `tmux attach` to copy, because that spelling names the session
@@ -100,6 +101,51 @@ A launcher with no working directory to set names the repository instead —
 Generating that file is deliberately left out: it would be a promise to generate
 one for the next terminal emulator, and for the one after that, in exchange for
 six lines a person writes once.
+
+## Whose client is it
+
+One session per repository has a consequence that took two incidents in one
+sitting to surface: a window opened in another repository is *always* in
+another session, so `Focus`, which follows a window across sessions, always
+switched. An agent standing in one repository and spawning work in another
+therefore moved the operator's attached client out of the repository they were
+watching and into one they had not asked for — arriving, from that seat, as
+their session being replaced by a duplicate of somebody else's, with detach and
+reattach the only way back.
+
+**So the client moves only when the repository acted on is the one the caller
+is standing in.** Name another repository and the window is created, left
+current in its own session so whoever attaches lands on it, and your client
+stays where it was; treewright says so and names `tw attach <repo>` as the way
+over. That is `Select` rather than `Focus` — the same pair `restore` already
+used, and for a version of the same reason: focusing each window it opened
+would drag an attached client through every one of them.
+
+The select half is not a formality. tmux makes a *new* window current by
+itself, but a window that was merely found is not, so without it "the window is
+ready over there" would be a promise that lands whoever attaches somewhere
+else.
+
+Three details of the rule are deliberate:
+
+- **It is not a flag.** A flag puts the operator's client at the mercy of every
+  caller remembering to pass it, and the callers likeliest to forget are the
+  agents this exists to contain. The behavior follows from whose session is
+  being acted on, which is not something a caller can neglect to mention.
+- **Naming your own repository suppresses nothing.** The agent guide tells
+  agents to pass `--repo` always, so a flag that changed where you land
+  depending on whether you bothered to name the repository you were already in
+  would be one nobody could pass by default.
+- **`attach` and `restore` still move you**, because moving you is what they
+  were asked for. The line is between a command whose answer is a *window* —
+  `new`, `resume`, `base` — where arriving is a convenience, and one whose
+  answer is a *session*, where arriving is the whole request. `restore` keeps
+  its `-d` for the same reason it always had it.
+
+Outside tmux none of this arises: there is no client, `Focus` skips the switch
+itself, and both paths print the way in. `send` never had the problem, since it
+types at a pane and calls neither — and that is a property to keep rather than
+a gap to fill.
 
 ## Window identity
 
@@ -186,6 +232,23 @@ Nothing writes `@treewright_agent_state`. The receiving agent's own
 `UserPromptSubmit` hook fires `signal working` when the message lands, which is
 the protocol working as designed; a sender stamping the window would be guessing
 at a state only the agent can report.
+
+### Reaching an agent in another repository
+
+`send --repo <name> <slug>` types at an agent in a repository the sender is not
+standing in, which is what makes one agent able to hand work to another across
+sessions. `base` is a target like any slug, so a repository's base window — the
+one an operator most often has an agent in — is addressable from outside it;
+inside its own repository it always was, and what is new is being able to say
+whose base is meant.
+
+Nothing about the mechanics changes, and that is the point: the target is a
+window id, which is server-unique, so the capture, the literal send, the Enter,
+the refusal of the caller's own window and the refusal of a held-open window all
+work across sessions exactly as they work within one. **Every one of them
+matters more here, not less.** The sender cannot see the receiving session at
+all, so the capture stops being a convenience and becomes the only look anybody
+gets before a keystroke answers a question nobody read.
 
 `send` goes through `internal/tmux` like everything else, which is the other half
 of why it is a command. The raw form honored no `TREEWRIGHT_TMUX_LABEL`, went

@@ -185,7 +185,7 @@ func TestSendNeedsAWindowToTypeInto(t *testing.T) {
 	if r.err == nil {
 		t.Fatalf("send to a worktree with no window succeeded\n%s", r.both())
 	}
-	if msg := flat(r.err.Error()); !strings.Contains(msg, "treewright resume eng-1") {
+	if msg := flat(r.err.Error()); !strings.Contains(msg, "treewright resume --repo proj eng-1") {
 		t.Errorf("error = %q, want the way to open one named", msg)
 	}
 }
@@ -213,7 +213,7 @@ func TestSendRefusesAWindowHeldOpenAfterItsCommandDied(t *testing.T) {
 	// kill-window: that line was run from a shell holding none of treewright's
 	// environment, so under a label it reached the default server and closed
 	// whatever that id happened to be there.
-	if want := "treewright close eng-1"; !strings.Contains(r.err.Error(), want) {
+	if want := "treewright close --repo proj eng-1"; !strings.Contains(r.err.Error(), want) {
 		t.Errorf("error = %q, want the way out to name %q", r.err, want)
 	}
 	// And the window is still there with the failure still on it, which is what

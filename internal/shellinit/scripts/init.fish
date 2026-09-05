@@ -81,6 +81,7 @@ complete -c treewright -n '__fish_seen_subcommand_from resume restore' -l fresh 
 complete -c treewright -n '__fish_seen_subcommand_from restore' -s d -l detached -d 'leave the session running and stay out of it'
 # -F is what turns the argument back into a filename completion: the file is on
 # the caller's disk, which treewright knows nothing about.
+complete -c treewright -n '__fish_seen_subcommand_from new resume send cd rm close ls prune base restore attach config refresh' -l repo -r -f -a '(command treewright __complete repos)' -d 'the repository to act on'
 complete -c treewright -n '__fish_seen_subcommand_from new move resume' -l prompt-file -r -F -d 'a file holding the brief'
 complete -c treewright -n '__fish_seen_subcommand_from agent-init' -l local -d 'install it for this repository alone, not every one'
 complete -c treewright -n '__fish_seen_subcommand_from agent-init' -l print -d 'print the plugin files instead of installing them'

@@ -30,7 +30,8 @@ import (
 // for the same reason.
 
 func cmdClose(env *Env, args []string) error {
-	positional, err := parseArgs("close", args, nil, nil, 1)
+	var repoName string
+	positional, err := parseArgs("close", args, nil, repoValues(&repoName, nil), 1)
 	if err != nil {
 		return err
 	}
@@ -39,7 +40,7 @@ func cmdClose(env *Env, args []string) error {
 		return usageErrorf("close", "a slug is required")
 	}
 
-	cfg, err := resolveConfig("")
+	cfg, err := resolveConfig(repoName)
 	if err != nil {
 		return err
 	}
@@ -55,9 +56,9 @@ func cmdClose(env *Env, args []string) error {
 	name, dir := closeTarget(env, cfg, slug)
 	window, ok := windows[dir]
 	if !ok || window.ID == "" {
-		return fmt.Errorf("no window is open on %s%s", name, asFields(
+		return fmt.Errorf("no window is open on %s in %s%s", name, cfg.Name, asFields(
 			field("looked for a window on", dir),
-			field("open now", strings.Join(openWindowNames(windows), "\n")),
+			field("open in that session now", strings.Join(openWindowNames(windows), "\n")),
 		))
 	}
 
@@ -95,7 +96,7 @@ func closeTarget(env *Env, cfg *config.Config, slug string) (name, dir string) {
 	if managed, err := repoFor(cfg).Managed(); err == nil {
 		// resolveSlug reports the expansion and errors when nothing matches; only
 		// the match is wanted here, the miss being the removed-worktree case.
-		if wt, err := resolveSlug(env, repoFor(cfg), managed, slug); err == nil {
+		if wt, err := resolveSlug(env, cfg, managed, slug); err == nil {
 			return wt.Slug, wt.Dir
 		}
 	}
@@ -176,8 +177,10 @@ func openWindowNames(windows map[string]tmux.Window) []string {
 // closeHint is how the commands that leave a window behind say to close it: a
 // treewright command rather than the `tmux kill-window` they used to print.
 //
-// Spelled with Argv0, so someone who typed `tw` is answered in the name they
-// use — and named once because `rm`, `prune` and `send` all reach for it.
-func closeHint(env *Env, slug string) string {
-	return env.copyable(env.Argv0 + " close " + slug)
+// Named once because `rm`, `prune` and `send` all reach for it, and built by
+// hint so it carries the repository — a stale window is the case where naming
+// only the slug is least defensible, since the worktree that would have
+// disambiguated it has just been deleted.
+func closeHint(env *Env, cfg *config.Config, slug string) string {
+	return hint(env, cfg, "close", slug)
 }

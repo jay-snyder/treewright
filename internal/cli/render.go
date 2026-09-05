@@ -496,7 +496,13 @@ func slugsOf(worktrees []git.Worktree) []string {
 //
 // An ambiguous prefix is an error listing the candidates: guessing among them
 // would eventually guess wrong on a command that destroys something.
-func resolveSlug(env *Env, repo git.Repo, managed []git.Worktree, want string) (git.Worktree, error) {
+//
+// The config is here for the messages rather than for the resolution: what a
+// miss has to name is the repository it looked in and a command to type, and
+// both of those are the config's — the same slug exists in two repositories as
+// a matter of course, so "no worktree eng-1" without a repository beside it
+// answers a question nobody asked.
+func resolveSlug(env *Env, cfg *config.Config, managed []git.Worktree, want string) (git.Worktree, error) {
 	var prefixed []git.Worktree
 	for _, wt := range managed {
 		if wt.Slug == want {
@@ -519,10 +525,10 @@ func resolveSlug(env *Env, repo git.Repo, managed []git.Worktree, want string) (
 		// set but the way to a non-empty one.
 		if len(managed) == 0 {
 			return git.Worktree{}, fmt.Errorf("no worktree %q — %s has no worktrees at all\nstart one with %s",
-				want, repo.Name(), env.copyable(env.Argv0+" new "+want))
+				want, cfg.Name, hint(env, cfg, "new", want))
 		}
-		return git.Worktree{}, fmt.Errorf("no worktree %q for %s\nhave:%s",
-			want, repo.Name(), asLines(slugsOf(managed)))
+		return git.Worktree{}, fmt.Errorf("no worktree %q in %s\nhave:%s",
+			want, cfg.Name, asLines(slugsOf(managed)))
 	default:
 		return git.Worktree{}, fmt.Errorf("%q matches %d worktrees — name one exactly:%s",
 			want, len(prefixed), asLines(slugsOf(prefixed)))

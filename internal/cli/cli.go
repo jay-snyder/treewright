@@ -124,10 +124,20 @@ type command struct {
 }
 
 // argRepo is how an optional repo name is spelled in a usage line. Named once
-// because it appears in three commands' specs and in the help those render: the
-// commands that take a repo all take it the same way, and a fourth added later
-// should read the same as the three.
+// because it appears in seven commands' specs and in the help those render: the
+// commands that take a repo all take it the same way, and an eighth added later
+// should read the same as the seven.
+//
+// These are the commands whose only argument is a repository, so a positional
+// can be one. Every other command's positionals are slugs and messages, and
+// there --repo is the spelling — argRepoFlag. Both are accepted everywhere; see
+// namedRepo in address.go for why there are two and why naming it twice is
+// refused.
 const argRepo = "[repo]"
+
+// argRepoFlag is how --repo is spelled in the usage line of a command whose
+// positionals are already taken.
+const argRepoFlag = "[" + repoFlag + " <name>]"
 
 // commands is ordered as it should read in help: first the four that get you
 // into a worktree, then inspection, then teardown, then installation.
@@ -147,7 +157,7 @@ func init() {
 		{
 			name:    "new",
 			aliases: []string{"create"},
-			args:    "[-p <text>] <slug> [window-name]",
+			args:    "[-p <text>] " + argRepoFlag + " <slug> [window-name]",
 			summary: "create a worktree and branch, and open a tmux window in it",
 			long: `Creates the worktree repo-<slug> on branch <prefix><slug>, copies in the
 configured carry_files, runs post_create in the background, and opens a tmux
@@ -185,6 +195,14 @@ shell-quoted as one argument. Without the flag the placeholder simply
 disappears; with the flag and no placeholder to take it, the error says where
 to write one.
 
+--repo names the repository to make the worktree in, by the name its config is
+registered under, instead of the one you are standing in. Everything follows
+that repository: its branch prefixes, its base branch, its worktree directory
+and its tmux session — and the progress lines say whose base branch is being
+forked, since a branch name alone never did. Naming another repository also
+leaves your tmux client where it is: the window is opened and left current in
+that repository's session, and "treewright attach <repo>" is the way over.
+
 --prompt-file is the same instruction, for a brief too long to type: the prompt
 becomes one line telling the agent to read that file, so its size never counts
 against the ceiling tmux puts on how long a command it will run. The path is
@@ -195,6 +213,7 @@ passing both is an error rather than a precedence rule to learn.`,
 			flags: []flagDoc{
 				{promptFlagNames, "text the agent starts working on, placed at the command's {prompt}"},
 				promptFileDoc,
+				repoFlagDoc,
 			},
 			run: cmdNew,
 		},
@@ -232,7 +251,7 @@ stdout is the new worktree's path, so cd "$(treewright move eng-1)" works, and
 		{
 			name:    "resume",
 			aliases: []string{"reopen"},
-			args:    "[-p <text>] [--fresh] [slug]",
+			args:    "[-p <text>] [--fresh] " + argRepoFlag + " [slug]",
 			summary: "reopen a window on an existing worktree",
 			long: `Opens a tmux window running the configured resume_command in the
 worktree, or switches to the window already open there — following it into
@@ -266,6 +285,11 @@ resume actually starts: a window that was already open is switched to as usual,
 with a warning that the prompt went undelivered — and "treewright send" is what
 reaches the agent standing in it.
 
+--repo resumes a worktree of another repository, named by its config. As with
+"new", your client stays where it is when the repository is not the one you are
+standing in — the window is made current in its own session, and "treewright
+attach <repo>" goes there.
+
 --prompt-file names a file holding the instructions instead, and the prompt
 becomes one line telling the agent to read it. See "treewright help new" for
 what that buys and what it leaves you to clean up.`,
@@ -273,12 +297,13 @@ what that buys and what it leaves you to clean up.`,
 				{promptFlagNames, "text for the resumed agent, placed at the command's {prompt}"},
 				promptFileDoc,
 				{freshFlag, "start a new session: run command rather than resume_command"},
+				repoFlagDoc,
 			},
 			run: cmdResume,
 		},
 		{
 			name:    "send",
-			args:    "[-n] <slug> <message>",
+			args:    "[-n] " + argRepoFlag + " <slug> <message>",
 			summary: "type one line at the agent in a worktree's window",
 			long: `Types a message into the window open on a worktree and presses Enter,
 which is how an agent already running gets its next instruction. --prompt only
@@ -299,6 +324,12 @@ One line only. Enter is what submits, so a message with a line break in it would
 post the rest as further turns: that is refused, and the way through is the one
 --prompt-file takes — put the text in a file and send a line naming it.
 
+--repo reaches an agent in another repository, which is the way one agent hands
+work to another across sessions: "treewright send --repo cibo base" types at the
+agent in cibo's base window, and any of its slugs reaches a worktree. Every rule
+above holds unchanged there and matters more, since the sender cannot see the
+receiving session at all — which is exactly why the pane is printed first.
+
 The window you are running in is refused too. A message sent to yourself arrives
 in this session ahead of whatever you were answering, and reads afterwards as an
 instruction from somewhere else.
@@ -306,12 +337,13 @@ instruction from somewhere else.
 Nothing is printed to stdout: there is no answer here, only something done.`,
 			flags: []flagDoc{
 				{"-n, --dry-run", "show what the window is displaying and send nothing"},
+				repoFlagDoc,
 			},
 			run: cmdSend,
 		},
 		{
 			name:    "cd",
-			args:    "[slug]",
+			args:    argRepoFlag + " [slug]",
 			summary: "move your shell into a worktree",
 			long: `Changes the calling shell's directory to a worktree, choosing from a
 menu when no slug is given. An unambiguous prefix of a slug is enough, and "base"
@@ -320,7 +352,8 @@ moves you to the main checkout.
 The path is also printed, so this works without the shell integration as
 cd "$(treewright cd <slug>)" — but with the integration loaded, treewright moves your
 shell for you.`,
-			run: cmdCd,
+			flags: []flagDoc{repoFlagDoc},
+			run:   cmdCd,
 		},
 		{
 			name:    "base",
@@ -338,8 +371,12 @@ and go.
 
 "treewright resume" reaches the same window, since the base checkout is a row of its
 menu. The difference is only ever visible on the first open of the day: this runs
-command, for a general-purpose window, where resume runs resume_command.`,
-			run: cmdBase,
+command, for a general-purpose window, where resume runs resume_command.
+
+Naming a repository other than the one you are standing in opens its base window
+without moving your tmux client to it. "treewright attach" is what moves you.`,
+			flags: []flagDoc{repoFlagDoc},
+			run:   cmdBase,
 		},
 		{
 			name:    "restore",
@@ -377,6 +414,7 @@ window.`,
 			flags: []flagDoc{
 				{"-d, --detached", "leave the session running and stay out of it"},
 				{freshFlag, "start new agent sessions: run command rather than resume_command"},
+				repoFlagDoc,
 			},
 			run: cmdRestore,
 		},
@@ -394,7 +432,8 @@ session the first one is already in is the nesting tmux warns about.
 The session has to exist. "treewright restore" is what opens a repository's
 windows after a restart, and so what usually brings its session back; "treewright
 base" opens the first window of all.`,
-			run: cmdAttach,
+			flags: []flagDoc{repoFlagDoc},
+			run:   cmdAttach,
 		},
 		{
 			name:    "popup",
@@ -532,13 +571,14 @@ landed since your last fetch still reads as active; rm and prune fetch before th
 judge, and so can disagree with a stale listing.`,
 			flags: []flagDoc{
 				{"--json", "print machine-readable output instead of a table"},
+				repoFlagDoc,
 			},
 			run: cmdLs,
 		},
 		{
 			name:    "rm",
 			aliases: []string{"remove", "delete"},
-			args:    "[-f] [-y] <slug>",
+			args:    "[-f] [-y] " + argRepoFlag + " <slug>",
 			summary: "tear down a worktree and its branch",
 			long: `Removes the worktree, deletes the local branch, and prunes the stale
 remote-tracking ref.
@@ -555,6 +595,7 @@ not whichever one you happened to run this from.`,
 			flags: []flagDoc{
 				{"-f, --force", "remove even when unsaved work would be lost"},
 				{"-y, --yes", "close the worktree's tmux window without asking"},
+				repoFlagDoc,
 			},
 			run: cmdRm,
 		},
@@ -573,12 +614,13 @@ separately: --yes answers for the worktrees, not for windows that may still have
 something running in them.`,
 			flags: []flagDoc{
 				{"-y, --yes", "actually remove them, instead of listing"},
+				repoFlagDoc,
 			},
 			run: cmdPrune,
 		},
 		{
 			name:    "close",
-			args:    "<slug>",
+			args:    argRepoFlag + " <slug>",
 			summary: "close the tmux window open on a worktree",
 			long: `Closes the window treewright opened on a worktree, and nothing else —
 the worktree, the branch and any work in them are left alone. "treewright rm" is
@@ -594,13 +636,19 @@ An unambiguous prefix of a slug is enough while the worktree is still there;
 once it has been removed there is nothing to match against, so name it in full.
 "base" closes the main checkout's window.
 
+--repo closes a window in another repository's session. Slugs collide across
+repositories — two of them called "fix" is the ordinary case, not a contrived
+one — so every hint treewright prints for this command names the repository, and
+so should you.
+
 Closing a session's last window ends the session, which moves an attached client
 elsewhere or detaches it. That is said rather than refused, as is closing the
 window you are running in — which is a real thing to want, and the last thing
 that happens in that session.
 
 Nothing is printed to stdout: there is no answer here, only something done.`,
-			run: cmdClose,
+			flags: []flagDoc{repoFlagDoc},
+			run:   cmdClose,
 		},
 		{
 			name:    "setup",
@@ -640,7 +688,8 @@ was read from.
 
 What a config file leaves out is where confusion lives — this is how you find out
 which base branch a command would really fork from.`,
-			run: cmdConfig,
+			flags: []flagDoc{repoFlagDoc},
+			run:   cmdConfig,
 		},
 		{
 			name:    "doctor",
@@ -772,7 +821,8 @@ shell that loaded it, and no process can replace its parent's. Where the loaded
 one is out of date it says so, and opening a new terminal is the fix.
 
 "treewright doctor" is what says whether any of this is needed.`,
-			run: cmdRefresh,
+			flags: []flagDoc{repoFlagDoc},
+			run:   cmdRefresh,
 		},
 		{
 			name:    "version",
