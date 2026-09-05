@@ -15,6 +15,37 @@ Run it as `treewright`. The short `tw` is a shell function
 from the interactive shell's startup file, and may not exist in the shell
 running your commands.
 
+## Which repository a command acts on
+
+**Every command resolves its repository from the working directory unless you
+name one.** That is right for a person, who is standing in the checkout they
+mean, and wrong for you: you stand in exactly one repository and are often
+asked about another. Run `treewright new` for a different repository from here
+and you get a worktree in *this* one — this repository's branch prefix, base
+branch and path, under the slug you meant for somewhere else.
+
+So name it whenever the work is not for the repository you are standing in:
+
+    treewright new --repo cibo eng-142-null-user --prompt "..."
+
+`--repo <name>` takes the name the repository is registered under, which is the
+`config:` line `treewright ls` reports and what `treewright doctor` lists. It
+works on every command — `new`, `resume`, `send`, `rm`, `close`, `cd`, `ls`,
+`prune`, `base`, `attach`, `restore`, `config`, `refresh` — and the commands
+whose only argument is a repository also take it as a bare positional, so
+`treewright ls cibo` and `treewright ls --repo cibo` are the same request.
+Naming it twice is a usage error rather than a precedence rule.
+
+Passing `--repo` for the repository you are already in is harmless and reads
+better than relying on where you happen to be standing, so prefer it in any
+command you write down.
+
+**Naming another repository does not move the person's tmux client.** The
+window is opened and left current in that repository's own session, and
+treewright says so and names `treewright attach <repo>` as the way over. Do not
+go looking for a flag to change that: an operator watching one repository
+having their screen replaced by another's is the thing this prevents.
+
 Every command has its own help, and it is fuller than this file: read
 `treewright help <command>` before improvising around something that seems
 missing. `help new` alone covers why there is deliberately no flag to fork from
@@ -100,6 +131,14 @@ stands — under Continue or hand work onward — is the only route left.
 - The slug may not contain "/". A leading "feature/" or "bug/" chooses a
   configured branch prefix — `treewright new bug/eng-142` — and one
   the repository has not configured is refused rather than guessed at.
+- A third positional renames the tmux window: `treewright new eng-142 review`.
+  Without it the window is named after a ticket key found in the slug, or after
+  the slug cut to fifteen characters. Leave it off unless you have a reason —
+  and never name a window after another repository. A session is one per
+  repository, so a window called `cibo` sitting in this repository's session
+  tells whoever reads the window list that cibo's work is here. treewright
+  warns when a name collides with a registered repository; the warning is worth
+  acting on rather than passing.
 - A branch that already exists — a colleague's pull request after fetching —
   is checked out rather than recreated, so this is also how work is picked up.
 
@@ -201,7 +240,15 @@ Removal leaves the work's tmux window open on a directory that no longer
 exists, and with no tty on this end treewright names the command that closes
 each one rather than asking:
 
-    treewright close eng-142
+    treewright close --repo cibo eng-142
+
+**Slugs collide across repositories.** Two pieces of work called `fix` in two
+repositories is the ordinary case, and by the time this window needs closing
+the worktree that would have told them apart has been deleted. So the hint
+treewright prints names the repository, and the command you run must too — copy
+it as printed rather than shortening it. Never fall back to `tmux kill-window`
+on a window index: it reaches whatever server that shell happens to find, closes
+whatever window holds that index there, and exits 0 when it was wrong.
 
 **A removed worktree always ends in AskUserQuestion: close its window?** The
 question is the final step of the cleanup, unconditionally — there is nothing

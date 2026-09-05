@@ -64,6 +64,12 @@ _treewright() {
     _files
     return
   fi
+  # --repo takes a registered config name on any command, which is the same list
+  # the repo-taking commands complete their positional from.
+  if [[ "$words[CURRENT-1]" == --repo ]]; then
+    compadd -- ${(f)"$(command treewright __complete repos 2>/dev/null)"}
+    return
+  fi
   case "$words[2]" in
     new|move)                    compadd -S '' -- ${(f)"$(command treewright __complete prefixes 2>/dev/null)"} ;;
     rm)                          compadd -- ${(f)"$(command treewright __complete slugs 2>/dev/null)"} ;;

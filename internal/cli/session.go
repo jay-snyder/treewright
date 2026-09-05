@@ -55,14 +55,24 @@ const (
 	// selects the window it means the session to open on — the base window —
 	// itself, once every window is there.
 	leaveTheClient
+
+	// stayHere leaves the window current in its own session, so whoever attaches
+	// lands on it, and leaves this client where it was. It is what a command
+	// acting on a repository other than the caller's own does: the window was
+	// asked for, the session was not, and a switch-client there is an operator
+	// watching one repository having it replaced by another. See arrivalFor.
+	stayHere
 )
 
 // reach brings the window to the foreground, or leaves the client where it is.
 func (a arrival) reach(env *Env, cfg *config.Config, w tmux.Window, command string) {
-	if a == leaveTheClient {
-		return
+	switch a {
+	case leaveTheClient:
+	case stayHere:
+		selectWindow(env, cfg, w, command)
+	default:
+		focusWindow(env, cfg, w, command)
 	}
-	focusWindow(env, cfg, w, command)
 }
 
 // note is what the warning about a window in another session says happened to it
@@ -70,10 +80,10 @@ func (a arrival) reach(env *Env, cfg *config.Config, w tmux.Window, command stri
 // repository's sitting in somebody else's session is a fact the reader has not
 // been told — but what treewright did about it is the half that differs.
 func (a arrival) note() string {
-	if a == leaveTheClient {
-		return "leaving it where it is"
+	if a == bringToFront {
+		return "switching to it there"
 	}
-	return "switching to it there"
+	return "leaving it where it is"
 }
 
 // openWindow puts a window on spec.Dir in the repository's session — or focuses
@@ -447,15 +457,50 @@ func focusWindow(env *Env, cfg *config.Config, w tmux.Window, command string) {
 		env.warnf("could not switch to session %s%s", w.Session,
 			asFields(field("attach with", env.copyable(attachHint(env, cfg, w.Session)))))
 	case err != nil:
-		// The window was there a moment ago, so what changed is that it closed:
-		// tmux closes a window as soon as its command exits, and a command that
-		// exits at once — a typo, a wrapper script that fails — looks exactly like
-		// this. Naming the command is what makes that guessable.
-		env.warnf("window %s closed as soon as it opened\ndid %q exit straight away?", w.Name, command)
+		warnWindowVanished(env, w, command)
 	case !tmux.Inside():
 		env.progressf("window %s is open in tmux session %s%s", w.Name, w.Session,
 			asFields(field("attach with", env.copyable(attachHint(env, cfg, w.Session)))))
 	}
+}
+
+// selectWindow leaves the window current in its own session and leaves this
+// client alone, which is what a command acting on another repository does.
+//
+// The select half is not a formality. tmux makes a new window current by
+// itself, but a window that was already open is not made current by being found
+// — so without this, "the window is ready over there" would be a promise that
+// whoever attaches lands somewhere else entirely. It is the same reason
+// `restore` selects the base window at the end rather than trusting the last
+// window opened.
+//
+// Outside tmux this says what focusWindow says, because outside tmux nothing
+// was declined: there is no client, no session was left, and the reader's whole
+// question is where the window went. Inside it, the client staying put is the
+// half the reader did not ask for and has to be told, so the message says it
+// happened and names the way over.
+func selectWindow(env *Env, cfg *config.Config, w tmux.Window, command string) {
+	if err := tmux.Select(w); err != nil {
+		warnWindowVanished(env, w, command)
+		return
+	}
+	if !tmux.Inside() {
+		env.progressf("window %s is open in tmux session %s%s", w.Name, w.Session,
+			asFields(field("attach with", env.copyable(attachHint(env, cfg, w.Session)))))
+		return
+	}
+	env.progressf("window %s is open in %s, and your client stayed where it is%s",
+		w.Name, w.Session, asFields(field("go there with", env.copyable(attachHint(env, cfg, w.Session)))))
+}
+
+// warnWindowVanished reports a window that would not take a select or a switch.
+//
+// The window was there a moment ago, so what changed is that it closed: tmux
+// closes a window as soon as its command exits, and a command that exits at
+// once — a typo, a wrapper script that fails — looks exactly like this. Naming
+// the command is what makes that guessable.
+func warnWindowVanished(env *Env, w tmux.Window, command string) {
+	env.warnf("window %s closed as soon as it opened\ndid %q exit straight away?", w.Name, command)
 }
 
 // attachHint says how to reach the session a window turned out to be in.

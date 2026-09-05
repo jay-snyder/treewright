@@ -39,11 +39,16 @@ import (
 // decide what treewright touches, and refreshing must never be how that decision
 // gets made for you.
 func cmdRefresh(env *Env, args []string) error {
-	positional, err := parseArgs("refresh", args, nil, nil, 1)
+	var repoName string
+	positional, err := parseArgs("refresh", args, nil, repoValues(&repoName, nil), 1)
 	if err != nil {
 		return err
 	}
-	cfg, err := resolveConfig(at(positional, 0))
+	named, err := namedRepo(env, "refresh", repoName, at(positional, 0))
+	if err != nil {
+		return err
+	}
+	cfg, err := resolveConfig(named)
 	if err != nil {
 		return err
 	}

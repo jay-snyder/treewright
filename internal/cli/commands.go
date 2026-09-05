@@ -21,12 +21,12 @@ import (
 // ---- new -------------------------------------------------------------------
 
 func cmdNew(env *Env, args []string) error {
-	var prompt, promptFile string
-	positional, err := parseArgs("new", args, nil, promptValues(&prompt, &promptFile), 2)
+	var prompt, promptFile, repoName string
+	positional, err := parseArgs("new", args, nil, repoValues(&repoName, promptValues(&prompt, &promptFile)), 2)
 	if err != nil {
 		return err
 	}
-	plan, err := planWorktree(env, "new", positional, prompt, promptFile)
+	plan, err := planWorktree(env, "new", repoName, positional, prompt, promptFile)
 	if err != nil {
 		return err
 	}
@@ -58,6 +58,7 @@ func cmdNew(env *Env, args []string) error {
 // move that went wrong.
 type worktreePlan struct {
 	cfg     *config.Config
+	named   string // the repository the caller named, "" for the one they stand in
 	prefix  string
 	slug    string
 	prompt  string
@@ -66,14 +67,15 @@ type worktreePlan struct {
 }
 
 // planWorktree runs that shared opening for cmd, whose name is what a refusal
-// renders help for.
-func planWorktree(env *Env, cmd string, positional []string, prompt, promptFile string) (worktreePlan, error) {
+// renders help for. repo is the repository named on the command line, which
+// `new` takes and `move` never does — see cmdMove.
+func planWorktree(env *Env, cmd, repo string, positional []string, prompt, promptFile string) (worktreePlan, error) {
 	slug, override := at(positional, 0), at(positional, 1)
 	if slug == "" {
 		return worktreePlan{}, usageErrorf(cmd, "a slug is required")
 	}
 
-	cfg, err := resolveConfig("")
+	cfg, err := resolveConfig(repo)
 	if err != nil {
 		return worktreePlan{}, err
 	}
@@ -81,6 +83,10 @@ func planWorktree(env *Env, cmd string, positional []string, prompt, promptFile 
 	if err := validateSlug(cmd, cfg, slug); err != nil {
 		return worktreePlan{}, err
 	}
+	// Before anything is created, with the other refusals, because it is about
+	// this invocation rather than about anything on disk — and because a window
+	// name is worth changing while changing it is still free.
+	warnIfWindowNameIsARepo(env, cfg, cfg.WindowName(slug, override))
 	// Resolved before anything is created: a prompt the command cannot take is
 	// this invocation being wrong, and finding that out after the worktree
 	// exists would leave a half-made one behind an error about a flag. The
@@ -94,7 +100,7 @@ func planWorktree(env *Env, cmd string, positional []string, prompt, promptFile 
 		return worktreePlan{}, err
 	}
 	return worktreePlan{
-		cfg: cfg, prefix: prefix, slug: slug,
+		cfg: cfg, named: repo, prefix: prefix, slug: slug,
 		prompt: prompt, command: command, window: override,
 	}, nil
 }
@@ -105,7 +111,7 @@ func (p worktreePlan) openWindow(env *Env, dir, branch string) {
 	openWorktreeWindow(env, p.cfg, worktreeWindow{
 		Slug: p.slug, Branch: branch, Dir: dir,
 		Name: p.cfg.WindowName(p.slug, p.window), Command: p.command, Prompt: p.prompt,
-	})
+	}, arrivalFor(p.cfg, p.named))
 }
 
 // createWorktree makes the branch and the worktree, and gives the worktree
@@ -133,15 +139,22 @@ func createWorktree(env *Env, cfg *config.Config, prefix, slug string) (dir, bra
 	// — and says "already exists" about a path rather than naming the command
 	// that opens what is already there.
 	if _, err := os.Stat(dir); err == nil {
-		return "", "", fmt.Errorf("worktree %s already exists%s", slug, asFields(
+		return "", "", fmt.Errorf("worktree %s already exists in %s%s", slug, cfg.Name, asFields(
 			field("path", dir),
-			field("open it with", env.copyable(env.Argv0+" resume "+slug)),
+			field("open it with", hint(env, cfg, "resume", slug)),
 		))
 	}
 
+	// Every line naming the fork point names the repository it belongs to, and
+	// names it possessively, right against the branch. `new` used to report
+	// "creating branch integrate/x off origin/megastructure" and leave the
+	// repository to be inferred from a branch prefix and a base branch — which
+	// works only for a reader who already knows whose base branch that is, and
+	// so did not work at all for the agent that made a worktree in the wrong
+	// repository and read this line without seeing anything wrong in it.
 	switch {
 	case repo.BranchExists(branch):
-		env.progressf("reusing existing branch %s", branch)
+		env.progressf("reusing %s's existing branch %s", cfg.Name, branch)
 		if err := repo.AddWorktree(dir, branch); err != nil {
 			return "", "", err
 		}
@@ -151,7 +164,7 @@ func createWorktree(env *Env, cfg *config.Config, prefix, slug string) (dir, bra
 		// than Fetch because this is one of the two places a fetch that failed
 		// once changes what the user gets rather than what they wait for.
 		if err := repo.FetchRetrying("origin", cfg.BaseBranch); err == nil {
-			env.progressf("creating branch %s off origin/%s", branch, cfg.BaseBranch)
+			env.progressf("creating branch %s off %s's origin/%s", branch, cfg.Name, cfg.BaseBranch)
 			if err := repo.AddWorktreeNewBranch(dir, branch, "origin/"+cfg.BaseBranch); err != nil {
 				return "", "", err
 			}
@@ -164,9 +177,9 @@ func createWorktree(env *Env, cfg *config.Config, prefix, slug string) (dir, bra
 			// renamed, credentials that expired, a deadline — and each of those
 			// sends the reader somewhere different. So the warning says what it
 			// did, what that costs, and then quotes git.
-			env.warnf("could not fetch origin/%s — forking from the local %s instead\n"+
+			env.warnf("could not fetch %s's origin/%s — forking from the local %s instead\n"+
 				"the fork point may be behind what is on origin%s",
-				cfg.BaseBranch, cfg.BaseBranch, asFields(field("git said", git.Said(err))))
+				cfg.Name, cfg.BaseBranch, cfg.BaseBranch, asFields(field("git said", git.Said(err))))
 			if err := repo.AddWorktreeNewBranch(dir, branch, cfg.BaseBranch); err != nil {
 				return "", "", err
 			}
@@ -201,13 +214,13 @@ type worktreeWindow struct {
 // the time this runs, so `cd "$(treewright new eng-1)"` must not fail because
 // tmux could not be made to open a window. resume and base do return that
 // error, a window being the whole of what they were asked for.
-func openWorktreeWindow(env *Env, cfg *config.Config, w worktreeWindow) {
+func openWorktreeWindow(env *Env, cfg *config.Config, w worktreeWindow, arrive arrival) {
 	created, err := openWindow(env, cfg, tmux.Spec{
 		Dir:    w.Dir,
 		Name:   w.Name,
 		Slug:   w.Slug,
 		Branch: w.Branch,
-	}, windowCommand{Command: w.Command}, bringToFront)
+	}, windowCommand{Command: w.Command}, arrive)
 	if err != nil {
 		env.warnf("%v", err)
 	}
@@ -472,10 +485,11 @@ func postCreateScript(commands []string, failedPath string) string {
 
 func cmdRm(env *Env, args []string) error {
 	var force, yes bool
+	var repoName string
 	positional, err := parseArgs("rm", args, map[string]*bool{
 		"-f": &force, "--force": &force,
 		"-y": &yes, "--yes": &yes,
-	}, nil, 1)
+	}, repoValues(&repoName, nil), 1)
 	if err != nil {
 		return err
 	}
@@ -484,7 +498,7 @@ func cmdRm(env *Env, args []string) error {
 		return usageErrorf("rm", "a slug is required")
 	}
 
-	cfg, err := resolveConfig("")
+	cfg, err := resolveConfig(repoName)
 	if err != nil {
 		return err
 	}
@@ -500,7 +514,7 @@ func cmdRm(env *Env, args []string) error {
 	// Resolved against the worktrees that exist, rather than deriving a path from
 	// the slug and letting git object: a typo would otherwise surface as "is not a
 	// working tree" about a path the user never typed.
-	target, err := resolveSlug(env, repo, managed, slug)
+	target, err := resolveSlug(env, cfg, managed, slug)
 	if err != nil {
 		return err
 	}
@@ -562,7 +576,7 @@ func cmdRm(env *Env, args []string) error {
 	} else {
 		removed = append(removed, field("branch", branch))
 	}
-	env.progressf("removed %s%s", slug, asFields(removed...))
+	env.progressf("removed %s from %s%s", slug, cfg.Name, asFields(removed...))
 	fmt.Fprintln(env.Stdout, dir)
 
 	// Two separate leftovers, and the caller usually has only one of them: a shell
@@ -570,7 +584,7 @@ func cmdRm(env *Env, args []string) error {
 	if wdErr == nil && insideDir(wd, dir) {
 		escapeDeletedDir(env, cfg.MainDir, dir)
 	}
-	offerWindowClose(env, slug, staleWindow, yes)
+	offerWindowClose(env, cfg, slug, staleWindow, yes)
 	return nil
 }
 
@@ -596,7 +610,7 @@ func escapeDeletedDir(env *Env, mainDir, goneDir string) {
 // waiting to be attached to. The two halves are their own functions because they
 // share almost nothing: one closes and reports, the other asks first — or, with
 // nobody to ask, says what to run.
-func offerWindowClose(env *Env, slug string, window tmux.Window, assumeYes bool) {
+func offerWindowClose(env *Env, cfg *config.Config, slug string, window tmux.Window, assumeYes bool) {
 	if window.ID == "" {
 		return
 	}
@@ -604,7 +618,7 @@ func offerWindowClose(env *Env, slug string, window tmux.Window, assumeYes bool)
 		closeRemovedWindow(env, window)
 		return
 	}
-	askWindowClose(env, slug, window)
+	askWindowClose(env, cfg, slug, window)
 }
 
 // lastInSessionNote is the caveat about a window whose closing ends its session
@@ -644,7 +658,7 @@ var openTTY = func() (*os.File, error) { return os.OpenFile("/dev/tty", os.O_RDW
 
 // askWindowClose asks before closing the removed worktree's window — or, with
 // nobody to ask, says what to run instead.
-func askWindowClose(env *Env, slug string, window tmux.Window) {
+func askWindowClose(env *Env, cfg *config.Config, slug string, window tmux.Window) {
 	tty, err := openTTY()
 	if err != nil {
 		// Nobody to ask — treewright was run by a script or an agent. Say what to
@@ -654,7 +668,7 @@ func askWindowClose(env *Env, slug string, window tmux.Window) {
 		// directory this command has just deleted.
 		env.progressf("tmux window %s now points at a deleted directory%s%s",
 			window.Name, under(lastInSessionNote(window)),
-			asFields(field("close it with", closeHint(env, slug))))
+			asFields(field("close it with", closeHint(env, cfg, slug))))
 		return
 	}
 	defer tty.Close()
@@ -683,11 +697,16 @@ func askWindowClose(env *Env, slug string, window tmux.Window) {
 
 func cmdLs(env *Env, args []string) error {
 	var asJSON bool
-	positional, err := parseArgs("ls", args, map[string]*bool{"--json": &asJSON}, nil, 1)
+	var repoName string
+	positional, err := parseArgs("ls", args, map[string]*bool{"--json": &asJSON}, repoValues(&repoName, nil), 1)
 	if err != nil {
 		return err
 	}
-	cfg, err := resolveConfig(at(positional, 0))
+	named, err := namedRepo(env, "ls", repoName, at(positional, 0))
+	if err != nil {
+		return err
+	}
+	cfg, err := resolveConfig(named)
 	if err != nil {
 		return err
 	}
@@ -751,11 +770,16 @@ func cmdLs(env *Env, args []string) error {
 
 func cmdPrune(env *Env, args []string) error {
 	var yes bool
-	positional, err := parseArgs("prune", args, map[string]*bool{"-y": &yes, "--yes": &yes}, nil, 1)
+	var repoName string
+	positional, err := parseArgs("prune", args, map[string]*bool{"-y": &yes, "--yes": &yes}, repoValues(&repoName, nil), 1)
 	if err != nil {
 		return err
 	}
-	cfg, err := resolveConfig(at(positional, 0))
+	named, err := namedRepo(env, "prune", repoName, at(positional, 0))
+	if err != nil {
+		return err
+	}
+	cfg, err := resolveConfig(named)
 	if err != nil {
 		return err
 	}
@@ -833,7 +857,7 @@ func cmdPrune(env *Env, args []string) error {
 	// worktrees", which is not the same as "close my windows" — one of them may
 	// have a session still running in it.
 	for _, wt := range removed {
-		offerWindowClose(env, wt.Slug, windows[wt.Dir], false)
+		offerWindowClose(env, cfg, wt.Slug, windows[wt.Dir], false)
 	}
 	return nil
 }
@@ -843,12 +867,13 @@ func cmdPrune(env *Env, args []string) error {
 func cmdResume(env *Env, args []string) error {
 	var prompt, promptFile string
 	var fresh bool
+	var repoName string
 	positional, err := parseArgs("resume", args,
-		map[string]*bool{freshFlag: &fresh}, promptValues(&prompt, &promptFile), 1)
+		map[string]*bool{freshFlag: &fresh}, repoValues(&repoName, promptValues(&prompt, &promptFile)), 1)
 	if err != nil {
 		return err
 	}
-	cfg, err := resolveConfig("")
+	cfg, err := resolveConfig(repoName)
 	if err != nil {
 		return err
 	}
@@ -911,7 +936,7 @@ func cmdResume(env *Env, args []string) error {
 	// and one whose agent left no session behind dead-ends there exactly as a
 	// worktree does.
 	if target.Base {
-		created, err := openBaseWindow(env, cfg, run, bringToFront)
+		created, err := openBaseWindow(env, cfg, run, arrivalFor(cfg, repoName))
 		warnIfPromptUndelivered(env, prompt, created, err)
 		return err
 	}
@@ -926,7 +951,7 @@ func cmdResume(env *Env, args []string) error {
 		Name:   cfg.WindowName(target.Slug, ""),
 		Slug:   target.Slug,
 		Branch: target.Branch,
-	}, run, bringToFront)
+	}, run, arrivalFor(cfg, repoName))
 	warnIfPromptUndelivered(env, prompt, created, err)
 	return err
 }
@@ -1061,7 +1086,7 @@ func chooseWorktree(env *Env, cfg *config.Config, repo git.Repo, managed []git.W
 		if slices.Contains(baseNames(cfg, base), slug) {
 			return base, nil
 		}
-		wt, err := resolveSlug(env, repo, managed, slug)
+		wt, err := resolveSlug(env, cfg, managed, slug)
 		return choice{Worktree: wt}, err
 	}
 
@@ -1104,11 +1129,12 @@ var errCancelled = errors.New("cancelled")
 // sources what treewright appends. Without the integration the path on stdout is
 // still the answer, so `cd "$(treewright cd foo)"` works unaided.
 func cmdCd(env *Env, args []string) error {
-	positional, err := parseArgs("cd", args, nil, nil, 1)
+	var repoName string
+	positional, err := parseArgs("cd", args, nil, repoValues(&repoName, nil), 1)
 	if err != nil {
 		return err
 	}
-	cfg, err := resolveConfig("")
+	cfg, err := resolveConfig(repoName)
 	if err != nil {
 		return err
 	}
@@ -1153,11 +1179,16 @@ func cmdCd(env *Env, args []string) error {
 // ---- base ------------------------------------------------------------------
 
 func cmdBase(env *Env, args []string) error {
-	positional, err := parseArgs("base", args, nil, nil, 1)
+	var repoName string
+	positional, err := parseArgs("base", args, nil, repoValues(&repoName, nil), 1)
 	if err != nil {
 		return err
 	}
-	cfg, err := resolveConfig(at(positional, 0))
+	named, err := namedRepo(env, "base", repoName, at(positional, 0))
+	if err != nil {
+		return err
+	}
+	cfg, err := resolveConfig(named)
 	if err != nil {
 		return err
 	}
@@ -1168,7 +1199,7 @@ func cmdBase(env *Env, args []string) error {
 	if err != nil {
 		return err
 	}
-	_, err = openBaseWindow(env, cfg, windowCommand{Command: command}, bringToFront)
+	_, err = openBaseWindow(env, cfg, windowCommand{Command: command}, arrivalFor(cfg, named))
 	return err
 }
 
@@ -1252,11 +1283,16 @@ func openBaseWindow(env *Env, cfg *config.Config, run windowCommand, arrive arri
 // into existence with some other set of windows in it is one more than the tool
 // needs.
 func cmdAttach(env *Env, args []string) error {
-	positional, err := parseArgs("attach", args, nil, nil, 1)
+	var repoName string
+	positional, err := parseArgs("attach", args, nil, repoValues(&repoName, nil), 1)
 	if err != nil {
 		return err
 	}
-	cfg, err := resolveConfig(at(positional, 0))
+	named, err := namedRepo(env, "attach", repoName, at(positional, 0))
+	if err != nil {
+		return err
+	}
+	cfg, err := resolveConfig(named)
 	if err != nil {
 		return err
 	}

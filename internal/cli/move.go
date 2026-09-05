@@ -44,7 +44,15 @@ func cmdMove(env *Env, args []string) error {
 	}
 	// The whole opening is `new`'s, on purpose: same refusals, same order, all
 	// of it before anything exists — see planWorktree.
-	plan, err := planWorktree(env, "move", positional, prompt, promptFile)
+	//
+	// The one thing not shared is --repo. What this command moves is the
+	// uncommitted work in the base checkout, and the only base checkout it can
+	// read is the one the caller is standing in: a --repo here would name the
+	// repository the worktree is made in while the work still came from wherever
+	// the caller happened to be, which is either a no-op or a way to put one
+	// repository's changes on another repository's branch. So the repository is
+	// the one you stand in, always, and that is the whole of what "move" means.
+	plan, err := planWorktree(env, "move", "", positional, prompt, promptFile)
 	if err != nil {
 		return err
 	}
@@ -53,7 +61,7 @@ func cmdMove(env *Env, args []string) error {
 	base := cfg.MainDir
 	if git.DirtyFiles(base) == 0 {
 		return fmt.Errorf("nothing to move — %s has no uncommitted work in it%s",
-			base, asFields(field("start a worktree instead with", env.copyable(env.Argv0+" new "+slug))))
+			base, asFields(field("start a worktree instead with", hint(env, cfg, "new", slug))))
 	}
 
 	patch, added, err := takePatch(env, cfg, slug)

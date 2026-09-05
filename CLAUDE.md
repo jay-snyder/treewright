@@ -173,6 +173,7 @@ breaks `brew upgrade` for everyone.
 | `internal/cli/release.go` | Whether a newer treewright exists, and how this one was installed. |
 | `internal/cli/doctor.go` | `doctor`: the four-way health check. |
 | `internal/cli/session.go` | One session per repo; `openWindow`/`focusWindow`, `arrival`, `attachTo`. |
+| `internal/cli/address.go` | `--repo`: which repository a command acts on, whether the client follows it there, and the hints that name it. |
 | `internal/cli/render.go` | Tables, JSON, `parseArgs`, slug resolution. |
 | `internal/cli/message.go` | How a message is shaped on the way out: `progressf`/`warnf`/`errorf`, the continuation indent, `asLines`, `under`, `count`. |
 | `internal/cli/popup.go` | `popup`, popup sizing, the no-worktrees message. |
@@ -233,6 +234,31 @@ tmux.conf lines, shell startup evals, help prose — spells out `treewright`.
 run — no integration loaded, or an eval file that cannot be written — so the
 by-hand line and the failure report belong beside the emit, which is what
 `moveShell` in `eval.go` owns. Don't call `appendEval` directly from a command.
+
+**A repository is named by `--repo`, never by qualifying a slug.** Every command
+that resolves a config accepts it, and the seven whose only argument is a
+repository keep `[repo]` as the shorthand — naming it twice is a usage error.
+`<repo>/<slug>` is the option that cannot be taken: a leading `feature/` already
+means a branch prefix on `new`, and is stripped by `rm`, `close`, `send`,
+`resume` and `cd`, so registering a config named after somebody's branch prefix
+would silently change which repository `tw rm feature/eng-1` deletes from.
+`move` deliberately has no `--repo` — the base checkout it moves work out of is
+the one you are standing in. Every hint naming a command names the repository
+too, through `hint` in `address.go`, because a slug identifies nothing once the
+same one exists in two repositories and the reader of a message is not
+reliably standing where it was printed.
+
+**A command acting on another repository does not move the caller's client.**
+One session per repository means a window opened elsewhere is always in another
+session, so `tmux.Focus` always switched — an operator watching one repository
+had it replaced by another's under their hands. `arrivalFor` picks `stayHere`
+over `bringToFront` when the repository named is not the one the caller is
+standing in; `stayHere` selects the window in its own session, so whoever
+attaches lands on it, and says the client stayed. It is deliberately not a flag
+(the callers likeliest to forget one are the agents this contains), naming your
+own repository suppresses nothing (the agent guide says to pass `--repo`
+always), and `attach`/`restore` still move you because a session is what they
+were asked for. See "Whose client is it" in `docs/tmux.md`.
 
 **tmux session targets are exact.** tmux matches session names as prefixes, so
 every session target goes through `exact()` → `=name`. Window targets are window

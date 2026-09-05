@@ -63,6 +63,17 @@ tmux session "checkout-api"
 checkout, parked on `main` — start new work there, ask your general questions
 there, and keep feature work out of it.
 
+Commands act on the repo you're standing in. To act on another one, name it:
+`tw new --repo checkout-api pay-89`, `tw ls --repo storefront`,
+`tw send --repo checkout-api base "have a look at the retry logic"` — the name
+is the one its config file is called. Every command takes `--repo`, and the ones
+whose only argument is a repo take it as a bare word too, so `tw ls
+checkout-api` is the same thing.
+
+Naming another repo leaves your tmux client where it is: the window opens in
+that repo's session, and `tw attach <repo>` is how you go there. Nothing moves
+your screen out from under you because something else got started elsewhere.
+
 A reboot takes the sessions and leaves the checkouts. `tw restore` puts one
 repository's session back — the base window, a window per worktree, each agent
 picking up the conversation it was having — and drops you into it. One terminal
@@ -234,8 +245,8 @@ worktrees yet, so anything reading it has somewhere to start.
 ## Configuring it
 
 One TOML file per repo, written by `tw setup`, in
-`~/.config/treewright/repos/<name>.toml`. The filename is what you pass to
-commands that take a `[repo]`.
+`~/.config/treewright/repos/<name>.toml`. The filename is the repo's name — what
+you pass as `--repo`, or as the bare `[repo]` on the commands that take one.
 
 ```toml
 version        = 2                    # which layout tw setup wrote; doctor checks it

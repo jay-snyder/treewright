@@ -155,7 +155,7 @@ func TestMoveRefusesACleanCheckout(t *testing.T) {
 	if r.err == nil {
 		t.Fatalf("move from a clean checkout succeeded\n%s", r.both())
 	}
-	if msg := flat(r.err.Error()); !strings.Contains(msg, "treewright new eng-1") {
+	if msg := flat(r.err.Error()); !strings.Contains(msg, "treewright new --repo proj eng-1") {
 		t.Errorf("error = %q, want the command that was meant named", msg)
 	}
 	if f.Exists("eng-1") {

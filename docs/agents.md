@@ -365,6 +365,15 @@ work lives, not whether anyone is currently home: a worktree whose window has
 been closed is exactly the state an agent could manufacture to get past a
 window-shaped rule, and `resume --prompt` is the way back into one either way.
 
+**Reaching into another repository is not what the guard is about.** It refuses
+tool calls that would mutate another *worktree* — an `Edit` under its path, a
+`git -C` against it — and treewright's own commands are never refused, so
+`tw new --repo other`, `tw send --repo other` and the rest pass exactly as their
+same-repository spellings do. That is the distinction the rule has always drawn:
+doing another agent's work yourself is what is refused, and handing work to an
+agent is what treewright is for. Across repositories that is the only route
+there is, since the other repository's worktrees are not even listed here.
+
 ### Procedure belongs in the binary, not in the guide
 
 An audit put roughly a hundred of the guide's two hundred and forty lines in one

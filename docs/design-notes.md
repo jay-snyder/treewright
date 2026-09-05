@@ -120,8 +120,10 @@ whatever is missing here".
 repository is the shape of the day anyway, so batching across repositories would
 save one command per tab and in exchange would spin up sessions and agents for
 every repository ever registered. The optional `[repo]` is the same positional
-`base`, `attach`, `ls` and `prune` take, and it is there because a terminal tab
-launches in no particular directory — see the one-tab-per-repo pattern in
+`base`, `attach`, `ls`, `prune`, `config` and `refresh` take — and the same
+repository `--repo` names, which every command accepts; see "Naming the
+repository a command acts on". It is there because a terminal tab launches in no
+particular directory — see the one-tab-per-repo pattern in
 [`tmux.md`](tmux.md).
 
 **It attaches by default, and `-d, --detached` opts out.** The common caller is a
@@ -176,6 +178,91 @@ status bar after you land is the only channel that would survive, and it is not
 built: `display-message` needs a client, and outside tmux the attach blocks until
 you detach, so saying it afterwards means saying it to somebody who has already
 left. It is readable under `-d`, and on the failure path, where nothing attaches.
+
+## Naming the repository a command acts on
+
+Every command resolves a config, and until recently most of them resolved it
+from the working directory with no way to say otherwise. That is right for a
+person, who is nearly always standing in the checkout they mean, and wrong for
+an agent, which stands in exactly one repository and has business in others.
+`ls`, `prune`, `base`, `attach`, `restore`, `config` and `refresh` already took
+an optional `[repo]`, on the argument that a terminal tab launches in no
+particular directory — and an agent is in that position with respect to every
+repository but its own, permanently.
+
+The failure it produced was silent. An agent standing in one repository ran
+`tw new` for another and got a worktree in the repository it was standing in:
+that repository's branch prefix, that repository's base branch, that
+repository's directory, under the slug meant for somewhere else. Nothing in
+the output contradicted it, because nothing in the output named a repository at
+all.
+
+**The repository is named by `--repo`, not by qualifying the target as
+`<repo>/<slug>`.** A qualified target is the tidier-looking option and it
+cannot be had: a slash already means a branch prefix. `new` reads a leading
+`feature/` as one, and `rm`, `close`, `send`, `resume` and `cd` all strip one
+before using what is left. So `tw rm feature/eng-1` would have two readings,
+and which one applied would depend on the registry rather than on anything in
+the repository being acted on — register a config called `feature` and the
+meaning of that line changes, in every repository, from "the eng-1 worktree
+here" to "the eng-1 worktree over there". That is a deletion moving under
+somebody on the strength of a file they did not edit. A flag cannot be confused
+with a prefix, a slug or a window name, and it leaves the prefix mechanism
+working on the slug: `tw new --repo cibo bug/eng-1` branches `bug/eng-1` in
+cibo.
+
+**The flag works everywhere and the positional stays where it was.** These are
+not two spellings of one thing so much as a general form and a shorthand: the
+seven commands whose only argument is a repository read better with a
+positional and have taken one since they existed, while every other command's
+positionals are slugs and messages. Accepting `--repo` on all of them is what
+makes it learnable as universal, which is the whole point — an agent that finds
+the flag rejected by one command has no reason to trust it on the next. Naming
+the repository twice is a usage error rather than a precedence rule, following
+`--prompt`/`--prompt-file` and the `branch_prefix` pair before them.
+
+`move` is the one command that deliberately has no `--repo`. What it moves is
+the uncommitted work in the base checkout, and the only base checkout it can
+read is the one the caller is standing in; a flag there would name where the
+worktree is made while the work still came from wherever the caller happened to
+be, which is either a no-op or a way to put one repository's changes onto
+another repository's branch.
+
+### Every message names the repository it is about
+
+`new` says whose base branch it is forking from, in the line that was already
+naming the branch: `creating branch bug/eng-1 off cibo's origin/main`. The
+possessive puts the repository against the thing that identifies it least
+reliably. Reading `creating branch integrate/x off origin/megastructure` and
+catching a mistake in it requires already knowing whose base branch
+`megastructure` is, which is exactly what the agent that got this wrong did not
+know. stdout is unchanged and still carries the worktree path alone.
+
+**Every hint naming a command names the repository too**, in every repository,
+including single-repository installs where it is redundant. A slug identifies
+nothing on its own: two pieces of work called `fix` in two repositories is the
+ordinary case rather than a contrived one. And the reader of a message is not
+reliably standing where it was printed — an agent has its own working
+directory, a transcript is read from somewhere else, and `rm`'s hint about a
+stale window is read after the worktree that would have disambiguated it has
+been deleted. In the incident, an operator holding `close it with tw close
+eng-1` had nothing that worked and fell back to `tmux kill-window` on a window
+index, which is the one thing `close` exists to stop. `hint` in
+`internal/cli/address.go` is the one place that spelling is built.
+
+### A window named after another repository
+
+A session is one per repository, so the window list is where a person checks
+which repository they are looking at. A window called `cibo` sitting in another
+repository's session tells the only reader it will ever have that cibo's work
+is here. Nothing misbehaves — treewright targets sessions by `=name` and
+windows by id, never by display name — so this is a warning rather than a
+refusal, on the same argument `warnIfAgentWorking` is a warning: the caller may
+have meant it, and a refusal would need a `--force`, which is a flag people
+learn to pass by reflex. The repository's own name is exempt, a window named
+after the repository it sits in misleading nobody. `new` and `move` both check,
+before anything is created, because a window name is worth changing while
+changing it is still free.
 
 ## Naming a worktree
 

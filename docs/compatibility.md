@@ -96,6 +96,30 @@ Help text, aliases, and completion are not part of this tier. Aliases are
 deliberately absent from help and completion already, and what `tw help`
 prints is prose.
 
+**`--repo` was added under this tier's additive rule.** It appears on every
+command that resolves a config, and nothing it touches is a break: a command
+that took no repository now takes one, and the seven that already took an
+optional `[repo]` positional keep it, unchanged, as the shorthand they have
+always had. No existing invocation means anything different than it did.
+
+That last clause is the part worth recording, because the alternative would not
+have passed. A qualified target — `tw rm cibo/eng-1` — collides with the branch
+prefixes those commands already strip, so what `tw rm feature/eng-1` meant
+would have started depending on the contents of the registry rather than on
+anything in the repository being acted on. Registering a config named after
+somebody's branch prefix would then change, silently, which repository a
+deletion lands in. That is a strong-tier break dressed as a feature, with no
+version bump anywhere near it, and it is why the addressing is a flag. See
+"Naming the repository a command acts on" in
+[`design-notes.md`](design-notes.md).
+
+The behavior change that rides along — a command acting on a repository other
+than the caller's own no longer moves the tmux client — is not a promised
+surface. Nothing machine-read reads it, and it is a correction rather than a
+choice: the old behavior threw an attached operator out of the session they
+were watching. `attach` and `restore`, whose answer *is* a session, are
+untouched.
+
 ## What is never promised
 
 This section matters as much as the freeze, because a promise that quietly
