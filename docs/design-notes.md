@@ -438,8 +438,9 @@ edited.
 also how you get a worktree onto a colleague's pull request after fetching it.
 Branches always fork from `origin/<base_branch>` — there is deliberately no flag
 to base one on anything else, the point being that every worktree starts from the
-same known-current place. When origin is unreachable, `new` says so and forks
-from the local base branch.
+same known-current place. When the fetch fails, `new` says so and forks from the
+local base branch — see the next section for what it says and how long it waits
+before saying it.
 
 **A base checkout ahead of origin is warned about**, because that same rule is
 what makes it invisible: commits made in the main checkout and not yet pushed are
@@ -451,6 +452,80 @@ against `origin/<base_branch>` on the path that forks from origin, says what it
 means for the worktree just made, and names the two ways out: push and recreate,
 or cherry-pick the commits over. It is the branch that is compared, not whatever
 the checkout has out — that is `base`'s question, and it asks it separately.
+
+### When the fetch fails
+
+A `new` once reported `origin unreachable`, forked from the local base branch,
+and was right about the fork point by luck. The same `git fetch --quiet origin
+main` run by hand immediately afterwards succeeded twelve times out of twelve at
+about three seconds each, `doctor` reported `ok origin`, and the session-start
+`fresh-base` fetch had succeeded half an hour earlier. Establishing that nothing
+was wrong took an investigation, and three separate things made it necessary.
+
+`doctor` agreeing was not a fourth. Its origin check is `git remote get-url` and
+a `RefExists` on `origin/<base_branch>` — both local, both answered out of this
+checkout, neither reaching the network. That is the right check for what
+`doctor` is for, and it means `ok origin` was never evidence about the fetch;
+the fetch is the only thing here that asks the network anything.
+
+**The message asserted more than it knew.** `Fetch` returns an error for any
+failure: a `base_branch` that is not on origin, credentials that expired, a
+repository that was renamed, a `git` missing from PATH, a deadline. None of those
+is unreachability, and naming the network sends the reader at the one part of the
+system that is working. So the warning now says what it did — `could not fetch
+origin/main — forking from the local main instead` — says what that costs, and
+then quotes git under a `git said` field. `fresh-base` already hedged this way
+about the identical failure, and this is the same register.
+
+That quote is git's, verbatim: its capitals, its full stops, its advice
+paragraph. The house voice governs treewright's own sentences, and a field
+holding a foreign program's output is a value, not prose — paraphrasing it would
+be the guessing the change is meant to end. The one thing `git.Said` does change
+is dropping git's blank lines, because `asFields` pads a value's later lines to
+the value column and a blank one arrives as a run of spaces under a label,
+reading as the message having stopped there.
+
+**Nothing bounded the wait.** The runner was a plain `exec.Command`, so a network
+that black-holes rather than refusing — a captive portal, a dead VPN, a stalled
+TLS handshake — hung `new` with no worktree, no window and nothing on screen. That
+is a worse failure than the one being fixed, and `doctor`'s release check already
+holds the opposite standard for the same reason. The deadline is on the fetch
+family and not on the shared runner: every other call here is local and answers
+in milliseconds, so a limit on `worktree add` or on the object-walking
+`commit-tree` behind squash-merge detection would be a limit on work that is slow
+only because the repository is large — and its expiry would be indistinguishable
+from the network failure this one reports.
+
+Thirty seconds, against a warm fetch that measures about three. The headroom is
+the whole point: every caller answers a failed fetch by carrying on from
+something older, so a budget tight enough to expire on an ordinary slow link
+would not report a problem — it would hand back a stale fork point and call it
+success, which is this bug inverted. The deadline also sets `cmd.WaitDelay`,
+without which it would be advisory: `git fetch` runs its transport in a child
+process that inherits the pipes treewright reads git's output through, so killing
+git leaves them open and the wait moves one process down rather than ending.
+
+**One failure decided the outcome.** A blip that a second attempt would have
+answered leaves a branch forked from a stale base, discovered at merge time or
+not at all. So `FetchRetrying` asks once more, and only the two callers where a
+failed fetch changes *what the user gets* use it: `new`'s fork point, and the
+base checkout `fresh-base` reports as current. The four housekeeping fetches in
+`rm` and `prune` stay on `Fetch`, because a stale `origin/<base>` there only makes
+`IsMerged` say no — `rm` refuses, `prune` skips — and that is the safe direction
+already. Retrying would add latency to teardown to reach an answer nothing acts
+on.
+
+One retry, not a loop, on the argument `session.go` already makes about falling
+back to a command that has just failed. And never after a timeout, which is the
+part worth spelling out because it looks backwards: a stalled handshake is the
+most transient-looking failure of the lot. But the budget has already been spent
+establishing that nothing is answering, and spending it twice doubles the wait
+for exactly the case the offline fallback exists to reach quickly — an offline
+laptop must not come back slowly with a warning about the network it is not on. A
+fast, definite refusal is the opposite trade: it cost nothing to obtain, so
+asking again costs only the backoff, and that is a cheaper mistake than never
+covering the blip at all. The rule is one line, `worthRetrying`, so that the
+distinction is a named thing rather than a condition inside a loop.
 
 ## Moving work that was started in the wrong place
 

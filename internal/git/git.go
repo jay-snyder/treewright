@@ -8,6 +8,8 @@ package git
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -15,6 +17,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Repo is a git repository identified by its main checkout directory.
@@ -27,11 +30,26 @@ func runIn(dir string, args ...string) (string, error) {
 	return runEnvIn(dir, nil, args...)
 }
 
-// runEnvIn is runIn with extra environment variables. The returned error wraps
-// the exec error so callers can inspect it with errors.As, while the message
-// carries git's stderr — without it a failure reads only as "exit status 128".
+// runEnvIn is runIn with extra environment variables.
 func runEnvIn(dir string, extraEnv []string, args ...string) (string, error) {
-	cmd := exec.Command("git", args...)
+	return runLimitedIn(dir, extraEnv, 0, args...)
+}
+
+// runLimitedIn is runEnvIn with a deadline on the whole invocation. A limit of
+// zero is no deadline at all, which is what every local call takes — only the
+// fetch family hands one in, for the reasons written above fetchTimeout.
+//
+// The returned error wraps the exec error so callers can inspect it with
+// errors.As, while carrying git's stderr — without it a failure reads only as
+// "exit status 128".
+func runLimitedIn(dir string, extraEnv []string, limit time.Duration, args ...string) (string, error) {
+	ctx := context.Background()
+	if limit > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, limit)
+		defer cancel()
+	}
+	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
 	if len(extraEnv) > 0 {
 		cmd.Env = append(os.Environ(), extraEnv...)
@@ -39,23 +57,89 @@ func runEnvIn(dir string, extraEnv []string, args ...string) (string, error) {
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
+	if limit > 0 {
+		cmd.WaitDelay = killGrace
+	}
 	err := cmd.Run()
 	out := strings.TrimSpace(stdout.String())
-	if err != nil {
-		return out, wrapExecErr("git "+strings.Join(args, " "), &stderr, err)
+	if err == nil {
+		return out, nil
 	}
-	return out, nil
+	command := "git " + strings.Join(args, " ")
+	// The deadline killed it, so git's own error is "signal: killed" and its
+	// stderr holds whatever it had managed to say before the signal — neither
+	// reports what happened. The budget does. It is also the one distinction the
+	// retry rule turns on, so it is carried on the error rather than left to be
+	// recognized from the text.
+	if ctx.Err() != nil {
+		return out, &ExecError{Command: command, TimedOut: true, Err: fmt.Errorf("timed out after %s", limit)}
+	}
+	return out, wrapExecErr(command, &stderr, err)
 }
 
-// wrapExecErr shapes a failed git invocation into one error: the command as the
-// caller spelled it, what git said on stderr when it said anything, and the
-// exec error underneath — without the stderr a failure reads only as "exit
-// status 128".
-func wrapExecErr(command string, stderr *bytes.Buffer, err error) error {
-	if msg := strings.TrimSpace(stderr.String()); msg != "" {
-		return fmt.Errorf("%s: %s (%w)", command, msg, err)
+// ExecError is a failed git invocation kept in parts: the command as the caller
+// spelled it, what git said on stderr, and the exec error underneath.
+//
+// It formats as all three, which is what most of these become on the way to
+// `error: ...`, and the parts exist for the caller that is writing its own
+// sentence about the failure instead — `new`'s fallback warning wants git's
+// words as a labelled field under it, not the whole wrapped string wedged into
+// the middle of a line. Said is how it asks.
+type ExecError struct {
+	Command string
+	Stderr  string
+	// TimedOut records that the deadline fired rather than git returning an
+	// answer, which is the difference between "origin refused" and "nothing
+	// answered" — and the difference a retry has to respect.
+	TimedOut bool
+	Err      error
+}
+
+// Error renders the invocation, what git said, and the exec error underneath —
+// without the stderr a failure reads only as "exit status 128".
+func (e *ExecError) Error() string {
+	if e.Stderr != "" {
+		return fmt.Sprintf("%s: %s (%v)", e.Command, e.Stderr, e.Err)
 	}
-	return fmt.Errorf("%s: %w", command, err)
+	return fmt.Sprintf("%s: %v", e.Command, e.Err)
+}
+
+// Unwrap keeps errors.As reaching the exec error underneath, which is how a
+// caller asks for an exit status.
+func (e *ExecError) Unwrap() error { return e.Err }
+
+// wrapExecErr shapes a failed git invocation into one ExecError, for the two
+// places that have a stderr buffer in hand and no deadline to report.
+func wrapExecErr(command string, stderr *bytes.Buffer, err error) error {
+	return &ExecError{Command: command, Stderr: strings.TrimSpace(stderr.String()), Err: err}
+}
+
+// Said returns what git itself said about a failure: its stderr where there was
+// any, and otherwise the reason the invocation never got that far — a deadline,
+// or a git that is not on PATH. It is for a message that has already said what
+// went wrong in treewright's own words and wants git's underneath as evidence.
+//
+// The blank lines git leaves between its fatal and its advice come out, because
+// the caller is putting this in a field: asFields pads a value's later lines to
+// the value column, so a blank one arrives as a line of spaces under a label
+// and reads as the message having ended. Nothing else is touched. These are
+// git's sentences, in git's voice, capitals and full stops and all, and a
+// message that paraphrased them would be back to guessing at what happened.
+func Said(err error) string {
+	var e *ExecError
+	if !errors.As(err, &e) {
+		return err.Error()
+	}
+	if e.Stderr == "" {
+		return e.Err.Error()
+	}
+	var lines []string
+	for line := range strings.SplitSeq(e.Stderr, "\n") {
+		if line = strings.TrimRight(line, " \t"); line != "" {
+			lines = append(lines, line)
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (r Repo) run(args ...string) (string, error) { return runIn(r.Dir, args...) }
@@ -505,11 +589,80 @@ func (r Repo) BaseCheckout(base string) Info {
 
 // ---- mutations -------------------------------------------------------------
 
-// Fetch updates one ref from a remote. An error usually means the network is
-// unavailable, which callers treat as "work offline" rather than as fatal.
+// The fetch family is the only thing in this package that touches a network,
+// and these three constants are what keep that from being unbounded.
+//
+// fetchTimeout bounds one fetch. The deadline is here rather than on the shared
+// runner because every other call is local and answers in milliseconds: a limit
+// on `worktree add`, or on the object-walking `commit-tree` that squash-merge
+// detection runs, would be a limit on work that is slow only because the
+// repository is large, and its expiry would be indistinguishable from the
+// network failure this one reports. What a fetch can do and they cannot is
+// wait forever — a network that black-holes rather than refusing, a captive
+// portal, a dead VPN, a stalled TLS handshake — and `new` waiting on one has no
+// worktree, no window and nothing on screen to say why.
+//
+// Thirty seconds is ten times what a warm `git fetch --quiet origin <base>`
+// costs. The headroom is the point: every caller answers a failed fetch by
+// carrying on from something older, so a budget tight enough to expire on an
+// ordinary slow link would not report a problem — it would hand back a stale
+// fork point and call it success.
+//
+// killGrace is how long Run then waits for git's output pipes to close before
+// returning without them. Without it the deadline is advisory: `git fetch` runs
+// its transport in a child process — git-remote-https, ssh — which inherits the
+// pipes this package reads through, so killing git leaves them open and Wait
+// blocks on a read that ends only when the child does. The hang would move one
+// process down and stay exactly as long.
+//
+// fetchRetryBackoff separates the two attempts FetchRetrying makes, so a
+// condition that lasted an instant has a beat to clear rather than being asked
+// again inside the moment that failed.
+const (
+	fetchTimeout      = 30 * time.Second
+	killGrace         = 2 * time.Second
+	fetchRetryBackoff = time.Second
+)
+
+// Fetch updates one ref from a remote. An error may mean the network is
+// unavailable — which callers treat as "work offline" rather than as fatal —
+// but it equally means a ref that is not on the remote, a repository that was
+// renamed, or credentials that will not do, so nothing here reports which.
 func (r Repo) Fetch(remote, ref string) error {
-	_, err := r.run("fetch", "--quiet", remote, ref)
+	_, err := runLimitedIn(r.Dir, nil, fetchTimeout, "fetch", "--quiet", remote, ref)
 	return err
+}
+
+// FetchRetrying is Fetch with one retry, for the two callers where a failed
+// fetch changes the answer rather than merely delaying it: the fork point `new`
+// creates a branch at, and the base checkout `fresh-base` reports as current.
+// The teardown callers stay on Fetch — a stale origin/<base> only makes
+// IsMerged say no, so `rm` refuses and `prune` skips, and a retry there buys a
+// safe answer nothing was going to act on anyway.
+//
+// One retry, and never after a timeout. What this covers is a blip: a fetch
+// that fails and then succeeds three seconds later, leaving a branch forked
+// from a stale base that nobody discovers until merge time. A timeout is the
+// other thing entirely — the budget has already been spent establishing that
+// nothing is answering, and spending it twice doubles the wait for exactly the
+// case the offline fallback exists to reach quickly. A fast, definite refusal
+// costs only the backoff to ask again, which is a cheaper mistake than never
+// covering the blip at all.
+func (r Repo) FetchRetrying(remote, ref string) error {
+	err := r.Fetch(remote, ref)
+	if err == nil || !worthRetrying(err) {
+		return err
+	}
+	time.Sleep(fetchRetryBackoff)
+	return r.Fetch(remote, ref)
+}
+
+// worthRetrying reports whether a failed fetch is the kind a second attempt
+// could answer differently. Everything except a timeout is, on the reasoning
+// above FetchRetrying.
+func worthRetrying(err error) bool {
+	var e *ExecError
+	return !errors.As(err, &e) || !e.TimedOut
 }
 
 // FastForward advances the branch this checkout has out to ref, or reports why
@@ -527,9 +680,11 @@ func (r Repo) FastForward(ref string) error {
 	return err
 }
 
-// FetchPrune drops remote-tracking refs whose upstream branch is gone.
+// FetchPrune drops remote-tracking refs whose upstream branch is gone. On the
+// same budget as Fetch, and for the same reason: teardown can afford a stale
+// answer, but not an unbounded wait for a fresh one.
 func (r Repo) FetchPrune(remote string) error {
-	_, err := r.run("fetch", "--prune", "--quiet", remote)
+	_, err := runLimitedIn(r.Dir, nil, fetchTimeout, "fetch", "--prune", "--quiet", remote)
 	return err
 }
 

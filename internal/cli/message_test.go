@@ -24,11 +24,11 @@ func TestAMessageOnOneLineIsUnchanged(t *testing.T) {
 	env, stderr := envWriting()
 
 	env.progressf("creating branch %s off origin/%s", "feature/eng-1", "main")
-	env.warnf("origin unreachable — forking from local %s", "main")
+	env.warnf("could not fetch origin/%s — forking from the local %s instead", "main", "main")
 	env.errorf("refusing to remove %q", "eng-1")
 
 	want := "creating branch feature/eng-1 off origin/main\n" +
-		"warning: origin unreachable — forking from local main\n" +
+		"warning: could not fetch origin/main — forking from the local main instead\n" +
 		"error: refusing to remove \"eng-1\"\n"
 	if got := stderr.String(); got != want {
 		t.Errorf("stderr = %q, want %q", got, want)

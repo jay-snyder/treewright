@@ -440,6 +440,47 @@ func TestNewWarnsWhenTheBaseCheckoutIsAheadOfOrigin(t *testing.T) {
 	}
 }
 
+// TestNewQuotesGitWhenTheFetchFails is the message the incident turned on. A
+// fetch that failed once reported origin as unreachable, sending the reader at
+// their network — while git's own account of it, which wrapExecErr had gone to
+// the trouble of capturing, was thrown away one line later. The warning now
+// carries what git said and claims no more than that the fetch did not happen.
+func TestNewQuotesGitWhenTheFetchFails(t *testing.T) {
+	f := newFixture(t, "")
+	// An origin that is not there fails the way an unreachable one does without
+	// a network to arrange: git refuses, quickly, and says why.
+	f.Git(f.MainDir, "remote", "set-url", "origin", filepath.Join(f.Root, "gone.git"))
+
+	r := f.exec("new", "alpha")
+	if r.err != nil {
+		t.Fatalf("new: %v\n%s", r.err, r.both())
+	}
+	stderr := flat(r.stderr)
+	if !strings.Contains(stderr, "could not fetch origin/main") {
+		t.Errorf("stderr = %q, want the fetch named as the thing that failed", r.stderr)
+	}
+	// The claim that could not be supported: a failed fetch is not evidence of
+	// an unreachable network, and every other cause sends the reader elsewhere.
+	if strings.Contains(stderr, "unreachable") {
+		t.Errorf("stderr = %q, want no claim about reachability", r.stderr)
+	}
+	if !strings.Contains(stderr, "git said") || !strings.Contains(stderr, "gone.git") {
+		t.Errorf("stderr = %q, want git's own words about the failure", r.stderr)
+	}
+	if !strings.Contains(stderr, "the fork point may be behind what is on origin") {
+		t.Errorf("stderr = %q, want what the fallback costs", r.stderr)
+	}
+
+	// The fallback itself is unchanged and is why this is a warning: the
+	// worktree is made anyway, forked from the local base branch.
+	if got, want := f.Git(f.DirFor("alpha"), "rev-parse", "HEAD"), f.Git(f.MainDir, "rev-parse", "main"); got != want {
+		t.Errorf("alpha forked from %s, want the local main at %s", got, want)
+	}
+	if strings.TrimSpace(r.stdout) != f.DirFor("alpha") {
+		t.Errorf("stdout = %q, want the worktree path alone", r.stdout)
+	}
+}
+
 func TestNewStripsAnAlreadyPrefixedSlug(t *testing.T) {
 	f := newFixture(t, "")
 

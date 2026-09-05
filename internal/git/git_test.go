@@ -4,7 +4,12 @@
 package git_test
 
 import (
+	"errors"
+	"fmt"
+	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -281,6 +286,115 @@ func TestWorktreesReportsBranchWithoutRefPrefix(t *testing.T) {
 		if strings.HasPrefix(wt.Branch, "refs/") {
 			t.Errorf("branch %q still carries its ref prefix", wt.Branch)
 		}
+	}
+}
+
+// ---- fetching --------------------------------------------------------------
+
+// flakyGit puts a shim named "git" first on PATH that fails its first `fails`
+// fetches and then hands every call to the real git. It returns the path of the
+// file counting the fetches, which is the whole of what these tests assert on:
+// how many times treewright asked.
+//
+// The real git is resolved before PATH is changed, so the shim delegates to the
+// binary the rest of the fixture is already using rather than to itself.
+func flakyGit(t *testing.T, fails int) (attempts string) {
+	t.Helper()
+	gitBinary, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatalf("find the real git: %v", err)
+	}
+	dir := t.TempDir()
+	attempts = filepath.Join(dir, "attempts")
+	script := fmt.Sprintf(`#!/bin/sh
+if [ "$1" = fetch ]; then
+	n=$(cat %[1]q 2>/dev/null || echo 0)
+	n=$((n + 1))
+	printf '%%s' "$n" > %[1]q
+	if [ "$n" -le %[2]d ]; then
+		echo "fatal: unable to access 'origin': the blip" >&2
+		exit 128
+	fi
+fi
+exec %[3]q "$@"
+`, attempts, fails, gitBinary)
+	if err := os.WriteFile(filepath.Join(dir, "git"), []byte(script), 0o755); err != nil {
+		t.Fatalf("write the git shim: %v", err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return attempts
+}
+
+// fetchesSoFar reads the counter flakyGit keeps. A missing file is none, which
+// is what a test asserting that nothing was retried needs to be able to see.
+func fetchesSoFar(t *testing.T, attempts string) int {
+	t.Helper()
+	raw, err := os.ReadFile(attempts)
+	if errors.Is(err, os.ErrNotExist) {
+		return 0
+	}
+	if err != nil {
+		t.Fatalf("read the fetch counter: %v", err)
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(string(raw)))
+	if err != nil {
+		t.Fatalf("fetch counter holds %q: %v", raw, err)
+	}
+	return n
+}
+
+// TestAFetchThatFailsOnceIsAskedAgain is the incident this covers: a fetch
+// failed, twelve run by hand straight afterwards all succeeded, and the branch
+// had already been forked from a base nobody had checked. The blip is only
+// worth anything if the second attempt is what the caller gets back.
+func TestAFetchThatFailsOnceIsAskedAgain(t *testing.T) {
+	f := gittest.New(t)
+	repo := git.Repo{Dir: f.MainDir}
+	attempts := flakyGit(t, 1)
+
+	if err := repo.FetchRetrying("origin", "main"); err != nil {
+		t.Fatalf("FetchRetrying: %v", err)
+	}
+	if got := fetchesSoFar(t, attempts); got != 2 {
+		t.Errorf("git fetch ran %d times, want 2 — the first failure was not retried", got)
+	}
+}
+
+// TestARetryIsOneRetry keeps the recovery from becoming a loop. A failure that
+// is not a blip has to reach the offline fallback quickly, and the error the
+// caller writes its warning from is the second attempt's, not a summary of
+// both.
+func TestARetryIsOneRetry(t *testing.T) {
+	f := gittest.New(t)
+	repo := git.Repo{Dir: f.MainDir}
+	attempts := flakyGit(t, 99)
+
+	err := repo.FetchRetrying("origin", "main")
+	if err == nil {
+		t.Fatal("want an error from a fetch that never succeeds, got none")
+	}
+	if got := fetchesSoFar(t, attempts); got != 2 {
+		t.Errorf("git fetch ran %d times, want exactly 2", got)
+	}
+	if said := git.Said(err); !strings.Contains(said, "the blip") {
+		t.Errorf("the error does not carry what git said: %q", said)
+	}
+}
+
+// TestFetchItselfAsksOnce holds the line between the two entry points. The
+// teardown callers in rm and prune stay on Fetch because a stale origin/<base>
+// only makes IsMerged say no — the safe direction — and paying a backoff there
+// would slow every teardown to reach an answer nothing acts on.
+func TestFetchItselfAsksOnce(t *testing.T) {
+	f := gittest.New(t)
+	repo := git.Repo{Dir: f.MainDir}
+	attempts := flakyGit(t, 1)
+
+	if err := repo.Fetch("origin", "main"); err == nil {
+		t.Fatal("want the shim's failure back from Fetch, got none")
+	}
+	if got := fetchesSoFar(t, attempts); got != 1 {
+		t.Errorf("git fetch ran %d times, want 1 — Fetch does not retry", got)
 	}
 }
 
