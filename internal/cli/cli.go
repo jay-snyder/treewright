@@ -768,15 +768,12 @@ and a skill teaching the agent to drive treewright, from reading what is in
 flight with "treewright ls --json" to starting parallel work with new and a
 --prompt.
 
-For claude that is ~/.claude/skills/treewright/, which claude loads whole as
-treewright@skills-dir the next time it starts. Nothing else is edited: no
-settings file, no dotfile, no .gitignore. A repository treewright does not
-manage costs nothing by being covered: outside a treewright window, signal does
-nothing, quietly.
-
-Where the agent keeps that directory is the agent's own business, and claude
-lets it be moved: with CLAUDE_CONFIG_DIR set, the plugin goes there instead, so
-it lands where the agent will actually read it.
+For claude that is ~/.claude/skills/treewright/ — or wherever claude's own
+CLAUDE_CONFIG_DIR puts that directory, since the plugin has to land where the
+agent will actually read it. claude loads it whole as treewright@skills-dir the
+next time it starts. Nothing else is edited: no settings file, no dotfile, no
+.gitignore. A repository treewright does not manage costs nothing by being
+covered: outside a treewright window, signal does nothing, quietly.
 
 stdout is the directory, so the path can be piped — and is the answer to where
 this put things, whatever the environment says. Run it again after upgrading
