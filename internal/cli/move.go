@@ -63,6 +63,9 @@ func cmdMove(env *Env, args []string) error {
 		return fmt.Errorf("nothing to move — %s has no uncommitted work in it%s",
 			base, asFields(field("start a worktree instead with", hint(env, cfg, "new", slug))))
 	}
+	if err := refuseToClearUnderAnAgent(env, cfg, keep); err != nil {
+		return err
+	}
 
 	patch, added, err := takePatch(env, cfg, slug)
 	if err != nil {
@@ -119,6 +122,35 @@ func cmdMove(env *Env, args []string) error {
 	// checkout being asked to carry on with something not there yet.
 	plan.openWindow(env, dir, branch)
 	return nil
+}
+
+// refuseToClearUnderAnAgent stops a move whose last step would clear the base
+// checkout while another agent is working in it.
+//
+// The checkout could only ever hold one agent until scratch windows, and a move
+// assumed the uncommitted work in it was the caller's. With a second agent
+// standing there it may be that agent's, mid-edit: clearing the checkout takes
+// its work away, and whatever it writes between the patch and the clear is lost
+// outright — a file changed after the patch was written is simply restored to
+// HEAD. So this refuses, before anything is written or created.
+//
+// A refusal and not the warning warnIfAgentWorking gives, because the way past
+// it is not a --force. --keep is the safe variant of this very command — the
+// work is copied into the worktree and the checkout is left exactly as it was —
+// so passing it by reflex costs nothing, and waiting for the agent to finish is
+// the other answer.
+func refuseToClearUnderAnAgent(env *Env, cfg *config.Config, keep bool) error {
+	if keep {
+		return nil
+	}
+	w, busy := agentWorkingBeside(cfg)
+	if !busy {
+		return nil
+	}
+	return fmt.Errorf("the agent in window %s is working in %s\n"+
+		"clearing the checkout would change files under it, and the work there may be its own\n"+
+		"wait until it is done, or pass %s to copy the work and leave the checkout alone",
+		w.Name, cfg.MainDir, env.copyable("--keep"))
 }
 
 // takePatch writes what the base checkout holds against HEAD to a file, and

@@ -25,7 +25,9 @@ import (
 // So one function does the work for `new`, `resume` and `base` alike: find the
 // window already sitting in a directory, or make one in the right session, and
 // then bring it to the foreground. `restore` is the one caller that asks for
-// every part of that except the last — see arrival.
+// every part of that except the last — see arrival — and `scratch` the one that
+// asks for every part except the first, a scratch window never being one that
+// was already sitting there.
 
 // sessionFor names the tmux session holding a repository's windows: the config's
 // own name, unless the config chose one with tmux_session.
@@ -104,6 +106,11 @@ func (a arrival) note() string {
 // two differ in the one thing a caller cannot see: only a created window runs
 // the command. A caller that folded something into that command — a kickoff
 // prompt — needs to know when it never ran.
+//
+// A spec naming a scratch window is always created. That window is identified by
+// itself rather than by the directory it opens on, so nothing standing in that
+// directory — the base window least of all — is the window being asked for, and
+// the name was checked against the open ones before this was reached.
 func openWindow(env *Env, cfg *config.Config, spec tmux.Spec, run windowCommand, arrive arrival) (created bool, err error) {
 	if !tmux.Available() {
 		// The two things to type get a labelled line each, because that is what
@@ -129,16 +136,11 @@ func openWindow(env *Env, cfg *config.Config, spec tmux.Spec, run windowCommand,
 	// switch to it rather than opening a duplicate beside it — unless it is the
 	// pane treewright is being typed into, which answers the request with the
 	// place the user is already standing.
-	if w, ok := tmux.Windows(spec.Session)[spec.Dir]; ok && !isTheCallersOwnShell(w, spec.Dir) {
-		if w.Session != spec.Session {
-			// Someone's own window, or one opened before this repo had a session
-			// of its own. Switching to it is still better than opening a second
-			// window on the same directory, but it is worth saying where it went.
-			env.warnf("window %s is in session %s, not %s\n%s",
-				w.Name, w.Session, spec.Session, arrive.note())
+	if spec.Scratch == "" {
+		if w, ok := tmux.Windows(spec.Session)[spec.Dir]; ok && !isTheCallersOwnShell(w, spec.Dir) {
+			arriveAt(env, cfg, w, command, arrive)
+			return false, nil
 		}
-		arrive.reach(env, cfg, w, command)
-		return false, nil
 	}
 
 	var w tmux.Window
@@ -155,6 +157,21 @@ func openWindow(env *Env, cfg *config.Config, spec tmux.Spec, run windowCommand,
 	}
 	arrive.reach(env, cfg, w, command)
 	return true, nil
+}
+
+// arriveAt does what a caller asked about the client, for a window that was
+// already open rather than one just created.
+//
+// The window may turn out to be in some other session — someone's own window, or
+// one opened before this repository had a session of its own. Going to it is
+// still better than opening a second one beside it, but it is worth saying where
+// it went.
+func arriveAt(env *Env, cfg *config.Config, w tmux.Window, command string, arrive arrival) {
+	if session := sessionFor(cfg); w.Session != session {
+		env.warnf("window %s is in session %s, not %s\n%s",
+			w.Name, w.Session, session, arrive.note())
+	}
+	arrive.reach(env, cfg, w, command)
 }
 
 // isTheCallersOwnShell reports that the window found on dir is the pane

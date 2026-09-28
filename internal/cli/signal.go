@@ -5,13 +5,15 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/jay-snyder/treewright/internal/config"
 	"github.com/jay-snyder/treewright/internal/git"
 	"github.com/jay-snyder/treewright/internal/tmux"
 )
 
 // `signal` is the agent-state protocol's one verb: an agent's own hooks run
-// `treewright signal waiting` and the window belonging to the worktree they are
-// standing in is stamped with the state, shown in the AGENT column of `ls` and,
+// `treewright signal waiting` and the window the agent is running in — failing
+// that, the window belonging to the checkout it is standing in — is stamped
+// with the state, shown in the AGENT column of `ls` and,
 // for waiting, as a marker on the window's name. treewright never sets a state
 // itself — agents write, treewright displays — and nothing clears one on focus:
 // switching to a waiting window is arrival, not help, and the agent's own next
@@ -35,7 +37,7 @@ const (
 
 var signalStates = []string{stateWorking, stateWaiting, stateDone, stateClear}
 
-// cmdSignal records an agent's state on its worktree's window.
+// cmdSignal records an agent's state on the window it is running in.
 //
 // Being invoked wrong is the only loud failure. Everything else — no tmux, no
 // registered repo, no window on this worktree — exits 0 in silence, because the
@@ -80,16 +82,26 @@ func cmdSignal(_ *Env, args []string) error {
 	return nil
 }
 
-// signalTarget finds the window owned by the checkout the caller is standing
-// in, reporting ok=false for every way the caller can be out of scope. A bool
-// rather than an error, because no branch here is one: each is a session that
-// is none of treewright's business, and cmdSignal answers all of them with the
-// same silence.
+// signalTarget finds the window the calling agent's state belongs on, reporting
+// ok=false for every way the caller can be out of scope. A bool rather than an
+// error, because no branch here is one: each is a session that is none of
+// treewright's business, and cmdSignal answers all of them with the same
+// silence.
 //
-// The checkout is named by git's own spelling of its root — the same fully
-// resolved path a window's worktree stamp holds — so the lookup lands however
-// the hook's working directory was spelled, and from a subdirectory of the
-// worktree just the same.
+// The pane is asked first. The window an agent is running in is the one it is
+// reporting about, and while every checkout had one window the directory named
+// it closely enough to be the whole answer. It never was quite: the base
+// window's shell, walked into a worktree by `cd`, ran its agent there and
+// stamped the worktree's window with that agent's state. A scratch window made
+// the gap the common case — its agent stands in the base checkout, and the
+// directory's answer is the base window, whose agent then wears the other one's
+// "working" and "!".
+//
+// The pane's window is taken only when treewright opened it for this
+// repository. Anywhere else — a window the user opened by hand, a window some
+// other repository's config opened — the lookup falls back to the directory,
+// which is exactly what it did before, so a hand-opened window on a worktree
+// still gets the state it always got and still keeps its name to itself.
 func signalTarget() (tmux.Window, bool) {
 	if !tmux.Available() {
 		return tmux.Window{}, false
@@ -98,6 +110,20 @@ func signalTarget() (tmux.Window, bool) {
 	if err != nil {
 		return tmux.Window{}, false
 	}
+	if w, ok := tmux.CallersWindow(); ok && w.Stamped() && w.Repo == cfg.Name {
+		return w, true
+	}
+	return checkoutWindow(cfg)
+}
+
+// checkoutWindow finds the window owned by the checkout the caller is standing
+// in.
+//
+// The checkout is named by git's own spelling of its root — the same fully
+// resolved path a window's worktree stamp holds — so the lookup lands however
+// the hook's working directory was spelled, and from a subdirectory of the
+// worktree just the same.
+func checkoutWindow(cfg *config.Config) (tmux.Window, bool) {
 	wd, err := os.Getwd()
 	if err != nil {
 		return tmux.Window{}, false

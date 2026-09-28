@@ -36,11 +36,22 @@ func signaled(id, session, name, worktree, state, dir string) string {
 	return inSession(2, id, session, name, worktree, state, dir)
 }
 
-// inSession renders a pane whose session holds a given number of windows, in
-// paneFormat's own order: the two free-text fields at the ends, the fixed ones
-// between.
+// inSession renders a pane whose session holds a given number of windows.
 func inSession(windows int, id, session, name, worktree, state, dir string) string {
-	return strings.Join([]string{name, id, session, worktree, state, strconv.Itoa(windows), dir}, "\t")
+	return listed(windows, id, session, name, "", worktree, "", state, dir)
+}
+
+// scratchPane renders a pane of a scratch window: stamped with the checkout it
+// was opened on, as every window treewright opens is, and with the repository
+// and the name it answers to.
+func scratchPane(id, session, name, repo, scratch, worktree, dir string) string {
+	return listed(2, id, session, name, repo, worktree, scratch, "", dir)
+}
+
+// listed renders one line in paneFormat's own order: the two free-text fields at
+// the ends, the fixed ones between.
+func listed(windows int, id, session, name, repo, worktree, scratch, state, dir string) string {
+	return strings.Join([]string{name, id, session, repo, worktree, scratch, state, strconv.Itoa(windows), dir}, "\t")
 }
 
 func TestParsePanes(t *testing.T) {
@@ -106,7 +117,7 @@ func TestParsePanes(t *testing.T) {
 		},
 		{
 			// A name that looks like a window id must not be mistaken for the
-			// anchor: the field four after it has to be the window count, and for
+			// anchor: the field six after it has to be the window count, and for
 			// a name it is the state, which is never digits.
 			name:   "a window named like a window id",
 			out:    pane("@5", "s", "@9", "/a"),
@@ -312,6 +323,87 @@ func TestParsePanesIgnoresWindowOrder(t *testing.T) {
 		got := parsePanes(strings.Join(order, "\n"), "proj")
 		if !maps.Equal(got, want) {
 			t.Errorf("rearranged to %v\n got %v\nwant %v", order, got, want)
+		}
+	}
+}
+
+// TestAScratchWindowClaimsNoDirectory is the load-bearing half of scratch
+// windows. One stands in the base checkout without answering for it, so the
+// window on the main checkout is the base window whatever else is standing
+// there — including when the scratch window is the older of the two, which is
+// what the base window being closed and reopened leaves behind, and including
+// when the base window is not open at all, where a scratch window that could
+// claim an empty slot would be switched to by `base`.
+func TestAScratchWindowClaimsNoDirectory(t *testing.T) {
+	const main = "/code/proj"
+	ask := scratchPane("@1", "proj", "ask", "proj", "ask", main, main)
+	base := stamped("@2", "proj", "main", main, main)
+
+	for _, order := range [][]string{{ask, base}, {base, ask}} {
+		got := parsePanes(strings.Join(order, "\n"), "proj")
+		if w := got[main]; w.ID != "@2" {
+			t.Errorf("window on the main checkout = %+v, want the base window @2", w)
+		}
+	}
+
+	if got := parsePanes(ask, "proj"); got != nil {
+		t.Errorf("a scratch window alone = %v, want it to claim nothing", got)
+	}
+
+	// Nor the directory its pane has walked into: a scratch agent that cd'd into
+	// a worktree is still not that worktree's window, and `rm` must not offer to
+	// close it on the worktree's behalf.
+	walked := scratchPane("@1", "proj", "ask", "proj", "ask", main, "/code/proj-eng-1")
+	if got := parsePanes(walked, "proj"); got != nil {
+		t.Errorf("a scratch window standing in a worktree = %v, want it to claim nothing", got)
+	}
+}
+
+// TestScratchWindowsAreFoundByName is the index that replaces the directory for
+// them: keyed by the name they were opened under, one repository's at a time,
+// wherever the window has ended up.
+func TestScratchWindowsAreFoundByName(t *testing.T) {
+	const main = "/code/proj"
+	out := strings.Join([]string{
+		scratchPane("@4", "proj", "ask", "proj", "ask", main, main),
+		// A second pane of the same window, after a split: the same window, once.
+		scratchPane("@4", "proj", "ask", "proj", "ask", main, "/tmp"),
+		scratchPane("@5", "elsewhere", "REVIEW", "proj", "review", main, main),
+		// The same name in another repository is another repository's window.
+		scratchPane("@6", "other", "ask", "other", "ask", "/code/other", "/code/other"),
+		stamped("@2", "proj", "main", main, main),
+		pane("@3", "proj", "shell", main),
+	}, "\n")
+
+	got := parseScratch(out, "proj")
+	if len(got) != 2 {
+		t.Fatalf("parseScratch = %v, want ask and review", got)
+	}
+	if w := got["ask"]; w.ID != "@4" || w.Scratch != "ask" || w.Repo != "proj" || w.Worktree != main {
+		t.Errorf("ask = %+v, want window @4 with its stamps read back", w)
+	}
+	// Moved into another session and still this repository's: reported, so a
+	// second window is not opened under the same name beside it.
+	if w := got["review"]; w.ID != "@5" || w.Session != "elsewhere" || w.Name != "REVIEW" {
+		t.Errorf("review = %+v, want window @5 in the session it was moved to", w)
+	}
+
+	if got := parseScratch(out, "nobody"); got != nil {
+		t.Errorf("parseScratch for a repository with none = %v, want nil", got)
+	}
+}
+
+// TestTwoScratchWindowsUnderOneNameResolveToTheOlder: `scratch` refuses a name
+// that is already open, but a hand-set option can arrange it anyway, and an
+// answer that changed with the order of the listing would be the window-order
+// bug over again.
+func TestTwoScratchWindowsUnderOneNameResolveToTheOlder(t *testing.T) {
+	const main = "/code/proj"
+	older := scratchPane("@9", "proj", "ask", "proj", "ask", main, main)
+	newer := scratchPane("@10", "proj", "ask", "proj", "ask", main, main)
+	for _, order := range [][]string{{older, newer}, {newer, older}} {
+		if w := parseScratch(strings.Join(order, "\n"), "proj")["ask"]; w.ID != "@9" {
+			t.Errorf("ask = %+v, want the older window @9", w)
 		}
 	}
 }

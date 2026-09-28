@@ -72,22 +72,25 @@ func cmdSend(env *Env, args []string) error {
 	if err != nil {
 		return err
 	}
-	// Resolved the way `resume` resolves it, base checkout included: an
-	// unambiguous prefix is enough, the expansion is reported, and the window
-	// you launch work from runs an agent like any other.
+	// Resolved the way `resume` resolves it, base checkout and scratch windows
+	// included: an unambiguous prefix of a slug is enough, the expansion is
+	// reported, and the window you launch work from runs an agent like any other.
 	target, err := chooseWorktree(env, cfg, repo, managed, slug)
 	if err != nil {
 		return err
 	}
-	name := target.Slug
-	if target.Base {
-		name = baseName
-	}
+	name := target.name()
 
 	if !tmux.Available() {
 		return fmt.Errorf("tmux is not installed, so there is no window to type into")
 	}
-	window := tmux.Windows(sessionFor(cfg))[target.Dir]
+	// A scratch window comes with its window, since the one standing for its
+	// directory is the base window. Everything below is by window id, so it
+	// holds for either — the refusal of the caller's own window included.
+	window := target.Window
+	if !target.Scratch {
+		window = tmux.Windows(sessionFor(cfg))[target.Dir]
+	}
 	if window.ID == "" {
 		return fmt.Errorf("no window is open on %s in %s, so there is no agent to reach%s",
 			name, cfg.Name, asFields(field("open one with", hint(env, cfg, "resume", name))))
@@ -114,7 +117,7 @@ func cmdSend(env *Env, args []string) error {
 	// what the agent happened to print stays a %.
 	env.progressf("%s in %s shows:\n%s", window.Name, cfg.Name, pane)
 
-	if err := refuseHeldOpen(env, cfg, window, pane, name); err != nil {
+	if err := refuseHeldOpen(env, cfg, window, pane, target); err != nil {
 		return err
 	}
 	if dry {
@@ -132,9 +135,13 @@ func cmdSend(env *Env, args []string) error {
 	// own UserPromptSubmit hook fires `signal working` when the message lands,
 	// which is the protocol working as designed; a sender that stamped the
 	// window would be guessing at a state only the agent can report.
+	what := "worktree"
+	if target.Scratch {
+		what = "scratch window"
+	}
 	env.progressf("sent to %s%s", window.Name, asFields(
 		field("repository", cfg.Name),
-		field("worktree", name),
+		field(what, name),
 		field("message", message),
 	))
 	return nil
@@ -158,14 +165,22 @@ func cmdSend(env *Env, args []string) error {
 // apart. The notice is the last line such a window shows, and the match is
 // against the last line rather than the whole capture, so an agent that happens
 // to print those words mid-screen is not mistaken for a dead one.
-func refuseHeldOpen(env *Env, cfg *config.Config, window tmux.Window, pane, name string) error {
+//
+// Starting again is `scratch` rather than `resume` for a scratch window, which
+// once closed has nothing for resume to find.
+func refuseHeldOpen(env *Env, cfg *config.Config, window tmux.Window, pane string, target choice) error {
 	lines := strings.Split(pane, "\n")
 	if len(lines) == 0 || strings.TrimSpace(lines[len(lines)-1]) != heldOpenNotice {
 		return nil
+	}
+	name := target.name()
+	again := hint(env, cfg, "resume", name)
+	if target.Scratch {
+		again = hint(env, cfg, "scratch", name)
 	}
 	return fmt.Errorf("%s has no agent in it — its command exited and the window is being held open%s\n"+
 		"a message would reach the shell holding it, and the Enter after it would close the window\n"+
 		"close it and start again:  %s && %s",
 		window.Name, asFields(field("window", window.ID)),
-		hint(env, cfg, "close", name), hint(env, cfg, "resume", name))
+		hint(env, cfg, "close", name), again)
 }

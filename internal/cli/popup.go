@@ -150,17 +150,19 @@ func sizeFor(env *Env, command string) (width, height int) {
 	// The rows the picker will show, in the cheap form popupSize measures: the
 	// base checkout at the head, as chooseWorktree puts it, and nothing inspected
 	// — the columns that cost a git call are not the ones the data can stretch.
+	// Laid out by the same listing the picker uses, so the scratch windows under
+	// the base row are counted exactly when they will be shown.
 	branch, _ := git.CurrentBranch(cfg.MainDir)
-	rows := make([]git.Info, 0, len(managed)+1)
-	rows = append(rows, git.Info{
+	infos := make([]git.Info, 0, len(managed)+1)
+	infos = append(infos, git.Info{
 		Worktree: git.Worktree{Dir: cfg.MainDir, Branch: branch},
 		Status:   git.StatusBase,
 	})
 	for _, wt := range managed {
-		rows = append(rows, git.Info{Worktree: wt})
+		infos = append(infos, git.Info{Worktree: wt})
 	}
 
-	width, height = popupSize(rows, tmux.Windows(sessionFor(cfg)))
+	width, height = popupSize(listing(infos, tmux.Windows(sessionFor(cfg)), tmux.Scratch(cfg.Name)))
 	if len(managed) == 0 {
 		// Two extra lines, for the sentence resume and cd print above the menu in
 		// a repository nobody has forked yet, and the blank line under it. The

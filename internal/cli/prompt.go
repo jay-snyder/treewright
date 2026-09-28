@@ -18,11 +18,12 @@ const promptPlaceholder = "{prompt}"
 
 // How the two prompt flags are spelled, parsed and documented, in one place.
 //
-// Three commands hand an agent its instructions — new, move and resume — and
-// the flags mean the same thing on each. Spelled out at each of them, they were
-// three chances to misspell a flag name and three copies of one sentence to
+// Four commands hand an agent its instructions — new, move, scratch and resume
+// — and the flags mean the same thing on each. Spelled out at each of them, they
+// were four chances to misspell a flag name and four copies of one sentence to
 // drift apart. What stays per command is the half that genuinely differs: what
-// the prompt is for there, which resume answers differently from the other two.
+// the prompt is for there, which resume answers differently from the other
+// three.
 const (
 	promptFlag      = "--prompt"
 	promptFileFlag  = "--prompt-file"
@@ -32,6 +33,11 @@ const (
 // promptFileDoc documents --prompt-file wherever it appears. It is one flag
 // with one behavior, so it is one sentence.
 var promptFileDoc = flagDoc{promptFileFlag, "a file holding the brief; the prompt becomes one line naming it"}
+
+// promptFlagDoc documents --prompt on the commands that start an agent — new,
+// move and scratch. resume says it differently, its prompt being for an agent
+// that may have been running before.
+var promptFlagDoc = flagDoc{promptFlagNames, "text the agent starts working on, placed at the command's {prompt}"}
 
 // promptValues is the flag pair as parseArgs takes it, pointed at a command's
 // own two variables.

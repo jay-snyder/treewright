@@ -2,7 +2,9 @@ package cli
 
 import (
 	"fmt"
+	"maps"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/jay-snyder/treewright/internal/agentinit"
@@ -256,11 +258,12 @@ func cmdComplete(env *Env, args []string) error {
 	// No arity check here: completion must never fail, and an unrecognized
 	// request simply offers nothing.
 	switch at(args, 0) {
-	// Two lists, differing by one name, because the commands that ask differ by
-	// what they can do. "slugs" is what rm completes: the worktrees, which are
-	// what it can remove. "targets" is what resume, cd and send complete: the
-	// same worktrees plus the base checkout, which they can reach and rm cannot.
-	// Offering "base" to rm would be completing a word that only ever errors.
+	// Two lists, differing by the names that are not worktrees, because the
+	// commands that ask differ by what they can do. "slugs" is what rm completes:
+	// the worktrees, which are what it can remove. "targets" is what resume, cd,
+	// send and close complete: the same worktrees plus the base checkout and the
+	// open scratch windows, which they can reach and rm cannot. Offering "base"
+	// to rm would be completing a word that only ever errors.
 	case "slugs", "targets":
 		cfg, err := resolveConfig("")
 		if err != nil {
@@ -275,6 +278,13 @@ func cmdComplete(env *Env, args []string) error {
 			// branch: completion is for finding a name, and a list offering the
 			// same row twice makes it harder, not easier.
 			fmt.Fprintln(env.Stdout, "base")
+			// In the order the listing shows them, under the base row. A name
+			// is the only way a scratch window can be typed, and nothing but
+			// the running server knows the names.
+			scratch := tmux.Scratch(cfg.Name)
+			for _, name := range slices.Sorted(maps.Keys(scratch)) {
+				fmt.Fprintln(env.Stdout, name)
+			}
 		}
 		for _, wt := range managed {
 			fmt.Fprintln(env.Stdout, wt.Slug)

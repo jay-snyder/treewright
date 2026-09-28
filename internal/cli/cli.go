@@ -211,7 +211,7 @@ outlive the command — treewright neither copies it nor deletes it, and clearin
 it up once the work has landed is yours. The two flags fill one setting, and
 passing both is an error rather than a precedence rule to learn.`,
 			flags: []flagDoc{
-				{promptFlagNames, "text the agent starts working on, placed at the command's {prompt}"},
+				promptFlagDoc,
 				promptFileDoc,
 				repoFlagDoc,
 			},
@@ -237,12 +237,18 @@ leaves the checkout untouched, says so, and names the patch, which is a second
 copy of the work and the way in by hand. --keep leaves the checkout alone even
 on success, for when you want the work in both places.
 
+While another agent reports working in the main checkout — a scratch window's,
+or the base window's when this is run from somewhere else — the move is refused
+before anything is written: clearing the checkout would change files under that
+agent, and the work in it may be that agent's. Wait for it to finish, or pass
+--keep, which copies the work and leaves the checkout alone.
+
 The work arrives staged, because a three-way apply goes through the index.
 
 stdout is the new worktree's path, so cd "$(treewright move eng-1)" works, and
 --prompt and --prompt-file hand the agent its instructions as they do on "new".`,
 			flags: []flagDoc{
-				{promptFlagNames, "text the agent starts working on, placed at the command's {prompt}"},
+				promptFlagDoc,
 				promptFileDoc,
 				{"--keep", "leave the work in the main checkout as well"},
 			},
@@ -259,6 +265,11 @@ another session if that is where it turns out to be.
 
 With no slug a menu is shown. Naming a slug skips it, and an unambiguous prefix
 of one is enough.
+
+The scratch windows standing in the main checkout are rows too, under the base
+row, and naming one — in full — switches to it. That works only while it is
+open: a closed scratch window keeps nothing, so there is nothing to resume, and
+"treewright scratch <name>" is what opens another.
 
 The base checkout heads that menu, so the window you return to between worktrees
 is reachable from the same key as the rest — and after a reboot, which a checkout
@@ -309,9 +320,9 @@ what that buys and what it leaves you to clean up.`,
 which is how an agent already running gets its next instruction. --prompt only
 reaches an agent a resume actually starts; this reaches the one standing there.
 
-An unambiguous prefix of a slug is enough, and "base" reaches the main
-checkout's window. There has to be a window open — "treewright resume <slug>"
-is what opens one.
+An unambiguous prefix of a slug is enough, "base" reaches the main checkout's
+window, and a scratch window's name reaches the agent in it. There has to be a
+window open — "treewright resume <slug>" is what opens one.
 
 What the window is showing is printed first, every time. An agent sitting on a
 question with options takes the next keystrokes as the answer to it, so a
@@ -374,9 +385,51 @@ menu. The difference is only ever visible on the first open of the day: this run
 command, for a general-purpose window, where resume runs resume_command.
 
 Naming a repository other than the one you are standing in opens its base window
-without moving your tmux client to it. "treewright attach" is what moves you.`,
+without moving your tmux client to it. "treewright attach" is what moves you.
+
+A second agent in the main checkout is "treewright scratch", which this never
+opens: however many scratch windows stand there, the base window is the one
+this means.`,
 			flags: []flagDoc{repoFlagDoc},
 			run:   cmdBase,
+		},
+		{
+			name:    "scratch",
+			args:    "[-p <text>] " + argRepoFlag + " <name> [window-name]",
+			summary: "open another window on the main checkout, under a name of its own",
+			long: `Opens another agent window in the main checkout, for work that needs an
+agent and no branch — investigating, answering a question, reviewing a pull
+request, orchestrating the agents in the worktrees. It runs the configured
+command, and there is no worktree to clean up afterwards.
+
+You name it, and the name is how everything else reaches it: "treewright send
+<name>" types at its agent, "treewright close <name>" closes it, and "treewright
+resume <name>" switches to it. ls lists it under the base row, with the status
+"scratch". The name follows a slug's rules, and one already answering for
+something — a worktree, an open scratch window, the base checkout — is refused,
+since those commands take any of them and could not tell two apart.
+
+Unlike "treewright base", this always opens a new window: the base window stays
+the one window "base" means, however many of these stand beside it. The window
+is named after a ticket key in the name, or after the name itself, as a
+worktree's window is, unless [window-name] overrides it.
+
+Nothing about a scratch window outlives it. Once it is closed, or lost to a
+restart, there is nothing for resume to find, and "treewright restore" does not
+reopen it.
+
+--prompt and --prompt-file hand the agent its first instruction, as they do on
+"new". --repo opens the window in another repository and leaves your tmux
+client where it is. Without tmux the command runs here instead, in the main
+checkout, as it does for "base".
+
+Nothing is printed to stdout: the answer is a window, and the name you gave it.`,
+			flags: []flagDoc{
+				promptFlagDoc,
+				promptFileDoc,
+				repoFlagDoc,
+			},
+			run: cmdScratch,
 		},
 		{
 			name:    "restore",
@@ -398,6 +451,8 @@ with its window order and its splits.
 
 A window already open on a worktree is left exactly as it is, so this is also
 what to type in a session that is already up: it opens whatever is missing.
+Scratch windows are neither reopened nor touched, since nothing on disk records
+one.
 
 On a clean restore it attaches at once and says nothing, the session being its
 own report. Where a window could not be opened it stays out instead, so that
@@ -469,12 +524,13 @@ the tmux server's, wherever that was started. A binding passes
 			name:    "signal",
 			args:    "<state>",
 			summary: "record the state of the agent running in this worktree",
-			long: `Stamps the tmux window belonging to the checkout you are standing in
-with an agent state — working, waiting, done, or clear — as the window option
-@treewright_agent_state. The state shows in the AGENT column of "treewright ls"
-and as agent_state in its JSON, and "waiting" also puts a marker on the window's
-name (!eng-142), so the one window that needs a person shows in any status line
-with nothing added to tmux.conf.
+			long: `Stamps the tmux window the agent is running in with an agent state —
+working, waiting, done, or clear — as the window option @treewright_agent_state.
+From a window treewright did not open, it stamps the one belonging to the
+checkout you are standing in instead. The state shows in the AGENT column of
+"treewright ls" and as agent_state in its JSON, and "waiting" also puts a marker
+on the window's name (!eng-142), so the one window that needs a person shows in
+any status line with nothing added to tmux.conf.
 
 This is for an agent's own hooks to run rather than for typing: a hook that
 fires when the agent starts work, blocks on you, or finishes runs
@@ -559,7 +615,8 @@ is marked with an asterisk.
 The base checkout heads the listing, as it heads the resume menu, under the branch
 it is parked on. Its status is "base" rather than one of the removable ones, and
 its divergence is how far your main checkout has drifted from origin — whether
-what you are reading there is stale.
+what you are reading there is stale. Any scratch windows open on it follow, by
+name, with the status "scratch" and no divergence of their own.
 
 With no worktrees yet the table prints nothing, "no worktrees" being the whole of
 the answer, while --json still carries the base row: a schema whose first row
@@ -634,7 +691,8 @@ outlives the directory.
 
 An unambiguous prefix of a slug is enough while the worktree is still there;
 once it has been removed there is nothing to match against, so name it in full.
-"base" closes the main checkout's window.
+"base" closes the main checkout's window, and a scratch window's name closes
+that one.
 
 --repo closes a window in another repository's session. Slugs collide across
 repositories — two of them called "fix" is the ordinary case, not a contrived

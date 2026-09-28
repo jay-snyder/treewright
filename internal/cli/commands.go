@@ -83,6 +83,13 @@ func planWorktree(env *Env, cmd, repo string, positional []string, prompt, promp
 	if err := validateSlug(cmd, cfg, slug); err != nil {
 		return worktreePlan{}, err
 	}
+	// A worktree and a scratch window share one namespace — send, close and
+	// resume take either — so a slug already answering for an open scratch
+	// window is refused here, while nothing exists yet. See
+	// refuseSlugOfAScratchWindow.
+	if err := refuseSlugOfAScratchWindow(env, cfg, slug); err != nil {
+		return worktreePlan{}, err
+	}
 	// Before anything is created, with the other refusals, because it is about
 	// this invocation rather than about anything on disk — and because a window
 	// name is worth changing while changing it is still free.
@@ -718,6 +725,7 @@ func cmdLs(env *Env, args []string) error {
 	}
 	session := sessionFor(cfg)
 	windows := tmux.Windows(session)
+	scratch := tmux.Scratch(cfg.Name)
 
 	// The base checkout heads the listing as it heads the menu, and in a
 	// repository with no worktrees yet the two modes part company: the table
@@ -738,8 +746,12 @@ func cmdLs(env *Env, args []string) error {
 	// an unregistered repo exits 1 with "no registered config matches repo
 	// <path>" — so the fault was never an unanswerable question, it was one
 	// schema saying two things.
+	//
+	// A scratch window open with no worktree beside it is the exception on the
+	// table's side: the table then has something to say that "no worktrees" does
+	// not, which is the agent in that window and what it is doing.
 	var infos []git.Info
-	if asJSON || len(managed) > 0 {
+	if asJSON || len(managed) > 0 || len(scratch) > 0 {
 		infos = inspectAll(repo, cfg, managed)
 	}
 
@@ -756,13 +768,13 @@ func cmdLs(env *Env, args []string) error {
 		// An array, never a message: a caller parsing this needs valid JSON
 		// whether or not there is anything to report, and the base row is there
 		// in every repository this command can answer about.
-		return writeJSON(env, worktreesJSON(infos, windows, tmux.CurrentWindow()))
+		return writeJSON(env, worktreesJSON(listing(infos, windows, scratch), tmux.CurrentWindow()))
 	}
 	if len(infos) == 0 {
 		env.progressf("no worktrees for %s", repo.Name())
 		return nil
 	}
-	worktreeTable(infos, windows, session).Render(env.Stdout, ui.ColorEnabled(env.Stdout))
+	worktreeTable(listing(infos, windows, scratch), session).Render(env.Stdout, ui.ColorEnabled(env.Stdout))
 	return nil
 }
 
@@ -922,8 +934,19 @@ func cmdResume(env *Env, args []string) error {
 		// popup this usually runs in close on the same Escape that dismissed the
 		// picker, rather than staying up to report a refusal as an error.
 		return nil
+	case err != nil && slug != "" && namesNoWorktree(managed, slug):
+		return nothingToResume(env, cfg, managed, slug)
 	case err != nil:
 		return err
+	}
+
+	// A scratch window is found only while it is open, so resuming one is
+	// switching to it — the same thing resume does with any window it finds
+	// already open, prompt warning included.
+	if target.Scratch {
+		arriveAt(env, cfg, target.Window, run.Command, arrivalFor(cfg, repoName))
+		warnIfPromptUndelivered(env, prompt, false, nil)
+		return nil
 	}
 
 	// The base checkout opens the way `base` opens it, under the base window's
@@ -1018,10 +1041,34 @@ func resumeCommand(cfg *config.Config, prompt string, fresh bool) (windowCommand
 // up as a worktree — a synthetic slug would be a name that means nothing to
 // `cfg.DirFor`, and the first command to forget the difference would be one
 // that deletes something.
+//
+// A scratch window is flagged for the same reason, and carries its window,
+// which is the one thing a lookup by directory cannot find for it: its Dir is
+// the base checkout's, and the window standing for that directory is the base
+// window. Its name is the window's Scratch, and deliberately not a Slug.
 type choice struct {
 	git.Worktree
 
-	Base bool
+	Base    bool
+	Scratch bool
+	Window  tmux.Window // the scratch window itself; set only when Scratch is
+}
+
+// name is what a message calls the choice: the word typed back at it.
+func (c choice) name() string {
+	switch {
+	case c.Base:
+		return baseName
+	case c.Scratch:
+		return c.Window.Scratch
+	default:
+		return c.Slug
+	}
+}
+
+// scratchChoice is an open scratch window as a selectable row.
+func scratchChoice(cfg *config.Config, w tmux.Window) choice {
+	return choice{Worktree: git.Worktree{Dir: cfg.MainDir}, Scratch: true, Window: w}
 }
 
 // baseChoice is the main checkout as a selectable row.
@@ -1059,11 +1106,10 @@ func baseNames(cfg *config.Config, base choice) []string {
 // inspectAll builds the rows the worktree table renders: the base checkout
 // first, then one per worktree.
 //
-// Base-first is an invariant rather than a taste. The picker numbers these rows
-// and maps a chosen index back with `managed[idx-1]`, so the base checkout
-// heading the list — pinned above the slugs rather than sorted among them, the
-// row you return to most staying row 1 as worktrees come and go — is arithmetic
-// two call sites depend on, and one function is what keeps them agreeing.
+// Base-first is an invariant rather than a taste: the base checkout heads the
+// list — pinned above the slugs rather than sorted among them, the row you
+// return to most staying row 1 as worktrees come and go — and listing, which
+// puts the scratch windows under it, finds it there.
 func inspectAll(repo git.Repo, cfg *config.Config, managed []git.Worktree) []git.Info {
 	infos := make([]git.Info, 0, len(managed)+1)
 	infos = append(infos, repo.BaseCheckout(cfg.BaseBranch))
@@ -1079,31 +1125,50 @@ func inspectAll(repo git.Repo, cfg *config.Config, managed []git.Worktree) []git
 // The menu is the `ls` table with a number beside each row, so the thing being
 // chosen from is the listing the user already reads, showing the status and
 // divergence that make the choice — not a bare list of names.
+//
+// A name is tried against the base checkout, then the open scratch windows,
+// then the worktrees, and the first two take exact matches only. The scratch
+// windows come before the worktrees because an exact name always beats a prefix
+// — the rule resolveSlug keeps among the worktrees themselves — and a scratch
+// name can never equal a slug exactly, `scratch` and `new` each refusing the
+// other's. They take no prefix of their own for the reason the base names do not:
+// a window opened later would quietly change what a prefix typed yesterday
+// meant.
 func chooseWorktree(env *Env, cfg *config.Config, repo git.Repo, managed []git.Worktree, slug string) (choice, error) {
 	base := baseChoice(cfg)
+	scratch := tmux.Scratch(cfg.Name)
 
 	if slug != "" {
 		if slices.Contains(baseNames(cfg, base), slug) {
 			return base, nil
 		}
+		if w, ok := scratch[slug]; ok {
+			return scratchChoice(cfg, w), nil
+		}
 		wt, err := resolveSlug(env, cfg, managed, slug)
 		return choice{Worktree: wt}, err
 	}
 
-	infos := inspectAll(repo, cfg, managed)
 	session := sessionFor(cfg)
+	rows := listing(inspectAll(repo, cfg, managed), tmux.Windows(session), scratch)
 	// The menu is a prompt, not an answer, so it goes to stderr: stdout still
 	// carries only the path the caller may be capturing.
-	header, rows := worktreeTable(infos, tmux.Windows(session), session).Lines(ui.ColorEnabled(env.Stderr))
-	idx, err := ui.Pick(env.Stderr, header, rows)
+	header, lines := worktreeTable(rows, session).Lines(ui.ColorEnabled(env.Stderr))
+	idx, err := ui.Pick(env.Stderr, header, lines)
 	if err != nil {
 		env.progressf("cancelled")
 		return choice{}, errCancelled
 	}
-	if idx == 0 {
+	// Mapped back through the row itself rather than by counting, since the rows
+	// are no longer one per worktree after the first.
+	switch picked := rows[idx]; {
+	case idx == 0:
 		return base, nil
+	case picked.scratch:
+		return scratchChoice(cfg, picked.window), nil
+	default:
+		return choice{Worktree: picked.Worktree}, nil
 	}
-	return choice{Worktree: managed[idx-1]}, nil
 }
 
 // errCancelled reports that the menu was dismissed rather than answered.
@@ -1168,8 +1233,9 @@ func cmdCd(env *Env, args []string) error {
 
 	fmt.Fprintln(env.Stdout, target.Dir)
 	// A shell about to run the project's own commands in there is exactly who needs
-	// to know the install stopped half way.
-	if !target.Base {
+	// to know the install stopped half way. Only a worktree has an install; a
+	// scratch window's row leads to the base checkout, which has none.
+	if !target.Base && !target.Scratch {
 		warnIfSetupFailed(env, cfg, target.Slug)
 	}
 	moveShell(env, target.Dir, "no shell integration loaded, so your shell did not move")
@@ -1221,13 +1287,7 @@ func cmdBase(env *Env, args []string) error {
 // the unusual one: it opens a window per worktree behind this one, so nothing may
 // move the client until they are all there.
 func openBaseWindow(env *Env, cfg *config.Config, run windowCommand, arrive arrival) (created bool, err error) {
-	if branch, err := git.CurrentBranch(cfg.MainDir); err == nil && branch != cfg.BaseBranch {
-		where := branch
-		if where == "" {
-			where = "a detached HEAD"
-		}
-		env.warnf("base checkout is on %s, not %s", where, cfg.BaseBranch)
-	}
+	warnIfBaseIsElsewhere(env, cfg)
 
 	// The base window is found by the directory it sits in, like any other, so a
 	// session that already has one gets it selected rather than gaining a second
@@ -1243,7 +1303,27 @@ func openBaseWindow(env *Env, cfg *config.Config, run windowCommand, arrive arri
 			Name: cfg.BaseBranch,
 		}, run, arrive)
 	}
+	return runInTheBaseCheckout(env, cfg, run)
+}
 
+// warnIfBaseIsElsewhere says so when the base checkout has drifted off the base
+// branch, for the two windows that stand in it — the base window and a scratch
+// window — whose agents read whatever it is parked on.
+func warnIfBaseIsElsewhere(env *Env, cfg *config.Config) {
+	if branch, err := git.CurrentBranch(cfg.MainDir); err == nil && branch != cfg.BaseBranch {
+		where := branch
+		if where == "" {
+			where = "a detached HEAD"
+		}
+		env.warnf("base checkout is on %s, not %s", where, cfg.BaseBranch)
+	}
+}
+
+// runInTheBaseCheckout is what a window on the base checkout comes to without
+// tmux: the command, run here, in the terminal the caller is already in. `base`
+// and `scratch` both end here, so that a scratch window without tmux means what
+// the base window without tmux has always meant rather than a third answer.
+func runInTheBaseCheckout(env *Env, cfg *config.Config, run windowCommand) (created bool, err error) {
 	// A blank command is the setting that leaves a window holding a shell, and
 	// outside tmux there is no window to leave one in — the caller is standing
 	// in a shell already. Said rather than done, because `sh -c ""` returns

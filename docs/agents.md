@@ -35,6 +35,18 @@ a failed command's window is deliberately held open so its output stays
 readable, and there the hold-open wrapper clears the state and the name marker
 itself, best-effort, straight through tmux.
 
+**The state goes on the window the agent is running in.** `signal` asks its own
+pane first, through `$TMUX_PANE`, and uses that window when treewright opened it
+for the repository the hook resolved; anywhere else it falls back to the window
+belonging to the checkout it is standing in, which is how it found its window
+before. The directory used to be the whole answer, and was always slightly
+wrong: the base window's shell, walked into a worktree by `tw cd` and running an
+agent there, stamped the worktree's window with that agent's state. Scratch
+windows made it the common case, a scratch agent standing in the base checkout
+exactly where the base window's does, so that asked by directory its `waiting`
+put the `!` on the base window. The fallback keeps a window the user opened by
+hand on a worktree getting the state it always got — and keeping its name.
+
 **`signal` never makes noise.** It exits 0 and prints nothing everywhere except
 being invoked wrong: outside tmux, outside a registered repository, in a
 checkout with no window — silence, not a warning. The hooks that run it fire in

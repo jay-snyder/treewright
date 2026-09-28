@@ -73,7 +73,9 @@ import _ "embed"
 //
 // `--continue` is what makes resuming per-worktree exact: each worktree is its
 // own directory, and claude resumes the session that last ran in the directory
-// it is started from. {prompt} is where a --prompt lands, as a positional
+// it is started from. The base checkout is where that stops being exact, since a
+// scratch window's agent runs there beside the base window's and whichever ran
+// last is the one continued — see "Scratch windows" in docs/design-notes.md. {prompt} is where a --prompt lands, as a positional
 // argument in both templates — claude takes an initial prompt that way fresh
 // or resumed. The templates must agree with the config package's defaults,
 // which a test holds them to.

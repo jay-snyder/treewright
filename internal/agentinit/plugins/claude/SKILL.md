@@ -1,6 +1,6 @@
 ---
 name: treewright
-description: Manage parallel work in repositories that use treewright (tw) — a git worktree, tmux window, and agent session per piece of work. Use when starting a task in parallel, spawning another agent on one, checking which worktrees and agents are in flight or need attention, resuming earlier work, or cleaning up merged branches. Use instead of raw git worktree in a treewright-managed repository.
+description: Manage parallel work in repositories that use treewright (tw) — a git worktree, tmux window, and agent session per piece of work. Use when starting a task in parallel, spawning another agent on one, putting a second agent on the main checkout for work that needs no branch (an investigation, a question, a pull request review), checking which worktrees and agents are in flight or need attention, resuming earlier work, or cleaning up merged branches. Use instead of raw git worktree in a treewright-managed repository.
 ---
 
 # Driving treewright
@@ -30,8 +30,9 @@ So name it whenever the work is not for the repository you are standing in:
 
 `--repo <name>` takes the name the repository is registered under, which is the
 `config:` line `treewright ls` reports and what `treewright doctor` lists. It
-works on every command — `new`, `resume`, `send`, `rm`, `close`, `cd`, `ls`,
-`prune`, `base`, `attach`, `restore`, `config`, `refresh` — and the commands
+works on every command — `new`, `scratch`, `resume`, `send`, `rm`, `close`,
+`cd`, `ls`, `prune`, `base`, `attach`, `restore`, `config`, `refresh` — and the
+commands
 whose only argument is a repository also take it as a bare positional, so
 `treewright ls cibo` and `treewright ls --repo cibo` are the same request.
 Naming it twice is a usage error rather than a precedence rule.
@@ -57,13 +58,19 @@ does outside tmux.
 
     treewright ls --json
 
-One JSON object per checkout:
+One JSON object per checkout, and one per open scratch window:
 
 - `"base": true` marks the main checkout. It is not a worktree,
   never a target for rm or prune, and new work should fork from it rather than
   happen in it. It is always the first row, in every repository this answers
   about — so an array of one is a registered repository with nothing in flight,
   where an unregistered one is an error naming the configs there are.
+- `"scratch": true` marks a scratch window: another agent session standing in
+  the main checkout, listed under the base row. Its `slug` is the name it was
+  opened under — what send, close and resume take — and it has no branch and a
+  `null` divergence of its own. It is not a worktree either: rm and prune
+  cannot name it, and work that will be committed never goes there. Its row
+  with `window_is_current` set is how an agent in one knows it is in one.
 - `status`: `dirty` and `unpushed` mean work
   that exists nowhere else; `merged` has landed and is safe to
   remove; `active` is pushed and unmerged — an open pull request.
@@ -182,19 +189,88 @@ shared by every worktree of a repository, so a `pop` in the wrong checkout is a
 keystroke away and the work is then in neither place you expected.
 
 `--keep` leaves the work in the main checkout as well, for when you want it in
-both places.
+both places. It is also the way past the one refusal `move` has of its own: while
+another agent reports working in the main checkout, clearing it would change
+files under that agent and could take its work, so the move waits for it —
+wait with it, or keep both copies.
+
+## Put a second agent on a question
+
+    treewright scratch retry-loop --prompt-file /tmp/retry-loop-question.md
+
+Opens another agent window standing in the main checkout, beside the base
+window, with no worktree and no branch behind it. It is for work whose result is
+an answer rather than a commit: tracing a bug before deciding where the fix
+goes, answering a question about the code, reviewing a pull request, reading CI
+logs, keeping track of the agents in the worktrees. Nothing is created on disk,
+so the window is all there is to put away afterwards.
+
+**Reach for one when the work would otherwise cost this conversation.** A long
+investigation run here fills your context with everything it read; run in a
+scratch window it goes on beside you, and what comes back is the conclusion.
+The same holds for the person — a question they want answered while you carry
+on with something else is a scratch window, not an interruption of you.
+
+**It is not free.** A fresh agent starts with none of this conversation. A
+question a few reads would settle is faster answered here, and one that depends
+on what you have been discussing is only worth asking with a brief that says
+it, which is why the example above passes `--prompt-file`. Open one with a
+prompt, as a worktree is opened with one: that prompt is all its agent begins
+with.
+
+**Anything that will be committed goes in a worktree, never here.** A scratch
+agent stands in the main checkout, which is where the base window's agent
+stands and where every new branch forks from, and nothing guards it — an edit
+made there lands under that agent and in front of the next `new`. Never check a
+branch out there from a scratch window either: a pull request whose code has to
+run gets a worktree of its own (`new` on an existing branch checks it out), and
+one that only needs reading is `gh pr diff` away.
+
+**If you are the agent in a scratch window**, the paragraph above is about you:
+change nothing in the checkout you are standing in. `treewright ls --json` says
+whether you are — your row is the one with `window_is_current`, and it carries
+`"scratch": true`. When the investigation turns into a fix, hand it on with
+`treewright new <slug> --prompt-file <brief>` like anyone else, and the
+worktrees are no more yours to edit than they are the base agent's — the
+tripwire under Start a piece of work holds unchanged.
+
+**Name it for what it is doing.** The name is required, follows a slug's rules,
+and is how everything else reaches it: `treewright send retry-loop "…"`,
+`treewright close retry-loop`, and `treewright resume retry-loop` to switch to
+it. `review-36` and `ci-watch` tell whoever reads the window list what each
+window is for; `ask2` tells them nothing. A name already answering for
+something — a worktree's slug, an open scratch window, `base` or the base
+branch — is refused, since those commands take any of them.
+
+Unlike `base`, which always means the one base window, `scratch` always opens a
+new window. `--prompt`, `--prompt-file`, `--repo` and a third positional that
+renames the window all work as they do on `new`.
+
+**Nothing about it outlives its window.** Once it is closed, or lost when the
+machine restarts, there is nothing for `resume` to find, and `restore` does not
+reopen it. So what it finds has to land somewhere that lasts before the window
+goes — a file, a pull request comment, or a message back to whoever asked:
+
+    treewright send --repo cibo base "findings are in /tmp/retry-loop-findings.md"
+
+**Close one you opened once its answer is somewhere, and ask before closing one
+you did not.** `treewright close <name>` ends that agent's conversation for
+good — there is no resuming it — so never while it reports `working`, and rm and
+prune never touch a scratch window, there being no worktree to remove. One the
+person opened is theirs.
 
 ## Continue or hand work onward
 
     treewright resume eng-142 --prompt "address the review comments"
 
-An unambiguous prefix of a slug is enough, and the expansion is reported. The
-prompt reaches the agent only when the resume actually starts one: a window
-that was already open is switched to instead, with a warning that the prompt
-went undelivered.
+An unambiguous prefix of a slug is enough, and the expansion is reported; a
+scratch window's name is taken in full. The prompt reaches the agent only when
+the resume actually starts one: a window that was already open is switched to
+instead, with a warning that the prompt went undelivered.
 
 That warning is not the end of the road. The agent in that window is an ordinary
-TUI on an ordinary tty, and `send` types at it:
+TUI on an ordinary tty, and `send` types at it — a worktree's agent by its slug,
+a scratch window's by its name:
 
     treewright send eng-142 "read /tmp/eng-142-review.md and address the comments in it"
 
@@ -226,7 +302,8 @@ for reaching agents rather than interrupting people.
     treewright prune --yes
 
 rm refuses a worktree with uncommitted changes or commits on no origin ref;
-prune only takes worktrees that are both merged and clean. The refusals mean
+prune only takes worktrees that are both merged and clean. Neither touches a
+scratch window — closing one is under Put a second agent on a question. The refusals mean
 work that exists nowhere else: do not pass --force on your own judgment —
 surface the refusal and let the person decide.
 

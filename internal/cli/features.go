@@ -93,7 +93,16 @@ var sessionStartFeatures = map[string]func(*config.Config) string{
 //   - Only from the base checkout. A session in a worktree is an agent working
 //     somewhere else, and moving a checkout it is not standing in is the very
 //     thing `guard` refuses on its behalf — worse here, since the base checkout
-//     may have an agent of its own with work in flight.
+//     may have an agent of its own with work in flight. That agent can also be
+//     standing right beside this one: a scratch window's agent stands in the
+//     base checkout as the base window's does, so a session starting in either
+//     can find the other mid-edit. So the move waits on every other window on
+//     the base checkout, and does not happen while one reports `working`. That
+//     check is the one that speaks rather than falling silent — "another agent
+//     is working here, so I left it alone" is precisely the answer to whether
+//     what this agent is about to read is current — and it runs last, after the
+//     fetch and the count, since fetching moves nothing anybody stands on and is
+//     what lets the answer say how far behind rather than only that it may be.
 //   - Only on base_branch. The base checkout is the one place a person switches
 //     branches by hand, and a checkout parked somewhere else is parked there
 //     deliberately.
@@ -129,6 +138,12 @@ func freshBase(cfg *config.Config) string {
 	_, behind, ok := repo.AheadBehind(branch, cfg.BaseBranch)
 	if !ok || behind == 0 {
 		return ""
+	}
+	if w, busy := agentWorkingBeside(cfg); busy {
+		return fmt.Sprintf("%s here is %s behind origin/%s and was left there\n"+
+			"the agent in window %s is working in this checkout, and a fast-forward would change files under it\n"+
+			"treat what you read here as behind origin/%s until that agent is done and it is brought up to date",
+			branch, count(behind, "commit", "commits"), cfg.BaseBranch, w.Name, cfg.BaseBranch)
 	}
 	if err := repo.FastForward("origin/" + cfg.BaseBranch); err != nil {
 		return fmt.Sprintf("%s here is %s behind origin/%s and could not be fast-forwarded\n"+

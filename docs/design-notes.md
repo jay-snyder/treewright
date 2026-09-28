@@ -54,6 +54,11 @@ directory and switches to it. It also gets what every other row gets when there
 turns out to be nothing to carry on from: `command` behind the failure, and
 `--fresh` to ask for it outright.
 
+One window *for the directory*, that is. The base checkout can have other agent
+windows standing in it — scratch windows, below — and none of them is a third way
+in: a scratch window claims no directory, so the window `base` finds on the main
+checkout is always this one, however many stand beside it.
+
 **Its status is `base`, outside the safe-to-remove scale.** A base checkout
 sitting level with origin has no commits outside it, which would read as
 `merged`: the green that means "safe to delete", about the one directory that
@@ -79,6 +84,134 @@ looking for a registration that was already in place. That state was never
 ambiguous — an unregistered repository exits 1 with `no registered config
 matches repo <path> (have: …)` — so the fault was not an unanswerable question
 but one schema with two shapes.
+
+## Scratch windows
+
+**A worktree's window is identified by its worktree. A scratch window is
+identified by itself.**
+
+A repository often needs a second agent session that needs no worktree and will
+commit nothing: an investigation, a question, a pull request to review, an agent
+orchestrating the ones in the worktrees. The base window cannot be it — `base` is
+one window by design, and a second call switches to the first. A second config
+for the same repository does not help either, because window lookup spans every
+session on the server and finds the existing window wherever it is. The
+workaround, a throwaway worktree per question, was rejected: a worktree holding
+no branch work is a teardown chore invented for nothing.
+
+What makes a worktree expensive is the disk, not the identity. Until scratch
+windows, the two were one thing: `@treewright_worktree` was simultaneously where
+a window stood and what it *was*. A scratch window separates them. It stands in
+the base checkout, and it answers to its own name, recorded on it as
+`@treewright_scratch`. It keeps `@treewright_worktree` too, set to the main
+checkout, because that option is the path a window is on as well as its identity
+— which keeps `Stamped()` true and the `!` waiting marker working on it.
+
+**It claims no directory at all.** The pane listing that maps directories to
+windows skips both of a scratch window's claims — the directory its pane stands
+in and the one it was opened on. That one rule is what keeps `tw base`,
+`close base`, `send base`, `ls` and `restore` correct without any of them knowing
+scratch windows exist: every one of them asks for the window on the main
+checkout, and the only window that can answer is the base window.
+
+Skipping is the only version of this that is true. Giving scratch windows a low
+rank would not do it: a window takes any directory nobody else has claimed, and
+rank is consulted only on a collision, so a scratch window would win the main
+checkout whenever the base window was closed — and `base` would switch to it
+instead of opening the window it was asked for. Leaving the worktree stamp in
+play at its usual rank is worse again: a tie with the base window, broken by
+session and then by age, which the base window wins until the day it is closed
+and reopened.
+
+**They have an index of their own.** `tmux.Scratch` maps a repository's scratch
+windows by name, beside `tmux.Windows` rather than inside it. One map with two
+kinds of key is a type that lies about what its keys are, and — the reason that
+matters more — the consumers that must never be handed a scratch window (the base
+window, `restore`, `signal`'s directory fallback, the guard's view of the
+worktrees) cannot grow a dependency on them by accident while this is the only
+way to get one. It is keyed by repository rather than by session, because a
+scratch name means something only within one repository, and a session is not a
+repository's alone once `tmux_session` points two configs at it. In the code a
+scratch window is a `choice` with a `Scratch` flag carrying its window, for the
+reason the base checkout is a flag rather than a synthetic slug: the first
+command to forget the difference is the one that reaches the wrong window, or
+deletes something.
+
+**One namespace, and a collision is refused when the name is given out.** `send`,
+`close` and `resume` take a worktree's slug and a scratch window's name alike, so
+`tw scratch <name>` refuses a name that is a live worktree's slug or an open
+scratch window's, and `new` and `move` refuse a slug that is an open scratch
+window's name. The base checkout's own names are refused as well: they win every
+lookup, so a scratch window called `base` could be opened and never reached.
+Checking once, where a name is handed out, is cheap; the alternative was a sigil
+marking scratch names (`:ask`), which is punctuation typed for the life of the
+tool to settle a question that arises once. Lookups take a scratch name exactly
+— never a prefix, for the reason the base names do not, since a window opened
+today would quietly change what a prefix typed yesterday meant — and an exact
+scratch name is tried before a worktree prefix, exactness beating a prefix being
+the rule among worktrees already.
+
+**The name is required, and follows a slug's rules.** Every other command that
+creates something takes a name, and an addressable thing should be named by
+whoever will address it: a generated `ask-1` you have to look up before you can
+`tw send` to it is worse than typing a word. What can be typed at `scratch` is
+what can be typed at `new`, so a name is checked by `refname.CheckSlug`.
+
+**It always opens a new window**, running `command` — never `resume_command`,
+since a window that did not exist a moment ago has nothing to resume — with
+`--prompt` and `--prompt-file` filled through `fillPrompt` exactly as `new` fills
+them. Without tmux it does what `base` does, running the command in the terminal
+you are in, rather than inventing a third answer.
+
+**`ls --json` flags a scratch row with `"scratch": true`**, beside the base row's
+`"base": true`, and lists scratch rows under the base row: a consumer deciding
+where work goes still reads row 0 and is never handed a scratch window by
+mistake. The row's slug is the name — what `send`, `close` and `resume` take —
+and it carries no branch and no divergence. It stands on the base checkout, and
+repeating the base row's numbers under it would be noise.
+
+**Two things that used to follow the directory now ask the pane.** `signal`
+stamps the window the agent is running in when treewright opened that window for
+this repository, and only otherwise falls back to the checkout it stands in —
+without which a scratch agent's `waiting` lands on the base window, `!` and all.
+That is a fix rather than a feature: the base window's shell walked into a
+worktree by `tw cd` and running an agent there was already stamping the
+worktree's window. And `fresh-base` waits for any other agent working in the base
+checkout, since a session starting in a scratch window can now find the base
+window's agent mid-edit — see `fresh-base` under "Optional behaviors".
+
+The guard is deliberately unchanged. It already leaves the base checkout
+unguarded — its foreign worktrees are the managed ones, which exclude the main
+checkout — so two agents standing in it is a likelier version of an existing
+hazard rather than a new kind, and the rules already describe a scratch agent
+correctly: it stands exactly where the base agent stands.
+
+**Nothing about a scratch window outlives it, for now.** Once it is closed, or
+lost to a restart, there is nothing for `resume` to find, and `restore` does not
+reopen it: restore opens what the disk records, and nothing on disk records a
+scratch window. `resume <name>` for a name nothing answers to says exactly that,
+and names `tw scratch <name>` as the way to a new one.
+
+**One cost lands on the base window, not on the scratch one.** claude's
+`--continue` resumes the most recent conversation *in a directory*, and a
+scratch session is a conversation in the base checkout — so a `resume` or
+`restore` of the base window after one may pick up the scratch conversation
+rather than the base window's own. The directory was an exact key for a
+conversation exactly as long as one agent stood in each, which is also what the
+claude module's comment on `--continue` rests on.
+
+That shapes what brings scratch sessions back after a restart, whenever it is
+built. A record of the conversation a window is running — its `session_id`,
+written by the agent's own `SessionStart` hook, the one party that knows it, at
+the moment it knows it — is only half a fix if it covers scratch windows alone:
+the base window would still resume with `--continue`, and still choose between
+itself and every scratch session that ran after it. So the record has to cover
+every agent standing in the base checkout, the base window included, and resume
+has to use it for the base window whenever one exists — `--continue` staying
+the fallback for a base window with no record, and for every worktree, where the
+directory is still exact. The name is kept as the stable handle for a scratch
+window, and `.git/treewright/scratch/` kept free, so that record can arrive
+without either moving.
 
 ## Putting a session back after a restart
 
@@ -114,7 +247,9 @@ the help says this out loud. **What restore opens is what `tw ls` lists**, and
 that is also why there is no `--dry-run` — the listing is the preview. A window
 already open on a worktree is left exactly as it is, which makes `tw restore` a
 reasonable thing to type in a session that is already up, where it means "open
-whatever is missing here".
+whatever is missing here". A scratch window is the one row `ls` lists that
+restore does not open: `ls` lists one only while it is open, restore leaves an
+open one exactly as it is, and nothing on disk records one to reopen.
 
 **One repository per invocation.** There is no `--all`. A terminal tab per
 repository is the shape of the day anyway, so batching across repositories would
@@ -676,6 +811,17 @@ of the worktree is the work already in it rather than an empty checkout it is
 being asked to carry on with. `--keep` leaves the base checkout alone on success
 too, for when the work is wanted in both places.
 
+**It will not clear the checkout under another agent.** Until scratch windows,
+the base checkout held one agent, and a move could assume the uncommitted work
+in it was the caller's. With two standing there it may be the other one's, in
+the middle of being written — and anything that agent changes between the patch
+and the clear is not moved but lost, restored to HEAD with the rest. So while a
+window on the base checkout other than the caller's reports `working`, `move` is
+refused before anything is written. It refuses rather than warns, unlike closing
+a window with a working agent, because the way past it is not a `--force`:
+`--keep` is the safe variant of the same command, copying the work and leaving
+the checkout exactly as it was, and passing it by reflex costs nothing.
+
 ## Output contract
 
 stdout carries the answer and nothing else, so any command can be piped:
@@ -697,6 +843,7 @@ stdout carries the answer and nothing else, so any command can be piped:
 | `send` | nothing — there is no answer, only something done; what the window was showing and what was typed go to stderr |
 | `close` | nothing — there is no answer, only a window that is gone; what it closed and what that cost go to stderr |
 | `restore` | nothing — there is no answer, only a session that is back; what it could not open, and the way in when it stayed out, go to stderr |
+| `scratch` | nothing — the answer is a window, and the name you gave it is how everything else reaches it; where it opened goes to stderr |
 | `signal` | nothing — the answer is the stamp on the window, and out of scope it is silent on stderr too |
 | `guard` | nothing — the answer is the exit code, that being what a PreToolUse hook reads, and the refusal it carries goes to stderr for the agent |
 | `session-start` | what each optional feature did, one message per feature — the reader is the agent, whose SessionStart hook adds a hook's stdout to the session as context, and with nothing to report it prints nothing at all |
@@ -834,6 +981,11 @@ listing already carried.
 `ls` reports one status per worktree, in this precedence: `dirty` outranks
 everything because it is the most easily lost, then `merged`, then `unpushed`; a
 pushed-but-unmerged branch is `active`.
+
+Two rows stand outside that scale, because it answers "how safe is this to
+remove" and neither is anything `rm` could remove: the base checkout is `base`,
+and a scratch window is `scratch` — see "The base checkout" and "Scratch
+windows".
 
 The counts shown — `dirty (3)`, `unpushed (2)` — are the numbers the removal
 guards refuse over, so a listing says how much a `--force` would discard.
@@ -1474,6 +1626,20 @@ is not out of scope: the session *is* in a repository that asked for this, and
 the honest answer is that freshness is now unknown. Saying nothing there would be
 indistinguishable from saying "you are current", which is the one wrong thing to
 tell an agent about to read the checkout.
+
+**It yields to another agent working in the base checkout, and says so.** The
+base window's agent and a scratch window's both stand in the base checkout, so a
+session starting in either can find the other mid-edit. A fast-forward there
+changes files under an agent that is working, so while any window on the base
+checkout other than the caller's own reports `working`, the checkout is left
+where it is. The caller's own is excluded because a session starting in a window
+*is* that window's agent: whatever it last reported belongs to the session now
+ending. Unlike the scope checks this one speaks — "another agent is working here,
+so I left it alone" is exactly the answer to whether what this agent is about to
+read is current — and it runs last, after the fetch and the count, because a
+fetch moves nothing anybody stands on and is what lets the answer say how far
+behind the checkout is rather than only that it might be. When nothing is behind,
+there is nothing to yield and nothing is said.
 
 #### Where a feature's parts live
 

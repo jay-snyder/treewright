@@ -38,6 +38,7 @@ complete -c treewright -n __fish_use_subcommand -a resume        -d 'reopen a wi
 complete -c treewright -n __fish_use_subcommand -a send          -d 'type one line at the agent in a worktree window'
 complete -c treewright -n __fish_use_subcommand -a cd            -d 'move your shell into a worktree'
 complete -c treewright -n __fish_use_subcommand -a base          -d 'open a window on the main checkout'
+complete -c treewright -n __fish_use_subcommand -a scratch       -d 'open another window on the main checkout, under a name of its own'
 complete -c treewright -n __fish_use_subcommand -a restore       -d 'reopen every window of a repository after a restart, and attach'
 complete -c treewright -n __fish_use_subcommand -a attach        -d 'attach this terminal to the repository tmux session'
 complete -c treewright -n __fish_use_subcommand -a popup         -d 'run a treewright command in a tmux popup sized to its output'
@@ -74,15 +75,15 @@ complete -c treewright -n '__fish_seen_subcommand_from version' -l check -d 'say
 complete -c treewright -n '__fish_seen_subcommand_from tmux-init' -l apply -d 'load it into the running tmux server'
 complete -c treewright -n '__fish_seen_subcommand_from tmux-init' -l resume-key -r -d 'prefix key that switches worktrees'
 complete -c treewright -n '__fish_seen_subcommand_from tmux-init' -l new-key -r -d 'prefix key that starts a worktree'
-complete -c treewright -n '__fish_seen_subcommand_from new move' -s p -l prompt -r -d 'text the agent starts working on'
+complete -c treewright -n '__fish_seen_subcommand_from new move scratch' -s p -l prompt -r -d 'text the agent starts working on'
 complete -c treewright -n '__fish_seen_subcommand_from move' -l keep -d 'leave the work in the main checkout as well'
 complete -c treewright -n '__fish_seen_subcommand_from resume' -s p -l prompt -r -d 'text for the resumed agent'
 complete -c treewright -n '__fish_seen_subcommand_from resume restore' -l fresh -d 'run command rather than resume_command'
 complete -c treewright -n '__fish_seen_subcommand_from restore' -s d -l detached -d 'leave the session running and stay out of it'
 # -F is what turns the argument back into a filename completion: the file is on
 # the caller's disk, which treewright knows nothing about.
-complete -c treewright -n '__fish_seen_subcommand_from new resume send cd rm close ls prune base restore attach config refresh' -l repo -r -f -a '(command treewright __complete repos)' -d 'the repository to act on'
-complete -c treewright -n '__fish_seen_subcommand_from new move resume' -l prompt-file -r -F -d 'a file holding the brief'
+complete -c treewright -n '__fish_seen_subcommand_from new resume send cd rm close ls prune base scratch restore attach config refresh' -l repo -r -f -a '(command treewright __complete repos)' -d 'the repository to act on'
+complete -c treewright -n '__fish_seen_subcommand_from new move resume scratch' -l prompt-file -r -F -d 'a file holding the brief'
 complete -c treewright -n '__fish_seen_subcommand_from agent-init' -l local -d 'install it for this repository alone, not every one'
 complete -c treewright -n '__fish_seen_subcommand_from agent-init' -l print -d 'print the plugin files instead of installing them'
 

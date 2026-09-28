@@ -28,6 +28,7 @@ _treewright() {
     'send:type one line at the agent in a worktree window'
     'cd:move your shell into a worktree'
     'base:open a window on the main checkout'
+    'scratch:open another window on the main checkout, under a name of its own'
     'restore:reopen every window of a repository after a restart, and attach'
     'popup:run a treewright command in a tmux popup sized to its output'
     'attach:attach this terminal to the repository tmux session'
