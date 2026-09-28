@@ -28,12 +28,16 @@ nobody can read.
 **State lives on the window, not on disk.** A treewright window runs the agent
 as the window's own command, so the agent dying *is* the window closing *is*
 the option evaporating: no marker file to garbage-collect, no stale "working"
-from an agent that crashed days ago. The post_create marker went the other way —
-a file beside the log — because a failed install outlives any window; an agent's
-state never outlives its window, except in one case treewright itself creates:
-a failed command's window is deliberately held open so its output stays
-readable, and there the hold-open wrapper clears the state and the name marker
-itself, best-effort, straight through tmux.
+from an agent that crashed days ago. Which *conversation* an agent in the base
+checkout is having is the one fact kept on disk, and the difference is the
+point of it: a state is worth nothing once its agent is gone, while the
+conversation is exactly what a restart must not take — see "A scratch session
+outlives its window" in [`design-notes.md`](design-notes.md). The post_create
+marker went the other way — a file beside the log — because a failed install
+outlives any window; an agent's state never outlives its window, except in one
+case treewright itself creates: a failed command's window is deliberately held
+open so its output stays readable, and there the hold-open wrapper clears the
+state and the name marker itself, best-effort, straight through tmux.
 
 **The state goes on the window the agent is running in.** `signal` asks its own
 pane first, through `$TMUX_PANE`, and uses that window when treewright opened it
@@ -113,6 +117,20 @@ signalling `waiting` there would make every `new` open a window already demandin
 attention. What is new is that the event carries a *different* verb — one that
 asks whether this repository wanted anything done before its agent starts
 reading.
+
+**It is also where a session's conversation is recorded.** The hook's payload
+carries the `session_id` of the conversation beginning, and for the base window
+and each scratch window `session-start` writes it down, so `resume` and
+`restore` can reopen that conversation rather than whichever ran last in the
+base checkout. Nothing about it is optional or printed, and it needed no new
+hook: every copy of the plugin already runs `session-start` here. See "A scratch
+session outlives its window" in [`design-notes.md`](design-notes.md).
+
+**`SessionEnd` reads its payload too.** `signal clear` is what it runs, and a
+scratch session whose agent a person quit is over, so its record goes. The
+payload's `reason` is what says a person quit — `prompt_input_exit` for claude,
+the module's `QuitReason` — and nothing else ends a record, because claude ends
+a killed session with `other` and a reboot kills every one.
 
 **A verb rather than a feature per hook**, because the plugin copy is a snapshot.
 It is installed once, carried into worktrees, and rewritten only by `agent-init`
@@ -763,8 +781,18 @@ the window is held open, and nothing is erased.
 **It runs once.** A `command` that also fails at once is held open, not tried
 again, and the line naming what exited names whichever of the two it was.
 
-**`restore` hands every window it opens the same pair**, built by the same
-function rather than assembled a second time. That is what makes a restored
+**A window in the base checkout resumes by conversation, not by directory.**
+The base window and each scratch window stand in one directory, where
+`--continue` cannot tell their conversations apart, so each is resumed on the id
+its own `SessionStart` recorded — `claude --resume <id>`, the module's
+`SessionResumeCommand` — with `command` behind it all the same. The fallback
+matters more there: a record outlives the conversation it names when the
+agent's history is cleaned up under it, and one written by a session that never
+said anything names a conversation that was never saved. `--resume` exits 1
+within a second for either, which is a failure that never got going.
+
+**`restore` hands every window it opens what `resume` would**, built by the same
+functions rather than assembled a second time. That is what makes a restored
 session honest: after a restart some worktrees have a conversation to continue
 and some do not, and the ones that do not get an agent rather than a window
 parked on an error in a session nobody has looked at yet. `--fresh` reaches all
@@ -797,4 +825,11 @@ cannot be fully derived, answering for exactly one agent, and failing silently
 when it changes. There is no supported way to ask, either: `claude --help` has
 no session-listing subcommand. Trading a brittle file you control for a brittle
 assumption you do not is not an improvement.
+
+The session record the base checkout's windows now keep is not a return to
+this. It reads nothing of the agent's storage: the id arrives in the agent's own
+`SessionStart` payload, a documented field handed to a hook, and it goes back
+through `--resume`, a documented flag. And it answers a different question —
+not whether a conversation exists, which the fast failure still answers, but
+which of several in one directory a window was having.
 

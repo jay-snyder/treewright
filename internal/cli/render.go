@@ -161,7 +161,8 @@ type row struct {
 //
 // Scratch windows go under the base row rather than among the worktrees because
 // that is where they are — on the base checkout — and in name order, so a
-// listing does not reshuffle as windows are opened. Under it rather than above
+// listing does not reshuffle as windows are opened. A recorded scratch session
+// whose window is gone is one of them, carrying a window with no id. Under it rather than above
 // it, because the base row is row 0 and a consumer of the JSON deciding where
 // work goes reads row 0.
 func listing(infos []git.Info, windows map[string]tmux.Window, scratch map[string]tmux.Window) []row {
@@ -367,15 +368,17 @@ type worktreeJSON struct {
 	// distinction spelled out rather than inferred from an empty slug.
 	Base bool `json:"base"`
 
-	// Scratch marks a scratch window: a second agent session standing on the
+	// Scratch marks a scratch session: a second agent session standing on the
 	// base checkout, listed under the base row. Its slug is the name it was
-	// opened under — what send, close and resume take — and nothing on disk
-	// answers to it, so rm and prune cannot name it either. Its dir is the main
+	// opened under — what send, close and resume take — and no worktree answers
+	// to it, so rm and prune cannot name it either. Its dir is the main
 	// checkout's, its branch is empty and its divergence null, since it has no
 	// branch of its own to compare; the base row already says where that
-	// checkout stands. Spelled out for the reason Base is: a consumer reading
-	// this to decide where work goes or what to tear down is never handed one by
-	// mistake.
+	// checkout stands. Its window fields are empty when it is a recorded session
+	// whose window a restart took, as a worktree's are when its window is
+	// closed — resume and restore reopen it. Spelled out for the reason Base is:
+	// a consumer reading this to decide where work goes or what to tear down is
+	// never handed one by mistake.
 	Scratch bool `json:"scratch"`
 
 	Dir        string `json:"dir"`

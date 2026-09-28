@@ -78,9 +78,10 @@ that repo's session, and `tw attach <repo>` is how you go there. Nothing moves
 your screen out from under you because something else got started elsewhere.
 
 A reboot takes the sessions and leaves the checkouts. `tw restore` puts one
-repository's session back — the base window, a window per worktree, each agent
-picking up the conversation it was having — and drops you into it. One terminal
-tab per repo, one command in each, and you are back where you were.
+repository's session back — the base window, its scratch windows, a window per
+worktree, each agent picking up the conversation it was having — and drops you
+into it. One terminal tab per repo, one command in each, and you are back where
+you were.
 
 ## Install
 

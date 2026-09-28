@@ -10,12 +10,22 @@ import (
 	"github.com/jay-snyder/treewright/internal/git"
 )
 
-// `session-start` is the moment a repository's optional features run at: an
-// agent's own hooks run it when a session begins, and every feature the config
-// switched on gets its turn. It is `signal`'s discipline applied to a different
-// question — silent everywhere it has no business, loud only when invoked wrong
-// — and for the same reason, since the same hooks fire in every session the
-// agent has, most of them in repositories treewright has never heard of.
+// `session-start` is what treewright does when an agent session begins. An
+// agent's own hooks run it, and it does two things: it records which
+// conversation a window standing in the base checkout is running, and it gives
+// every feature the config switched on its turn. It is `signal`'s discipline
+// applied to a different question — silent everywhere it has no business, loud
+// only when invoked wrong — and for the same reason, since the same hooks fire
+// in every session the agent has, most of them in repositories treewright has
+// never heard of.
+//
+// The record is the part nobody switches on: resume and restore need it to
+// reach the right conversation in the base checkout, and it prints nothing, so
+// there is nothing about it for a session to be spared. See sessions.go. It
+// rides on this verb rather than on a hook of its own for the reason below —
+// every installed copy of the plugin already runs `session-start` at every
+// session start, so recording arrived in wiring that was on disk before it was
+// written, with no copy anywhere needing to change.
 //
 // One verb rather than one per feature, and this is the decision the shape
 // rests on. The wiring lives in a plugin copy on somebody's disk: installed
@@ -32,8 +42,13 @@ import (
 // than baked into the JSON at install time. That is what lets one plugin serve
 // a repository that asked for this and a repository that did not.
 
-// cmdSessionStart runs whichever of the repository's features are due at the
-// start of an agent session, and prints what each of them did.
+// cmdSessionStart records the session that is starting, then runs whichever of
+// the repository's features are due at the start of one, and prints what each
+// of them did.
+//
+// The record comes first because it depends on nothing a feature does, and a
+// feature that fails to fetch or fast-forward is no reason for resume to lose
+// track of the conversation.
 //
 // What it prints goes to stdout, which for this command is the answer in the
 // output contract's own terms: the consumer is a program, and the agent's
@@ -55,6 +70,7 @@ func cmdSessionStart(env *Env, args []string) error {
 		//nolint:nilerr // out of scope, not a fault: agent hooks fire in repositories treewright has never heard of
 		return nil
 	}
+	recordThisSession(env, cfg)
 	for _, f := range feature.At(feature.AtSessionStart) {
 		if !cfg.Enabled(f.Name) {
 			continue

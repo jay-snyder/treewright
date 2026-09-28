@@ -206,10 +206,21 @@ type result struct {
 func (r result) both() string { return r.stdout + r.stderr }
 
 // exec invokes treewright with separate stdout and stderr.
+//
+// Stdin is empty rather than the test binary's own. The commands agent hooks run
+// read a payload from it, and a test process's stdin is whatever `go test` was
+// started with — a terminal, which they would skip, or a pipe nobody closes,
+// which they would wait on for ever. execWithStdin hands one a payload.
 func (f *fixture) exec(args ...string) result {
 	f.t.Helper()
+	return f.execWithStdin("", args...)
+}
+
+// execWithStdin is exec with a hook's payload on stdin.
+func (f *fixture) execWithStdin(stdin string, args ...string) result {
+	f.t.Helper()
 	var out, errOut bytes.Buffer
-	err := Run(Env{Args: args, Version: "test", Stdout: &out, Stderr: &errOut})
+	err := Run(Env{Args: args, Version: "test", Stdout: &out, Stderr: &errOut, Stdin: strings.NewReader(stdin)})
 	return result{stdout: out.String(), stderr: errOut.String(), err: err}
 }
 

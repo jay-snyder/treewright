@@ -616,6 +616,43 @@ func (c *Config) AgentCarries() []string {
 	return out
 }
 
+// SessionResumeCommand is the agent module's template for resuming one
+// conversation by id, or "" when this config has none to use — in which case
+// the sessions of the agents standing in the base checkout are not recorded,
+// and every window resumes with ResumeCommand as it always did.
+//
+// There is one only when the config names a module that has one, and only
+// while resume_command is that module's own. The id form is the module's other
+// spelling of its resume rather than a setting beside it, so it follows the
+// setting it spells: a config that wrote a resume_command of its own —
+// claude with a model pinned, say — has flags in it that the module's template
+// knows nothing about, and resuming the right conversation without them is a
+// different agent from the one the file asked for. Compared by value rather
+// than through Explicit, so a file that spells the module's default out in
+// full still gets what the default gets.
+//
+// Never inferred from resume_command's words: with no agent key there is no
+// module to ask, for the reason Agent is never guessed from Command.
+func (c *Config) SessionResumeCommand() string {
+	module, ok := agentinit.Lookup(c.Agent)
+	if c.Agent == "" || !ok || c.ResumeCommand != module.ResumeCommand {
+		return ""
+	}
+	return module.SessionResumeCommand
+}
+
+// SessionQuitReason is the SessionEnd reason by which the agent says a person
+// quit it, or "" where sessions are not recorded at all — see
+// SessionResumeCommand, whose condition this shares so that a record is never
+// written by a rule that cannot also end it.
+func (c *Config) SessionQuitReason() string {
+	if c.SessionResumeCommand() == "" {
+		return ""
+	}
+	module, _ := agentinit.Lookup(c.Agent)
+	return module.QuitReason
+}
+
 // WindowName derives the tmux window name for a slug.
 //
 // Precedence: an explicit override wins; else a ticket key matched by

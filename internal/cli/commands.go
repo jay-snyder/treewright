@@ -725,7 +725,11 @@ func cmdLs(env *Env, args []string) error {
 	}
 	session := sessionFor(cfg)
 	windows := tmux.Windows(session)
-	scratch := tmux.Scratch(cfg.Name)
+	// Recorded scratch sessions are rows as well as open ones, with no window,
+	// as a worktree whose window is closed is a row. That is also what keeps
+	// restore's promise — it opens what this lists, and this listing is the
+	// only preview it has.
+	scratch := scratchSessions(cfg)
 
 	// The base checkout heads the listing as it heads the menu, and in a
 	// repository with no worktrees yet the two modes part company: the table
@@ -747,9 +751,10 @@ func cmdLs(env *Env, args []string) error {
 	// <path>" — so the fault was never an unanswerable question, it was one
 	// schema saying two things.
 	//
-	// A scratch window open with no worktree beside it is the exception on the
+	// A scratch session with no worktree beside it is the exception on the
 	// table's side: the table then has something to say that "no worktrees" does
-	// not, which is the agent in that window and what it is doing.
+	// not — the agent in that window and what it is doing, or a session restore
+	// will reopen.
 	var infos []git.Info
 	if asJSON || len(managed) > 0 || len(scratch) > 0 {
 		infos = inspectAll(repo, cfg, managed)
@@ -940,26 +945,45 @@ func cmdResume(env *Env, args []string) error {
 		return err
 	}
 
-	// A scratch window is found only while it is open, so resuming one is
+	// An open scratch window is the session being asked for, so resuming one is
 	// switching to it — the same thing resume does with any window it finds
-	// already open, prompt warning included.
+	// already open, prompt warning included. One whose window has gone, and
+	// whose conversation is recorded, is reopened on that conversation.
 	if target.Scratch {
-		arriveAt(env, cfg, target.Window, run.Command, arrivalFor(cfg, repoName))
-		warnIfPromptUndelivered(env, prompt, false, nil)
-		return nil
+		if target.Window.ID != "" {
+			arriveAt(env, cfg, target.Window, run.Command, arrivalFor(cfg, repoName))
+			warnIfPromptUndelivered(env, prompt, false, nil)
+			return nil
+		}
+		name := target.name()
+		scratchRun, err := resumeWindow(cfg, prompt, fresh, name)
+		if err != nil {
+			return err
+		}
+		warnIfBaseIsElsewhere(env, cfg)
+		created, err := reopenScratchWindow(env, cfg, name, scratchRun, arrivalFor(cfg, repoName))
+		warnIfPromptUndelivered(env, prompt, created, err)
+		return err
 	}
 
 	// The base checkout opens the way `base` opens it, under the base window's
-	// name — with resume_command, this being resume. The prompt rides along:
-	// the base window runs an agent too, and "resume the base and hand it this"
-	// is the same sentence as for any worktree.
+	// name — resuming, this being resume: the conversation recorded for the base
+	// window where there is one, and resume_command where there is not. The
+	// record is what keeps this from continuing a scratch window's conversation
+	// instead, a scratch session being a conversation in the same directory.
+	// The prompt rides along: the base window runs an agent too, and "resume
+	// the base and hand it this" is the same sentence as for any worktree.
 	//
 	// The fallback rides along too, and that is the half the marker file this
 	// replaces could never reach: the base checkout is a row in every picker,
 	// and one whose agent left no session behind dead-ends there exactly as a
 	// worktree does.
 	if target.Base {
-		created, err := openBaseWindow(env, cfg, run, arrivalFor(cfg, repoName))
+		baseRun, err := resumeWindow(cfg, prompt, fresh, baseName)
+		if err != nil {
+			return err
+		}
+		created, err := openBaseWindow(env, cfg, baseRun, arrivalFor(cfg, repoName))
 		warnIfPromptUndelivered(env, prompt, created, err)
 		return err
 	}
@@ -1009,7 +1033,54 @@ func resumeCommand(cfg *config.Config, prompt string, fresh bool) (windowCommand
 		command, err := fillPrompt(cfg.Command, "command", prompt)
 		return windowCommand{Command: command}, err
 	}
-	resume, err := fillPrompt(cfg.ResumeCommand, "resume_command", prompt)
+	return resumeWith(cfg, cfg.ResumeCommand, "resume_command", resumeCommandPair, prompt)
+}
+
+// sessionResumeKey and sessionResumePair are how the prompt and length checks
+// name the command that resumes a recorded conversation, which is the agent
+// module's rather than a setting a reader could go and look up — so they say
+// what it does instead of what it is called.
+const (
+	sessionResumeKey  = "resuming the recorded conversation"
+	sessionResumePair = sessionResumeKey + ", with command behind it"
+)
+
+// resumeWindow settles what a window standing in the base checkout runs when it
+// is resumed: the conversation recorded for it, by id, where there is a record —
+// and otherwise exactly what resumeCommand gives every other window.
+//
+// The window is named the way its record is: `base`, or a scratch window's
+// name. See sessions.go for why these two, and only these, are recorded.
+//
+// command stays behind the id form as it stays behind resume_command, and it is
+// needed more here. A record outlives the conversation it names whenever the
+// agent's own history is cleared out from under it, and a record written by a
+// session that never said anything names a conversation that was never saved.
+// Either way the agent says it found nothing and exits at once, and the window
+// runs command rather than parking on the error.
+//
+// --fresh ignores the record, as it ignores resume_command: a new session is
+// what was asked for, and the agent's own SessionStart then records that one.
+func resumeWindow(cfg *config.Config, prompt string, fresh bool, name string) (windowCommand, error) {
+	id, ok := recordedSession(cfg, name)
+	if !ok || fresh {
+		return resumeCommand(cfg, prompt, fresh)
+	}
+	// The id goes in before the prompt, so that a prompt which happens to
+	// contain the placeholder's spelling is never taken for it. The id cannot
+	// contain the prompt's — validSessionID admits no braces.
+	template := strings.ReplaceAll(cfg.SessionResumeCommand(), sessionPlaceholder, shellQuote(id))
+	return resumeWith(cfg, template, sessionResumeKey, sessionResumePair, prompt)
+}
+
+// sessionPlaceholder is where an agent module's resume-by-id template takes the
+// conversation's id.
+const sessionPlaceholder = "{session}"
+
+// resumeWith is the rest of resumeCommand, for whichever resume template the
+// window is to run, key and pair naming it in the refusals.
+func resumeWith(cfg *config.Config, template, key, pair, prompt string) (windowCommand, error) {
+	resume, err := fillPrompt(template, key, prompt)
 	if err != nil {
 		return windowCommand{}, err
 	}
@@ -1027,7 +1098,7 @@ func resumeCommand(cfg *config.Config, prompt string, fresh bool) (windowCommand
 	// Each half fits, which is not the question tmux asks: the window is handed
 	// one script holding both, with the prompt in each of them.
 	run := windowCommand{Command: resume, Fresh: command}
-	if err := checkCommandFits(run.script(), resumeCommandPair, prompt); err != nil {
+	if err := checkCommandFits(run.script(), pair, prompt); err != nil {
 		return windowCommand{}, err
 	}
 	return run, nil
@@ -1045,13 +1116,14 @@ func resumeCommand(cfg *config.Config, prompt string, fresh bool) (windowCommand
 // A scratch window is flagged for the same reason, and carries its window,
 // which is the one thing a lookup by directory cannot find for it: its Dir is
 // the base checkout's, and the window standing for that directory is the base
-// window. Its name is the window's Scratch, and deliberately not a Slug.
+// window. Its name is the window's Scratch, and deliberately not a Slug — and a
+// window with no ID is a recorded session whose window is not open.
 type choice struct {
 	git.Worktree
 
 	Base    bool
 	Scratch bool
-	Window  tmux.Window // the scratch window itself; set only when Scratch is
+	Window  tmux.Window // the scratch window itself, with no ID if it is not open; set only when Scratch is
 }
 
 // name is what a message calls the choice: the word typed back at it.
@@ -1066,9 +1138,27 @@ func (c choice) name() string {
 	}
 }
 
-// scratchChoice is an open scratch window as a selectable row.
+// scratchChoice is a scratch session as a selectable row. Its window has no id
+// when the session is recorded and its window is not open — see
+// scratchSessions.
 func scratchChoice(cfg *config.Config, w tmux.Window) choice {
 	return choice{Worktree: git.Worktree{Dir: cfg.MainDir}, Scratch: true, Window: w}
+}
+
+// reopenScratchWindow opens a window for a recorded scratch session whose
+// window has gone, under the name that reaches it, running what the caller
+// settled — which for a resume and a restore is the recorded conversation, with
+// command behind it.
+//
+// The window is named as `scratch` names one given no override. An override is
+// a fact about the window rather than the session, so it went with the window,
+// as a worktree window's does when restore reopens it.
+func reopenScratchWindow(env *Env, cfg *config.Config, name string, run windowCommand, arrive arrival) (created bool, err error) {
+	return openWindow(env, cfg, tmux.Spec{
+		Dir:     cfg.MainDir,
+		Name:    cfg.WindowName(name, ""),
+		Scratch: name,
+	}, run, arrive)
 }
 
 // baseChoice is the main checkout as a selectable row.
@@ -1126,17 +1216,23 @@ func inspectAll(repo git.Repo, cfg *config.Config, managed []git.Worktree) []git
 // chosen from is the listing the user already reads, showing the status and
 // divergence that make the choice — not a bare list of names.
 //
-// A name is tried against the base checkout, then the open scratch windows,
-// then the worktrees, and the first two take exact matches only. The scratch
-// windows come before the worktrees because an exact name always beats a prefix
-// — the rule resolveSlug keeps among the worktrees themselves — and a scratch
-// name can never equal a slug exactly, `scratch` and `new` each refusing the
-// other's. They take no prefix of their own for the reason the base names do not:
-// a window opened later would quietly change what a prefix typed yesterday
-// meant.
+// A name is tried against the base checkout, then the scratch sessions, then
+// the worktrees, and the first two take exact matches only. The scratch
+// sessions come before the worktrees because an exact name always beats a
+// prefix — the rule resolveSlug keeps among the worktrees themselves — and a
+// scratch name can never equal a slug exactly, `scratch` and `new` each
+// refusing the other's. They take no prefix of their own for the reason the
+// base names do not: a window opened later would quietly change what a prefix
+// typed yesterday meant.
+//
+// A scratch session is one whose window is open, or one recorded after its
+// window went — a restart, a kill — and waiting to be reopened. The menu offers
+// both, the second with no window, for the reason it offers the base checkout
+// after a reboot: a menu is a way through, and reopening what the restart took
+// is exactly what someone reaching for it is doing.
 func chooseWorktree(env *Env, cfg *config.Config, repo git.Repo, managed []git.Worktree, slug string) (choice, error) {
 	base := baseChoice(cfg)
-	scratch := tmux.Scratch(cfg.Name)
+	scratch := scratchSessions(cfg)
 
 	if slug != "" {
 		if slices.Contains(baseNames(cfg, base), slug) {

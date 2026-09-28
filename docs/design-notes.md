@@ -47,8 +47,11 @@ stretching prefix resolution here would let a `b` that used to mean the `bugfix`
 worktree quietly start meaning the base checkout.
 
 **Two ways in, one window.** `tw base` opens it fresh with `command`; picking it
-out of the resume menu runs `resume_command`, the same "carry on where I left
-off" every other row gets — which after a reboot is the point. The difference
+out of the resume menu resumes it, the same "carry on where I left off" every
+other row gets — which after a reboot is the point. What it carries on is the
+base window's own conversation where one is recorded, and `resume_command`
+otherwise; see "A scratch session outlives its window" for why the directory
+alone stopped being enough. The difference
 shows only on the first open, since every later call finds the window by its
 directory and switches to it. It also gets what every other row gets when there
 turns out to be nothing to carry on from: `command` behind the failure, and
@@ -139,13 +142,14 @@ deletes something.
 
 **One namespace, and a collision is refused when the name is given out.** `send`,
 `close` and `resume` take a worktree's slug and a scratch window's name alike, so
-`tw scratch <name>` refuses a name that is a live worktree's slug or an open
-scratch window's, and `new` and `move` refuse a slug that is an open scratch
-window's name. The base checkout's own names are refused as well: they win every
-lookup, so a scratch window called `base` could be opened and never reached.
-Checking once, where a name is handed out, is cheap; the alternative was a sigil
-marking scratch names (`:ask`), which is punctuation typed for the life of the
-tool to settle a question that arises once. Lookups take a scratch name exactly
+`tw scratch <name>` refuses a name that is a live worktree's slug or a scratch
+session's — open, or recorded and waiting to be reopened — and `new` and `move`
+refuse a slug that is a scratch session's name. The base checkout's own names
+are refused as well: they win every lookup, so a scratch window called `base`
+could be opened and never reached. Checking once, where a name is handed out, is
+cheap; the alternative was a sigil marking scratch names (`:ask`), which is
+punctuation typed for the life of the tool to settle a question that arises
+once. Lookups take a scratch name exactly
 — never a prefix, for the reason the base names do not, since a window opened
 today would quietly change what a prefix typed yesterday meant — and an exact
 scratch name is tried before a worktree prefix, exactness beating a prefix being
@@ -186,46 +190,124 @@ checkout — so two agents standing in it is a likelier version of an existing
 hazard rather than a new kind, and the rules already describe a scratch agent
 correctly: it stands exactly where the base agent stands.
 
-**Nothing about a scratch window outlives it, for now.** Once it is closed, or
-lost to a restart, there is nothing for `resume` to find, and `restore` does not
-reopen it: restore opens what the disk records, and nothing on disk records a
-scratch window. `resume <name>` for a name nothing answers to says exactly that,
-and names `tw scratch <name>` as the way to a new one.
+### A scratch session outlives its window
 
-**One cost lands on the base window, not on the scratch one.** claude's
-`--continue` resumes the most recent conversation *in a directory*, and a
-scratch session is a conversation in the base checkout — so a `resume` or
-`restore` of the base window after one may pick up the scratch conversation
-rather than the base window's own. The directory was an exact key for a
-conversation exactly as long as one agent stood in each, which is also what the
-claude module's comment on `--continue` rests on.
+A restart takes the window and leaves the conversation, and the name was always
+meant to be the handle back to it. So each agent standing in the base checkout
+has its conversation recorded; `resume <name>` reopens a scratch window whose
+window is gone on that conversation, `restore` reopens every one of them, and
+`ls` and the menu list one with no window, as they list a worktree whose window
+is closed. `resume <name>` for a name nothing answers to still says so, and
+names `tw scratch <name>` as the way to a new one.
 
-That shapes what brings scratch sessions back after a restart, whenever it is
-built. A record of the conversation a window is running — its `session_id`,
-written by the agent's own `SessionStart` hook, the one party that knows it, at
-the moment it knows it — is only half a fix if it covers scratch windows alone:
-the base window would still resume with `--continue`, and still choose between
-itself and every scratch session that ran after it. So the record has to cover
-every agent standing in the base checkout, the base window included, and resume
-has to use it for the base window whenever one exists — `--continue` staying
-the fallback for a base window with no record, and for every worktree, where the
-directory is still exact. The name is kept as the stable handle for a scratch
-window, and `.git/treewright/scratch/` kept free, so that record can arrive
-without either moving.
+**The record covers the base window too, because the hole started there.**
+claude's `--continue` resumes the most recent conversation *in a directory*, and
+a scratch session is a conversation in the base checkout — so from the first
+scratch window on, a `resume` or `restore` of the base window could pick up the
+scratch conversation rather than the base window's own. The directory was an
+exact key for a conversation exactly as long as one agent stood in each. A
+record kept for scratch windows alone would have been half a fix: the base
+window would still resume with `--continue`, and still choose between itself
+and every scratch session that ran after it. So the base window resumes on its
+own record whenever it has one, and `--continue` stays the fallback in exactly
+two places — a base window with no record yet, and every worktree, where one
+agent per directory keeps the directory exact.
+
+**The agent writes it, at the moment it knows.** The record is the
+conversation's `session_id`, and the one party that has it is the agent: its
+`SessionStart` hook is handed the id as the session begins. That hook already
+ran `treewright session-start`, so recording needed no new hook and no plugin
+copy rewritten — which is the property `session-start` was built as a single
+dispatch verb for. It records for a window treewright opened for this
+repository, found through the pane as `signal` finds its window, when that
+window is the base window or a scratch one and the agent is standing in the base
+checkout. `/clear` starts a conversation under a new id and fires `SessionStart`
+again, so the record follows what the window is running rather than pinning the
+one it opened with. An id minted by treewright when the window opened was the
+alternative, and `/clear` is what sank it: the pin would have pointed at the
+conversation before the clear for ever.
+
+**It lives at `.git/treewright/sessions/<name>`**, `base` for the base window
+and the scratch name otherwise, holding the id and nothing else.
+`.git/treewright/` was already treewright's, with post_create's logs and
+`move`'s patches in it; the record is per checkout, never committed, gone with
+the repository, and findable by anyone who wants it gone. This directory was
+first reserved as `scratch/`, in the same breath as saying the record had to
+cover the base window too — which the name then contradicted.
+
+**What ends one was settled on the binary, not on its documentation.**
+`close <name>` ends a scratch session, window and record both, and ends one
+whose window is already gone. The other ending is quitting its agent, and there
+the obvious rule — remove the record on `SessionEnd` — would have undone the
+feature. claude (2.1.283) ends a session with reason `other` when its process is
+killed, and `tmux kill-window`, the tmux server going away and a `SIGTERM` all
+count: a reboot is that ending, delivered to every agent at once. So only
+`prompt_input_exit` — `/exit`, a double Ctrl-C — ends a record, and only a
+record still naming the session that is ending. `/clear` reports `clear` and
+starts the next session in the same window, which rewrites the record rather
+than needing it removed. `SessionEnd` was already wired to `signal clear`, which
+now reads the hook's payload for this, rather than a hook of its own that no
+installed copy would have. The reason vocabulary is the module's, as its
+`QuitReason`.
+
+**The base window's record is never removed.** Quitting the base agent is not
+forgetting its conversation — the next `resume base` should carry that one on,
+as `--continue` carries on a worktree whose agent was quit — and closing the
+base window is not either. The record changes only when the base window starts
+another session.
+
+A record left behind by a kill, a server death or a reboot is correct: the agent
+did not finish, so its session comes back. What accumulates instead is a
+scratch session somebody stopped caring about and never quit, which `restore`
+reopens once and `close` ends for good.
+
+**Its name stays taken while it is recorded.** `scratch` refuses a recorded
+name, naming `resume` to reopen the session and `close` to end it, and `new` and
+`move` refuse one as they refuse an open scratch window's. A second window under
+the name would be a second session answering to one word — and the first time
+its agent started, its record would overwrite the one it collided with.
+
+**Resuming by id is the module's, not a setting.** The id form is
+`claude --resume {session} {prompt}`, a field on the claude module rather than a
+third config key: `command` and `resume_command` are settings people override
+for their own reasons, and a key they had to know about to keep resume exact
+would be a trap. It applies while `resume_command` is the module's own, compared
+by value. A config that wrote its own — claude with a model pinned, say — has
+flags in it the module's template knows nothing about, and the right
+conversation resumed without them is a different agent from the one the file
+asks for; so that config keeps its own command, keeps no records, and resumes
+the base window by directory as before. With no `agent` key there is no module
+to ask, for the reason a module is never guessed from `command`. A recorded id
+with nothing behind it — a transcript cleaned up, a session that never said
+anything — makes `--resume` exit 1 within a second, which is the fast failure
+the resume fallback already runs `command` behind.
+
+**Why a record is allowed when restore's snapshot was not.** "Putting a session
+back after a restart" turns down saving the session: a snapshot of the layout
+would have to be rewritten by every command that opens or closes a window, and
+would drift from a session people rearrange by hand all day. This is not that.
+It has one writer — the agent whose conversation it names — writing at the
+moments that change the answer, and it says nothing about layout: which windows
+a session should have is still read off the disk. Nor is it the agent's own
+session storage, which "When there is nothing to resume" in
+[`agents.md`](agents.md) turns down for being a layout treewright does not own:
+the id arrives in a documented hook payload, and `--resume` is a documented
+flag.
 
 ## Putting a session back after a restart
 
 A tmux session does not survive a reboot while a checkout on disk does — the
 sentence the base checkout's place in the resume menu comes from. `restore` is
-that sentence applied to the whole list at once: the base window, then one window
-per worktree, each running `resume_command` with `command` behind it, and then
-this terminal attached to the session.
+that sentence applied to the whole list at once: the base window, then a window
+for each scratch session the restart interrupted, then one window per worktree,
+each resuming with `command` behind it, and then this terminal attached to the
+session.
 
 The morning it replaces is `tw base`, `tw attach`, and one `tw resume` per
 worktree, in a terminal tab per repository. Three repositories with three
 worktrees each is fifteen commands to arrive back where you were.
 
-**Nothing is saved, and nothing may be.** The worktrees on disk are the record,
+**No layout is saved, and none may be.** The worktrees on disk are the record,
 and restore reads them. Recording the live layout and replaying it is the obvious
 alternative, and it loses on every count:
 
@@ -240,16 +322,23 @@ alternative, and it loses on every count:
   `doctor`'s registry check calls anything else a stray, so a snapshot would need
   a directory of its own to live in.
 
+What is kept is narrower and of a different kind: which conversation each agent
+in the base checkout is running, written by that agent's own hook. It is how the
+base window gets its own conversation back rather than the latest one in the
+directory, and how a scratch session lost to the restart is known about at all —
+see "A scratch session outlives its window" above for why it passes where the
+snapshot did not.
+
 So what you get is a **tidied session rather than a photocopy** of the one you
-lost: the base window first, then the worktrees in slug order, without your
-window order or your splits. The name risks promising the photocopy, which is why
+lost: the base window first, then its scratch windows by name, then the worktrees
+in slug order, without your window order or your splits. The name risks promising the photocopy, which is why
 the help says this out loud. **What restore opens is what `tw ls` lists**, and
 that is also why there is no `--dry-run` — the listing is the preview. A window
-already open on a worktree is left exactly as it is, which makes `tw restore` a
-reasonable thing to type in a session that is already up, where it means "open
-whatever is missing here". A scratch window is the one row `ls` lists that
-restore does not open: `ls` lists one only while it is open, restore leaves an
-open one exactly as it is, and nothing on disk records one to reopen.
+already open is left exactly as it is, which makes `tw restore` a reasonable
+thing to type in a session that is already up, where it means "open whatever is
+missing here". That promise is also why `ls` lists a recorded scratch session
+whose window is gone: restore reopens it, and a listing that left it out would
+be a preview of less than restore does.
 
 **One repository per invocation.** There is no `--all`. A terminal tab per
 repository is the shape of the day anyway, so batching across repositories would
@@ -846,7 +935,7 @@ stdout carries the answer and nothing else, so any command can be piped:
 | `scratch` | nothing — the answer is a window, and the name you gave it is how everything else reaches it; where it opened goes to stderr |
 | `signal` | nothing — the answer is the stamp on the window, and out of scope it is silent on stderr too |
 | `guard` | nothing — the answer is the exit code, that being what a PreToolUse hook reads, and the refusal it carries goes to stderr for the agent |
-| `session-start` | what each optional feature did, one message per feature — the reader is the agent, whose SessionStart hook adds a hook's stdout to the session as context, and with nothing to report it prints nothing at all |
+| `session-start` | what each optional feature did, one message per feature — the reader is the agent, whose SessionStart hook adds a hook's stdout to the session as context, and with nothing to report it prints nothing at all; recording which conversation the session is prints nothing ever |
 
 Progress, warnings, prompts, and errors go to stderr, prefixed `warning:` or
 `error:` following git's convention, and unprefixed when it is just narration. So
@@ -1369,6 +1458,7 @@ What it writes, in full:
 |---|---|
 | `<config dir>/<name>.toml` | The registry *is* the configuration; there is no treewright without it. One directory, `rm -r` and it is gone. |
 | `<main_dir>/.git/treewright/post-create-*` | A background step's log and failure marker, inside the repository's own `.git`, which goes when the repository does. |
+| `<main_dir>/.git/treewright/sessions/<name>` | Which conversation the base window and each scratch window is running, one id per file, written from the agent's own SessionStart hook — so resume and restore reopen that one rather than the latest in the directory. Removed by `close` and by quitting a scratch agent; the base window's is rewritten rather than removed. `rm -r` takes the lot, and a missing record only means resuming by directory, as before. |
 | `<main_dir>/.git/treewright/move-*.patch` | The uncommitted work `move` is carrying, written before anything is created and deleted once it has landed. What is left behind is left after a failure, deliberately: it is a second copy of work that exists in one place, and the way back in by hand. |
 | `~/.claude/skills/treewright/` | The agent plugin, written by `agent-init` — one copy covering every checkout the agent is started in. The only thing on this list outside a repository besides the registry, and running the command that installs the wiring *is* the consent: nothing else writes there, `rm -r` and it is gone, and `claude plugin disable treewright@skills-dir` stops it loading without deleting anything. |
 | `<main_dir>/.claude/skills/treewright/` | The same plugin, when `agent-init --local` is asked for it — inside the repository, in a directory treewright named and nothing else writes to. |
