@@ -317,7 +317,7 @@ func TestThePluginTeachesTheCLIThatExists(t *testing.T) {
 	for _, field := range reflect.VisibleFields(reflect.TypeFor[worktreeJSON]()) {
 		tags[field.Tag.Get("json")] = true
 	}
-	for _, field := range []string{"base", "status", "agent_state", "ahead", "behind"} {
+	for _, field := range []string{"base", "scratch", "status", "agent_state", "ahead", "behind"} {
 		if !strings.Contains(plugin, "`"+field+"`") && !strings.Contains(plugin, `"`+field+`"`) {
 			t.Errorf("the plugin no longer explains the %s field", field)
 		}

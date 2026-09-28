@@ -315,7 +315,8 @@ both directions:
 
 - **Hooks in**, which fill the AGENT column and the `!`.
 - **A skill out**, teaching the agent to drive treewright: read what's in
-  flight, spawn a sibling worktree with a prompt, respect the teardown guards.
+  flight, spawn a sibling worktree with a prompt, put a scratch agent on a
+  question that needs no branch, respect the teardown guards.
   Ask the agent in your `main` window to farm three jobs out to three worktrees
   and it knows exactly how.
 
