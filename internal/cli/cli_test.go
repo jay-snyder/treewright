@@ -1461,6 +1461,18 @@ func TestStdoutCarriesOnlyTheAnswer(t *testing.T) {
 		}
 	})
 
+	// The answer is a window, and the name the caller gave it: there is no path
+	// to hand back, and nothing a consumer could read.
+	t.Run("scratch prints nothing", func(t *testing.T) {
+		r := f.exec("scratch", "ask")
+		if r.err != nil {
+			t.Fatalf("scratch: %v\n%s", r.err, r.both())
+		}
+		if r.stdout != "" {
+			t.Errorf("stdout = %q, want nothing", r.stdout)
+		}
+	})
+
 	t.Run("an empty listing leaves stdout empty", func(t *testing.T) {
 		f2 := newFixture(t, "")
 		r := f2.exec("ls")
@@ -1647,7 +1659,7 @@ func TestMessagesShareOneVoice(t *testing.T) {
 
 	var lines []string
 	for _, args := range [][]string{
-		{"new", "beta"}, {"ls"}, {"prune"}, {"rm", "alpha"}, {"resume", "nope"},
+		{"new", "beta"}, {"ls"}, {"prune"}, {"rm", "alpha"}, {"resume", "nope"}, {"scratch", "gamma"},
 	} {
 		r := f.exec(args...)
 		lines = append(lines, strings.Split(strings.TrimRight(r.stderr, "\n"), "\n")...)

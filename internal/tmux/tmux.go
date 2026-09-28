@@ -21,6 +21,13 @@
 // windows can stand in one directory at once — the base window does exactly that
 // after `treewright cd` — so identity has to come from something the user cannot
 // change by walking around.
+//
+// Identity has two forms. A worktree's window is identified by its worktree; a
+// scratch window — a second agent session standing on the base checkout, with no
+// worktree of its own — is identified by itself, the name recorded on it as
+// @treewright_scratch. It still carries @treewright_worktree, because that option
+// is the path a window is on as well as what it is, but it claims no directory:
+// Windows never lists it, and Scratch is the only way to find one.
 package tmux
 
 import (
@@ -38,16 +45,18 @@ import (
 // treewright records on it.
 //
 // Slug and Branch are empty for the base window, which sits on a checkout rather
-// than on a worktree, and so has neither.
+// than on a worktree, and so has neither — and for a scratch window, which sits
+// on that same checkout and is named by Scratch instead.
 type Spec struct {
 	Session string // the session it belongs in
 	Dir     string // the worktree it opens on
 	Name    string // as shown in the status line, e.g. "eng-142"
 	Command string // what to run in it; blank leaves a shell
 
-	Repo   string // the config's name
-	Slug   string // names the worktree, when this is one
-	Branch string // the branch that worktree is on
+	Repo    string // the config's name
+	Slug    string // names the worktree, when this is one
+	Branch  string // the branch that worktree is on
+	Scratch string // names the scratch window, when this is one
 }
 
 // MaxCommandLength is the longest command treewright will give a window, in
@@ -90,13 +99,25 @@ type Window struct {
 
 	// Worktree is the checkout treewright opened this window on, empty for a
 	// window treewright did not open. It is what identifies a window, per the
-	// package comment.
+	// package comment — unless Scratch is set.
 	//
 	// Kept as the path rather than flattened to a bool because "treewright opened
 	// this window" and "treewright opened this window *here*" are different
 	// questions, and the window whose pane has wandered into another worktree's
 	// directory is exactly the case that tells them apart.
 	Worktree string
+
+	// Scratch is the name a scratch window was opened under, empty for every
+	// other window. A window carrying one is identified by it rather than by
+	// Worktree, which then says only where the window stands.
+	Scratch string
+
+	// Repo is the config the window was opened for, empty for a window treewright
+	// did not open. A scratch name means something only within one repository —
+	// two of them each having an "ask" is the ordinary case — so this is what
+	// Scratch filters on, and what tells `signal` the window it is running in
+	// belongs to the repository it resolved.
+	Repo string
 
 	// SessionWindows is how many windows the session holding this one has, which
 	// is what LastInSession reads.
@@ -203,9 +224,10 @@ func ServerRunning() bool {
 // The user options treewright records on every window it opens. Windows treewright did
 // not open have none, and read as empty.
 //
-// Two are read back, and they ride in paneFormat below: the worktree, which is
-// what identifies a window, and the agent state, which is what the agent running
-// in it last said it was doing. The rest are written for the user's own
+// Four are read back, and they ride in paneFormat below: the worktree and the
+// scratch name, which between them are what identifies a window; the repository,
+// which scopes a scratch name; and the agent state, which is what the agent
+// running in it last said it was doing. The rest are written for the user's own
 // tmux.conf, where "#{@treewright_slug}" in a status line costs nothing to render
 // and the alternative is a shell-out to git on every status interval.
 //
@@ -222,6 +244,7 @@ const (
 	repoOption     = "@treewright_repo"
 	slugOption     = "@treewright_slug"
 	branchOption   = "@treewright_branch"
+	scratchOption  = "@treewright_scratch"
 
 	// AgentStateOption holds what the agent in a window last signaled.
 	AgentStateOption = "@treewright_agent_state"
@@ -234,25 +257,31 @@ const (
 	WaitingMarker = "!"
 )
 
-// paneFormat lists a pane as window name, window id, session, the worktree its
-// window was opened on, the agent state recorded on it, how many windows its
-// session holds, then path.
+// paneFormat lists a pane as window name, window id, session, the repository
+// and worktree its window was opened for, its scratch name, the agent state
+// recorded on it, how many windows its session holds, then path.
 //
 // The fields are tab-separated, and exactly two of them are free text tmux
 // cannot be told to escape: the window name, which rename-window lets a user
 // put anything into — a tab included — and the pane's path. So the two bracket
 // the listing, one at each end, and between them sit only fields that cannot
 // hold a tab: the id and the count are tmux's own spellings of a number, the
-// state is a word from signal's closed vocabulary, and the stamped worktree is
-// a path too — which is why stamp declines to write one holding a tab. A fixed
-// left-to-right split used to put the name in the middle, where one tab shifted
-// the worktree, the state and the path each a field over; splitPaneLine now
-// anchors on the shape of the fixed fields instead, so a tab at either end
-// stays in the field it belongs to.
+// state is a word from signal's closed vocabulary, and the three stamps are
+// values stamp declines to write when they hold a tab. A fixed left-to-right
+// split used to put the name in the middle, where one tab shifted the worktree,
+// the state and the path each a field over; splitPaneLine now anchors on the
+// shape of the fixed fields instead, so a tab at either end stays in the field
+// it belongs to.
 //
 // The window count is here rather than asked per window because this listing is
 // gathered once for a whole table. See Window.SessionWindows.
-const paneFormat = "#{window_name}\t#{window_id}\t#{session_name}\t#{" + worktreeOption + "}\t#{" + AgentStateOption + "}\t#{session_windows}\t#{pane_current_path}"
+const paneFormat = "#{window_name}\t#{window_id}\t#{session_name}\t#{" + repoOption + "}\t#{" + worktreeOption + "}\t#{" +
+	scratchOption + "}\t#{" + AgentStateOption + "}\t#{session_windows}\t#{pane_current_path}"
+
+// fixedFields is how many fields paneFormat puts between the window name and
+// the path, the window id first and the window count last. splitPaneLine
+// anchors on those two, so the count is this many fields less one after the id.
+const fixedFields = 7
 
 // Windows maps each pane's working directory to the window holding it, across
 // every session on the server. It is what stops `resume` from opening a second
@@ -269,14 +298,47 @@ const paneFormat = "#{window_name}\t#{window_id}\t#{session_name}\t#{" + worktre
 // several panes share a directory — the base window standing in a worktree's
 // worktree after `treewright cd` is the everyday case — Window.beats decides
 // between them.
+//
+// Scratch windows are never in it. See parsePanes for why, and Scratch for where
+// they are found instead.
 func Windows(prefer string) map[string]Window {
-	out, err := run("list-panes", "-a", "-F", paneFormat)
+	out, err := listPanes()
 	if err != nil {
 		// No server running, or no tmux at all: nothing is open.
 		return nil
 	}
 	return parsePanes(out, prefer)
 }
+
+// Scratch maps the name of each of a repository's scratch windows to the window,
+// across every session on the server, as Windows does for worktrees.
+//
+// A function of its own rather than a second set of keys in Windows' map, and
+// that is the point of it rather than a matter of taste. One map keyed by a
+// directory and a name at once is a type that lies about what its keys are —
+// and, worse, a consumer that must never be handed a scratch window could be
+// handed one by nothing more than a name that happens to look like a path. The
+// base window, `restore`, `signal`'s directory fallback and the guard's view of
+// the worktrees all read Windows, and none of them can grow a dependency on
+// scratch windows by accident while this is the only way to get one.
+//
+// It takes the repository rather than a session because a scratch name means
+// something only within one: two repositories each with an "ask" is ordinary,
+// and a session is not a repository's alone once tmux_session has pointed two
+// configs at the same one. A window that has been moved into some other session
+// is still found, for the reason Windows keeps one — it is still this
+// repository's window, and pretending otherwise would let a second one be
+// opened under the same name.
+func Scratch(repo string) map[string]Window {
+	out, err := listPanes()
+	if err != nil {
+		return nil
+	}
+	return parseScratch(out, repo)
+}
+
+// listPanes is the listing both indexes are built from.
+func listPanes() (string, error) { return run("list-panes", "-a", "-F", paneFormat) }
 
 // olderWindow compares window ids by creation rather than as text, so "@9" comes
 // before "@10". tmux never spells one otherwise, but an id that does not parse
@@ -314,6 +376,25 @@ func parsePanes(out, prefer string) map[string]Window {
 		if !ok {
 			continue
 		}
+		// A scratch window claims no directory at all — neither the one its pane
+		// stands in nor the one it was opened on. It stands in the base checkout
+		// without answering for it, and that is what keeps `base`, `close base`,
+		// `send base`, `ls` and `restore` correct without any of them learning
+		// that scratch windows exist: every one of them asks this map for the
+		// window on the main checkout, and the only window that can answer is the
+		// base window.
+		//
+		// Skipping is the only version of this that is true. A low rank would not
+		// do it: stake takes a window whenever the directory is unclaimed and
+		// consults beats only on a collision, so a scratch window would still win
+		// the main checkout whenever the base window was closed — and `base` would
+		// switch to it rather than opening the window it was asked for. Leaving
+		// the worktree stamp staked at its usual rank is worse again, a tie with
+		// the base window broken by session and then by age, which the base window
+		// wins until the day it is closed and reopened.
+		if w.Scratch != "" {
+			continue
+		}
 		stake(path, w)
 		// A window treewright opened answers for its own worktree wherever its pane
 		// is standing, so cd-ing a pane out of the directory no longer orphans the
@@ -327,39 +408,69 @@ func parsePanes(out, prefer string) map[string]Window {
 	return best
 }
 
+// parseScratch turns the pane listing into a name-to-window map of one
+// repository's scratch windows. Split out, as parsePanes is, so it can be tested
+// without a server.
+//
+// Every pane of a window reports the same name, which is the one collision that
+// is ordinary. Two windows under one name should not happen — `scratch` refuses a
+// name already open — but a hand-set option or a race can arrange it, and the
+// older window answers then, which is arbitrary and stable in the way olderWindow
+// already is for directories.
+func parseScratch(out, repo string) map[string]Window {
+	found := make(map[string]Window)
+	for line := range strings.SplitSeq(out, "\n") {
+		w, _, ok := splitPaneLine(line)
+		if !ok || w.Scratch == "" || w.Repo != repo {
+			continue
+		}
+		if held, taken := found[w.Scratch]; taken && !olderWindow(w.ID, held.ID) {
+			continue
+		}
+		found[w.Scratch] = w
+	}
+	if len(found) == 0 {
+		return nil
+	}
+	return found
+}
+
 // splitPaneLine reads one line of the pane listing back into a window and its
 // pane's path.
 //
 // The name and the path are the two fields a tab cannot be kept out of, and
-// paneFormat puts them at the two ends with the five tabless fields between.
-// Neither end can be split off by counting, since either may have added tabs of
-// its own — so the fixed run is found by its shape instead: a window id is "@"
-// then digits and the window count four fields later is digits, a pair nothing
-// in a name matches by accident without also faking the three fields between.
+// paneFormat puts them at the two ends with the tabless fields between. Neither
+// end can be split off by counting, since either may have added tabs of its own
+// — so the fixed run is found by its shape instead: a window id is "@" then
+// digits and the window count at the far end of the run is digits, a pair
+// nothing in a name matches by accident without also faking every field between.
 // Everything before that run is the name, everything after it the path. A line
 // no anchor fits is skipped whole, which reads as "no such window" — the honest
 // answer for a line that cannot be trusted field by field, where the old fixed
 // split answered with the worktree, state and path each one field over.
 func splitPaneLine(line string) (w Window, path string, ok bool) {
 	fields := strings.Split(line, "\t")
-	for idx := 1; idx <= len(fields)-6; idx++ {
-		if !isWindowID(fields[idx]) || !allDigits(fields[idx+4]) {
+	last := fixedFields - 1 // the window count, counted from the id
+	for idx := 1; idx+last < len(fields)-1; idx++ {
+		if !isWindowID(fields[idx]) || !allDigits(fields[idx+last]) {
 			continue
 		}
 		// The count is digits by the check above, so Atoi cannot fail short of
 		// overflow — and zero reads as "not the last window", which is the right
 		// way to be wrong about the one caveat it feeds.
-		windows, _ := strconv.Atoi(fields[idx+4])
+		windows, _ := strconv.Atoi(fields[idx+last])
 		return Window{
 			ID:      fields[idx],
 			Session: fields[idx+1],
 			// The waiting marker comes off here, once, so the name every consumer
 			// sees is the one underneath treewright's own punctuation.
 			Name:           strings.TrimPrefix(strings.Join(fields[:idx], "\t"), WaitingMarker),
-			Worktree:       fields[idx+2],
-			State:          fields[idx+3],
+			Repo:           fields[idx+2],
+			Worktree:       fields[idx+3],
+			Scratch:        fields[idx+4],
+			State:          fields[idx+5],
 			SessionWindows: windows,
-		}, strings.Join(fields[idx+5:], "\t"), true
+		}, strings.Join(fields[idx+fixedFields:], "\t"), true
 	}
 	return Window{}, "", false
 }
@@ -410,10 +521,11 @@ func NewWindow(s Spec) (Window, error) {
 // other window entirely. Every option below is set the same way, and for the same
 // reason.
 //
-// All of it is best-effort. The window exists once tmux has answered with its id,
-// and a window that is merely missing a stamp still works: it is matched by the
-// directory its pane is standing in, which is what every window was matched by
-// before stamps existed.
+// All of it is best-effort but the scratch name. The window exists once tmux has
+// answered with its id, and a window that is merely missing a stamp still works:
+// it is matched by the directory its pane is standing in, which is what every
+// window was matched by before stamps existed. A scratch window is the exception,
+// because being matched by its directory is exactly what it must not be.
 func newWindow(s Spec, args []string) (Window, error) {
 	if strings.TrimSpace(s.Command) != "" {
 		args = append(args, s.Command)
@@ -421,6 +533,20 @@ func newWindow(s Spec, args []string) (Window, error) {
 	id, err := run(args...)
 	if err != nil {
 		return Window{}, err
+	}
+	// First, so the moment a scratch window stands unstamped on the main checkout
+	// is as short as it can be made, and the one stamp whose absence is not
+	// harmless: a scratch window that missed it would be read as a window on the
+	// main checkout, and so as the base window — `base` would switch to it and
+	// `close base` would close it. So a failure takes the window down rather than
+	// leaving it to be mistaken, unless it has gone already: a command that exits
+	// at once closes its window before there is anything to stamp, and that is
+	// the "closed as soon as it opened" the caller reports for any window. The
+	// kill succeeding is how "still there" is known.
+	if s.Scratch != "" {
+		if err := stampOrFail(id, scratchOption, s.Scratch); err != nil && KillWindow(id) == nil {
+			return Window{}, err
+		}
 	}
 	// tmux switches automatic-rename off by itself when -n names a window, so this
 	// only matters on versions that do not.
@@ -435,7 +561,7 @@ func newWindow(s Spec, args []string) (Window, error) {
 	stamp(id, slugOption, s.Slug)
 	stamp(id, branchOption, s.Branch)
 
-	return Window{ID: id, Session: s.Session, Name: s.Name, Worktree: s.Dir}, nil
+	return Window{ID: id, Session: s.Session, Name: s.Name, Worktree: s.Dir, Scratch: s.Scratch, Repo: s.Repo}, nil
 }
 
 // Stamped reports that treewright opened this window. It gates the things
@@ -523,15 +649,22 @@ func SetWaitingMarker(w Window, waiting bool) error {
 // empty string either way, and an option that was never set is the honest record
 // of something treewright does not know — the base window's slug and branch.
 //
-// A value holding a tab goes unstamped, because the worktree comes back as one
-// tab-separated field of the pane listing, where only the last field, the path,
-// can carry one. The other options are not read back and so could carry a tab
-// safely, but one rule for all four is easier to keep true than three.
-func stamp(id, option, value string) {
-	if value == "" || strings.ContainsRune(value, '\t') {
-		return
+// A value holding a tab goes unstamped, because the stamps read back each come
+// back as one tab-separated field of the pane listing, where only the last
+// field, the path, can carry one. The options not read back could carry a tab
+// safely, but one rule for all of them is easier to keep true than two.
+func stamp(id, option, value string) { _ = stampOrFail(id, option, value) }
+
+// stampOrFail is stamp for the one caller that cannot shrug off a failure.
+func stampOrFail(id, option, value string) error {
+	if value == "" {
+		return nil
 	}
-	_, _ = run("set-window-option", "-t", id, option, value)
+	if strings.ContainsRune(value, '\t') {
+		return fmt.Errorf("%s cannot hold a tab: %q", option, value)
+	}
+	_, err := run("set-window-option", "-t", id, option, value)
+	return err
 }
 
 // CurrentSession names the session the calling client is attached to, or ""
@@ -589,6 +722,36 @@ func CurrentWindow() string {
 		return ""
 	}
 	return id
+}
+
+// CallersWindow is the window the calling pane is in, the whole of it rather
+// than CurrentWindow's id — and ok=false wherever CurrentWindow would answer "".
+//
+// It is what `signal` asks first. The window an agent is running in is the one
+// its state belongs on, and before there were scratch windows the directory the
+// agent stood in named that window closely enough: one window per checkout. A
+// scratch agent stands in the base checkout beside the base window's agent, so
+// the directory names the wrong one, and only the pane knows which it is.
+//
+// One call rather than CurrentWindow's id and a lookup: the pane is asked for
+// the same listing Windows reads, so what comes back is parsed by the same code
+// and carries the same fields. Asked of a pane, display-message answers about
+// that pane's own window, which is the exactness CurrentWindow's comment is
+// about.
+func CallersWindow() (Window, bool) {
+	if !Inside() {
+		return Window{}, false
+	}
+	pane := os.Getenv("TMUX_PANE")
+	if pane == "" {
+		return Window{}, false
+	}
+	out, err := run("display-message", "-p", "-t", pane, paneFormat)
+	if err != nil {
+		return Window{}, false
+	}
+	w, _, ok := splitPaneLine(out)
+	return w, ok
 }
 
 // Focus brings a window to the foreground, following it across sessions.

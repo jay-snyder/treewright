@@ -61,7 +61,10 @@ tmux session "checkout-api"
 
 `main` is home base, and `tw base` opens it from anywhere. It sits in the main
 checkout, parked on `main` — start new work there, ask your general questions
-there, and keep feature work out of it.
+there, and keep feature work out of it. Need a second agent there — to dig into
+something, review a pull request, keep an eye on the others — without a branch
+to clean up afterwards? `tw scratch ask` opens another window on the main
+checkout, and `ask` is how `tw send`, `tw close` and `tw resume` reach it.
 
 Commands act on the repo you're standing in. To act on another one, name it:
 `tw new --repo checkout-api pay-89`, `tw ls --repo storefront`,

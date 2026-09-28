@@ -3,7 +3,9 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -83,14 +85,21 @@ func statusText(info git.Info) string {
 // first one, so "base" would only repeat the position, while the branch is what
 // tells you whether your general-purpose window is sitting on staging, on main,
 // or somewhere you left it three days ago.
-func slugCell(info git.Info) string {
-	if info.Status != git.StatusBase {
-		return info.Slug
-	}
-	if info.Branch == "" {
+//
+// A scratch window has no slug either, and its name goes in the column instead,
+// for the reason a slug does: it is what you type at `send`, `close` and
+// `resume` to reach it.
+func slugCell(r row) string {
+	switch {
+	case r.scratch:
+		return r.window.Scratch
+	case r.Status != git.StatusBase:
+		return r.Slug
+	case r.Branch == "":
 		return "detached"
+	default:
+		return r.Branch
 	}
-	return info.Branch
 }
 
 // windowCell says where a worktree's window is, in the width of a table column.
@@ -124,15 +133,61 @@ func agentColor(state string) ui.Color {
 	}
 }
 
+// scratchStatus is what the STATUS column and the JSON say for a scratch window.
+// Not a git.Status, because the git statuses answer "how safe is this to
+// remove", and a scratch window has nothing on disk to remove — which is also why
+// its row carries no branch and no divergence: it stands on the base checkout,
+// and repeating the base row's numbers under it would be noise.
+const scratchStatus = "scratch"
+
+// row is one line of the listing: a checkout or a scratch window, and the window
+// that goes with it.
+//
+// The window used to be looked up by the row's directory, cell by cell, which
+// was right while a directory named exactly one window. A scratch window stands
+// on the base checkout without answering for it, so its row carries its window
+// rather than finding one — a lookup by directory would hand it the base
+// window's.
+type row struct {
+	git.Info
+
+	window  tmux.Window
+	scratch bool
+}
+
+// listing lays out the rows the table, the menu and the JSON share: the base
+// checkout, then the scratch windows standing on it, then the worktrees. infos
+// are as inspectAll returns them, base checkout first.
+//
+// Scratch windows go under the base row rather than among the worktrees because
+// that is where they are — on the base checkout — and in name order, so a
+// listing does not reshuffle as windows are opened. Under it rather than above
+// it, because the base row is row 0 and a consumer of the JSON deciding where
+// work goes reads row 0.
+func listing(infos []git.Info, windows map[string]tmux.Window, scratch map[string]tmux.Window) []row {
+	rows := make([]row, 0, len(infos)+len(scratch))
+	for i, info := range infos {
+		rows = append(rows, row{Info: info, window: windows[info.Dir]})
+		if i > 0 || info.Status != git.StatusBase {
+			continue
+		}
+		for _, name := range slices.Sorted(maps.Keys(scratch)) {
+			w := scratch[name]
+			rows = append(rows, row{Info: git.Info{Worktree: git.Worktree{Dir: info.Dir}}, window: w, scratch: true})
+		}
+	}
+	return rows
+}
+
 // worktreeTable builds the table shown by `ls` and used as the `resume` and `cd`
 // menus, so a menu is a picker over the same rows the user already knows.
 //
-// Callers put the base checkout at the head of infos. It belongs in the list on
-// both of the list's own terms: it is somewhere you return to between worktrees,
-// and — since a tmux session does not survive a reboot while a checkout on disk
-// does — it is something you reopen. Leaving it out made the one window that is
-// always there, and that keeps the session alive, the one window the menu could
-// not reach.
+// Callers put the base checkout at the head of the rows. It belongs in the list
+// on both of the list's own terms: it is somewhere you return to between
+// worktrees, and — since a tmux session does not survive a reboot while a
+// checkout on disk does — it is something you reopen. Leaving it out made the one
+// window that is always there, and that keeps the session alive, the one window
+// the menu could not reach.
 //
 // The worktree the caller is standing in gets a leading asterisk, and the column
 // holding it appears only when one of the rows is in fact the current directory:
@@ -143,12 +198,15 @@ func agentColor(state string) ui.Color {
 // when some window carries a signaled state, so for the user whose command is
 // nvim the whole feature is invisible — the agent-agnosticism promise kept in
 // the table itself rather than asserted in the README.
-func worktreeTable(infos []git.Info, windows map[string]tmux.Window, session string) *ui.Table {
+//
+// A scratch window is never the row you are standing in: it stands in the base
+// checkout, and so do you, and the row that says so is the base row.
+func worktreeTable(rows []row, session string) *ui.Table {
 	cwd, err := os.Getwd()
 	here := -1
 	if err == nil {
-		for i, info := range infos {
-			if insideDir(cwd, info.Dir) {
+		for i, r := range rows {
+			if !r.scratch && insideDir(cwd, r.Dir) {
 				here = i
 				break
 			}
@@ -156,8 +214,8 @@ func worktreeTable(infos []git.Info, windows map[string]tmux.Window, session str
 	}
 
 	hasAgent := false
-	for _, info := range infos {
-		if windows[info.Dir].State != "" {
+	for _, r := range rows {
+		if r.window.State != "" {
 			hasAgent = true
 			break
 		}
@@ -172,19 +230,15 @@ func worktreeTable(infos []git.Info, windows map[string]tmux.Window, session str
 	}
 
 	table := ui.Table{Headers: headers}
-	for i, info := range infos {
-		divergence := "?" // an unavailable comparison is unknown, not zero
-		if info.Compared {
-			divergence = fmt.Sprintf("+%d/-%d", info.Ahead, info.Behind)
-		}
+	for i, r := range rows {
 		cells := []ui.Cell{
-			ui.Text(slugCell(info)),
-			ui.Colored(statusText(info), statusColor(info.Status)),
-			ui.Text(divergence),
-			ui.Text(windowCell(windows[info.Dir], session)),
+			ui.Text(slugCell(r)),
+			statusCell(r),
+			ui.Text(divergenceCell(r)),
+			ui.Text(windowCell(r.window, session)),
 		}
 		if hasAgent {
-			cells = append(cells, agentCell(windows[info.Dir]))
+			cells = append(cells, agentCell(r.window))
 		}
 		if here >= 0 {
 			marker := " "
@@ -196,6 +250,31 @@ func worktreeTable(infos []git.Info, windows map[string]tmux.Window, session str
 		table.Add(cells...)
 	}
 	return &table
+}
+
+// statusCell renders a row's STATUS, which for a scratch window is the word that
+// says what it is and not one of the answers about removing something.
+func statusCell(r row) ui.Cell {
+	if r.scratch {
+		// Dim, as the base checkout is, and for its reason: nothing here is a
+		// candidate for removal, so it gets the one color that urges nothing.
+		return ui.Colored(scratchStatus, ui.Dim)
+	}
+	return ui.Colored(statusText(r.Info), statusColor(r.Status))
+}
+
+// divergenceCell renders AHEAD/BEHIND: "?" for a comparison that could not be
+// made, which is unknown rather than zero, and "-" for a scratch window, which
+// has no branch of its own to compare.
+func divergenceCell(r row) string {
+	switch {
+	case r.scratch:
+		return "-"
+	case !r.Compared:
+		return "?"
+	default:
+		return fmt.Sprintf("+%d/-%d", r.Ahead, r.Behind)
+	}
 }
 
 // agentCell renders one window's signaled state, blank for a window nothing has
@@ -230,7 +309,7 @@ func agentCell(w tmux.Window) ui.Cell {
 //
 // The layout mirrored here is worktreeTable's, and TestPopupSizeCoversTheTable
 // renders a real one to check this still covers it.
-func popupSize(rows []git.Info, windows map[string]tmux.Window) (width, height int) {
+func popupSize(rows []row) (width, height int) {
 	const (
 		// The two columns whose width the data cannot push past: the longest
 		// status is "unpushed (nnn)", and divergence never outgrows its header.
@@ -249,16 +328,16 @@ func popupSize(rows []git.Info, windows map[string]tmux.Window) (width, height i
 	)
 
 	slugCol, windowCol := len("SLUG"), len("WINDOW")
-	for _, info := range rows {
-		slugCol = max(slugCol, len(slugCell(info)))
-		windowCol = max(windowCol, len(windowCell(windows[info.Dir], "")))
+	for _, r := range rows {
+		slugCol = max(slugCol, len(slugCell(r)))
+		windowCol = max(windowCol, len(windowCell(r.window, "")))
 	}
 	// The AGENT column, which worktreeTable adds only when some window carries a
 	// signaled state — so it is measured from the same data, and contributes
 	// nothing when the table would not show it.
 	agentCol := 0
-	for _, info := range rows {
-		if state := windows[info.Dir].State; state != "" {
+	for _, r := range rows {
+		if state := r.window.State; state != "" {
 			agentCol = max(agentCol, gap+max(len("AGENT"), len(state)))
 		}
 	}
@@ -287,6 +366,17 @@ type worktreeJSON struct {
 	// an agent reading this to work out where a ticket should go — needs the
 	// distinction spelled out rather than inferred from an empty slug.
 	Base bool `json:"base"`
+
+	// Scratch marks a scratch window: a second agent session standing on the
+	// base checkout, listed under the base row. Its slug is the name it was
+	// opened under — what send, close and resume take — and nothing on disk
+	// answers to it, so rm and prune cannot name it either. Its dir is the main
+	// checkout's, its branch is empty and its divergence null, since it has no
+	// branch of its own to compare; the base row already says where that
+	// checkout stands. Spelled out for the reason Base is: a consumer reading
+	// this to decide where work goes or what to tear down is never handed one by
+	// mistake.
+	Scratch bool `json:"scratch"`
 
 	Dir        string `json:"dir"`
 	Branch     string `json:"branch"`
@@ -332,18 +422,23 @@ type worktreeJSON struct {
 // running in, from tmux.CurrentWindow — passed in rather than asked for here so
 // that one invocation asks the server once, and so a test can say where it is
 // standing without a client to be standing in.
-func worktreesJSON(infos []git.Info, windows map[string]tmux.Window, current string) []worktreeJSON {
-	out := make([]worktreeJSON, 0, len(infos))
-	for _, info := range infos {
-		w := windows[info.Dir]
-		row := worktreeJSON{
-			Slug:          info.Slug,
-			Base:          info.Status == git.StatusBase,
-			Dir:           info.Dir,
-			Branch:        info.Branch,
-			Status:        string(info.Status),
-			DirtyFiles:    info.DirtyFiles,
-			Unpushed:      info.Unpushed,
+func worktreesJSON(rows []row, current string) []worktreeJSON {
+	out := make([]worktreeJSON, 0, len(rows))
+	for _, r := range rows {
+		w := r.window
+		status, slug := string(r.Status), r.Slug
+		if r.scratch {
+			status, slug = scratchStatus, w.Scratch
+		}
+		entry := worktreeJSON{
+			Slug:          slug,
+			Base:          r.Status == git.StatusBase,
+			Scratch:       r.scratch,
+			Dir:           r.Dir,
+			Branch:        r.Branch,
+			Status:        status,
+			DirtyFiles:    r.DirtyFiles,
+			Unpushed:      r.Unpushed,
 			Window:        w.Name,
 			WindowID:      w.ID,
 			WindowSession: w.Session,
@@ -354,11 +449,11 @@ func worktreesJSON(infos []git.Info, windows map[string]tmux.Window, current str
 			WindowIsCurrent:     w.ID != "" && w.ID == current,
 			WindowLastInSession: w.LastInSession(),
 		}
-		if info.Compared {
-			ahead, behind := info.Ahead, info.Behind
-			row.Ahead, row.Behind = &ahead, &behind
+		if r.Compared {
+			ahead, behind := r.Ahead, r.Behind
+			entry.Ahead, entry.Behind = &ahead, &behind
 		}
-		out = append(out, row)
+		out = append(out, entry)
 	}
 	return out
 }

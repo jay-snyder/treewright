@@ -156,14 +156,27 @@ options:
 |---|---|
 | `@treewright_repo` | The config's name. |
 | `@treewright_worktree` | The checkout the window was opened on. |
-| `@treewright_slug` | The worktree. Unset on the base window, which is not one. |
+| `@treewright_slug` | The worktree. Unset on the base window and on a scratch window, which are not worktrees. |
 | `@treewright_branch` | The branch that worktree is on. |
+| `@treewright_scratch` | The name a scratch window was opened under. Unset on every other window. |
 | `@treewright_agent_state` | What the agent in it last signaled. Written by `signal`, not at creation — see "Agent state" in [`agents.md`](agents.md). |
 
 Of these, the worktree is what *identifies* a window. A pane's
 directory moves with every `cd`, and two windows can stand in one directory at
 once — the base window does exactly that after `tw cd` — so which window a
 worktree owns cannot be read off where its shell happens to be standing.
+
+**Identity has two forms.** A worktree's window is identified by its worktree; a
+scratch window — a second agent session standing on the base checkout, opened by
+`tw scratch <name>` — is identified by itself, the name in `@treewright_scratch`.
+It still carries `@treewright_worktree`, set to the main checkout, since that
+option is where a window stands as well as what it is. But it claims no
+directory: `tmux.Windows`, the directory-to-window map every other lookup reads,
+never contains one, which is what keeps the window on the main checkout the base
+window however many scratch windows stand beside it. `tmux.Scratch` is where they
+are found instead, by name, one repository's at a time. See "Scratch windows" in
+[`design-notes.md`](design-notes.md) for why skipping them is the only version of
+this that is true.
 
 Before the stamp existed, `list-panes -a` walked windows in index order and two
 windows standing in one directory resolved to whichever the user had arranged
@@ -181,7 +194,10 @@ and a bool cannot answer that. `Window.Stamped` remains for the callers that onl
 want the first, such as deciding whose window name treewright may decorate.
 
 The options are written at creation, so a window treewright merely finds and
-switches to keeps whatever it already had. The rest are there for your own status
+switches to keeps whatever it already had. Every stamp is best-effort but the
+scratch name: a scratch window that missed it would read as a window on the main
+checkout, and so as the base window, so one that cannot be stamped is closed
+rather than left to be mistaken. The rest are there for your own status
 line — `#{@treewright_repo}` costs nothing to render, where the alternative is
 shelling out to git on every status interval. They keep the full `@treewright_`
 prefix because they are a public, greppable interface, and a cryptic `@tw_` would
@@ -249,6 +265,12 @@ work across sessions exactly as they work within one. **Every one of them
 matters more here, not less.** The sender cannot see the receiving session at
 all, so the capture stops being a convenience and becomes the only look anybody
 gets before a keystroke answers a question nobody read.
+
+A scratch window is reached by its name, `tw send ask "…"`, and the window comes
+with the name rather than being looked up by directory — the window standing for
+the base checkout's directory is the base window, and typing there in a scratch
+window's name is the mistake the name exists to prevent. Everything after the
+lookup is by window id, so the capture and both refusals hold unchanged.
 
 `send` goes through `internal/tmux` like everything else, which is the other half
 of why it is a command. The raw form honored no `TREEWRIGHT_TMUX_LABEL`, went

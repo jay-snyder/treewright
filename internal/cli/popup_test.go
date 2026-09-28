@@ -27,9 +27,10 @@ import (
 // estimate still covers it.
 func TestPopupSizeCoversTheTable(t *testing.T) {
 	cases := []struct {
-		name   string
-		infos  []git.Info
-		window tmux.Window
+		name    string
+		infos   []git.Info
+		window  tmux.Window
+		scratch map[string]tmux.Window
 	}{
 		{
 			name: "the widest each column gets",
@@ -76,6 +77,24 @@ func TestPopupSizeCoversTheTable(t *testing.T) {
 			window: tmux.Window{ID: "@1", Session: "another-session", Name: "flaky-payment-t…"},
 		},
 		{
+			// Scratch windows are rows of their own under the base row, named in
+			// the SLUG column, with a window the directory lookup would never
+			// have found for them — so the estimate has to count them from the
+			// same listing the table is drawn from.
+			name: "scratch windows under the base row",
+			infos: []git.Info{
+				{Worktree: git.Worktree{Branch: "main", Dir: "/wt/main"}, Status: git.StatusBase},
+				{Worktree: git.Worktree{Slug: "eng-1", Dir: "/wt/a"}, Status: git.StatusActive, Compared: true},
+			},
+			scratch: map[string]tmux.Window{
+				"review-the-retry-logic-for-pay": {
+					ID: "@7", Session: "another-session", Name: "review-the-retr…",
+					Scratch: "review-the-retry-logic-for-pay", State: "waiting",
+				},
+				"ask": {ID: "@8", Session: "proj", Name: "ask", Scratch: "ask"},
+			},
+		},
+		{
 			name: "ten of them, so the index column grows a digit",
 			infos: func() []git.Info {
 				var out []git.Info
@@ -96,11 +115,11 @@ func TestPopupSizeCoversTheTable(t *testing.T) {
 				}
 			}
 
-			gotW, gotH := popupSize(tc.infos, windows)
+			gotW, gotH := popupSize(listing(tc.infos, windows, tc.scratch))
 
 			// The picker prints the header indented by the width of its "n) "
 			// prefix, then one prefixed line per row, a blank, and the prompt.
-			header, rows := worktreeTable(tc.infos, windows, "").Lines(false)
+			header, rows := worktreeTable(listing(tc.infos, windows, tc.scratch), "").Lines(false)
 			indexCol := len(rows)/10 + 3 // digits in the largest index, plus "n) "
 			widest := len(header) + indexCol
 			for _, row := range rows {
@@ -127,13 +146,13 @@ func TestPopupSizeCoversTheTable(t *testing.T) {
 // TestPopupSizeBeatsAPercentage is the point of the whole exercise, stated as a
 // number: on a wide terminal the old 70%x60% was several times the content.
 func TestPopupSizeBeatsAPercentage(t *testing.T) {
-	listing := []git.Info{
+	infos := []git.Info{
 		{Worktree: git.Worktree{Branch: "staging", Dir: "/wt/main"}, Status: git.StatusBase},
 		{Worktree: git.Worktree{Slug: "eng-1557-migrate-api-eb-to-ecs", Dir: "/wt/a"}},
 		{Worktree: git.Worktree{Slug: "eng-1646-app-landing-page-redesign", Dir: "/wt/b"}},
 		{Worktree: git.Worktree{Slug: "eng-1675-cold-start-checklist-boost", Dir: "/wt/c"}},
 	}
-	w, h := popupSize(listing, nil)
+	w, h := popupSize(listing(infos, nil, nil))
 
 	// The terminal this was reported on.
 	const cols, rows = 237, 62

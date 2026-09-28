@@ -13,10 +13,11 @@ companions:
 - **`docs/`** — why the behavior is what it is, in four files. Read the relevant
   section before changing behavior in that area; add to it when you decide
   something a future reader would otherwise re-litigate.
-  - **`design-notes.md`** — the base checkout, worktree and window naming, branch
-    prefixes, the full output contract, statuses and squash-merge detection,
-    what gets reported when a background step fails, the safety rules, what
-    treewright is allowed to write, configuration, the eval-file protocol.
+  - **`design-notes.md`** — the base checkout, scratch windows, worktree and
+    window naming, branch prefixes, the full output contract, statuses and
+    squash-merge detection, what gets reported when a background step fails, the
+    safety rules, what treewright is allowed to write, configuration, the
+    eval-file protocol.
   - **`tmux.md`** — session per repo, window identity, terminal titles, popup
     sizing and the key bindings.
   - **`agents.md`** — the agent-state protocol, agent modules and the plugin
@@ -166,6 +167,7 @@ breaks `brew upgrade` for everyone.
 | `internal/cli/move.go` | `move`: uncommitted work out of the base checkout and into a worktree. |
 | `internal/cli/send.go` | `send`: one line typed at the agent in an open window. |
 | `internal/cli/close.go` | `close`: the tmux window on a worktree, gone worktree or not. |
+| `internal/cli/scratch.go` | `scratch`: another agent window on the main checkout, and the rule that its name and a slug never coincide. |
 | `internal/cli/restore.go` | `restore`: every window a repository's session should have, after a restart. |
 | `internal/cli/prompt.go` | `{prompt}`, the two flags that fill it, and what `--prompt-file` builds. |
 | `internal/cli/setup.go` | `setup` (config generation, `--refresh`) and `config`. |
@@ -270,6 +272,23 @@ resolution order, and note that the option is kept on `Window` as the path it is
 rather than as a bool: "treewright opened this window" and "treewright opened this
 window *here*" are different questions, and the second is the one `openWindow`
 asks.
+
+**A scratch window is identified by itself, and claims no directory.** It
+carries `@treewright_scratch` — the name it was opened under — beside a
+`@treewright_worktree` pointing at the main checkout, and `parsePanes` skips
+*both* of its claims, so `tmux.Windows` never holds one. That skip is what keeps
+`base`, `close base`, `send base`, `ls` and `restore` answering with the base
+window without any of them knowing scratch windows exist. Don't replace it with a
+low `rank`: `stake` takes any unclaimed directory without consulting `beats`, so
+a scratch window would become the base window the moment the real one closed.
+They are found through `tmux.Scratch(repo)`, a separate index keyed by name, so
+nothing that must never see one can reach one by accident — and a `choice`
+carries a scratch window as a `Scratch` flag plus the window, never as a slug. A
+scratch name and a worktree slug share one namespace, since `send`, `close` and
+`resume` take either: `scratch` refuses a live slug, an open scratch name and the
+base checkout's names, and `new`/`move` refuse an open scratch name. Lookups take
+scratch names exactly, before worktree prefixes. See "Scratch windows" in
+`docs/design-notes.md`.
 
 **The pane treewright is typed into is not a window to switch to** —
 `isTheCallersOwnShell` in `session.go`. A window treewright opened on the
@@ -512,12 +531,16 @@ runs unattended needs the same, or it fails silently.
 **`signal` is silent out of scope — deliberately outside the rule above.** Agent
 hooks run it in every session the agent has, so outside tmux, outside a
 registered repo, or with no window it exits 0 and prints nothing; a hook that
-warns is an integration that nags. The state it writes lives on the window
-option `@treewright_agent_state`, never on disk — the agent is the window's
-command, so agent death is state death — and the `!` waiting marker is display
-only: `tmux.Windows` strips it at parse, so `Window.Name` is always the clean
-name. The held-open wrapper is the one place a window outlives its agent, and it
-clears both itself. See "Agent state" in `docs/agents.md`.
+warns is an integration that nags. It stamps the window the agent is running in
+— `tmux.CallersWindow`, when treewright opened that window for this repository —
+and only otherwise the window of the checkout it stands in, because a scratch
+agent stands in the base checkout and asked by directory it would stamp the base
+window. The state it writes lives on the window option `@treewright_agent_state`,
+never on disk — the agent is the window's command, so agent death is state death
+— and the `!` waiting marker is display only: `tmux.Windows` strips it at parse,
+so `Window.Name` is always the clean name. The held-open wrapper is the one place
+a window outlives its agent, and it clears both itself. See "Agent state" in
+`docs/agents.md`.
 
 **`guard` is `signal`'s discipline with a sharper reason, and it is the one
 command that never returns a usage error.** It reads a PreToolUse payload on
@@ -568,7 +591,9 @@ are load-bearing: `compact` and `fork` fire mid-session, where a feature that
 moves a checkout would move it under a working agent. `fresh-base` is
 `--ff-only` and acts only in the base checkout, on `base_branch` — treewright
 moving somebody's checkout unasked is defensible exactly while the move is one it
-could not have got wrong. See "Optional behaviors" in `docs/design-notes.md`.
+could not have got wrong — and never while another window on the base checkout
+reports `working`, which it says rather than falling silent. See "Optional
+behaviors" in `docs/design-notes.md`.
 
 **An integration that propagates an upgrade must be able to say which
 treewright it came from.** The shim, the tmux snippet and the plugin all follow

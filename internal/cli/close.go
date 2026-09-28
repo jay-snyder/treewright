@@ -2,11 +2,13 @@ package cli
 
 import (
 	"fmt"
+	"maps"
 	"slices"
 	"sort"
 	"strings"
 
 	"github.com/jay-snyder/treewright/internal/config"
+	"github.com/jay-snyder/treewright/internal/git"
 	"github.com/jay-snyder/treewright/internal/tmux"
 )
 
@@ -28,6 +30,11 @@ import (
 // worktree that no longer exists — which is the case the command is mostly for.
 // The path is computed from the slug rather than looked up among the worktrees
 // for the same reason.
+//
+// A scratch window is the exception in both directions. It is found by its name,
+// since the window standing for its directory is the base window — and a name
+// that finds no open scratch window finds nothing, since a scratch window has no
+// worktree whose record could outlive it.
 
 func cmdClose(env *Env, args []string) error {
 	var repoName string
@@ -52,13 +59,23 @@ func cmdClose(env *Env, args []string) error {
 		return fmt.Errorf("tmux is not installed, so there is no window to close")
 	}
 	session := sessionFor(cfg)
-	windows := tmux.Windows(session)
-	name, dir := closeTarget(env, cfg, slug)
-	window, ok := windows[dir]
+	windows, scratch := tmux.Windows(session), tmux.Scratch(cfg.Name)
+	target := closeTarget(env, cfg, slug, scratch)
+	window, ok := target.Window, target.Scratch
+	if !target.Scratch {
+		window, ok = windows[target.Dir]
+	}
 	if !ok || window.ID == "" {
-		return fmt.Errorf("no window is open on %s in %s%s", name, cfg.Name, asFields(
-			field("looked for a window on", dir),
-			field("open in that session now", strings.Join(openWindowNames(windows), "\n")),
+		// Said for every name but the base checkout's: the reader may have meant a
+		// scratch window, and needs to hear that none is open by that name rather
+		// than only that nothing stands on a worktree directory they never meant.
+		notScratch := ""
+		if !target.Base {
+			notScratch = "and no scratch window by that name is open"
+		}
+		return fmt.Errorf("no window is open on %s in %s%s%s", target.name(), cfg.Name, under(notScratch), asFields(
+			field("looked for a window on", target.Dir),
+			field("open in that session now", strings.Join(openWindowNames(windows, scratch), "\n")),
 		))
 	}
 
@@ -88,19 +105,24 @@ func cmdClose(env *Env, args []string) error {
 //
 // The base checkout answers to its own names, as it does in the resume menu.
 // Closing its window is a legitimate thing to want — it usually ends the
-// repository's session, which is said rather than refused.
-func closeTarget(env *Env, cfg *config.Config, slug string) (name, dir string) {
+// repository's session, which is said rather than refused. An open scratch
+// window answers to its exact name next, as it does in chooseWorktree and for
+// its reasons.
+func closeTarget(env *Env, cfg *config.Config, slug string, scratch map[string]tmux.Window) choice {
 	if base := baseChoice(cfg); slices.Contains(baseNames(cfg, base), slug) {
-		return baseName, cfg.MainDir
+		return base
+	}
+	if w, ok := scratch[slug]; ok {
+		return scratchChoice(cfg, w)
 	}
 	if managed, err := repoFor(cfg).Managed(); err == nil {
 		// resolveSlug reports the expansion and errors when nothing matches; only
 		// the match is wanted here, the miss being the removed-worktree case.
 		if wt, err := resolveSlug(env, cfg, managed, slug); err == nil {
-			return wt.Slug, wt.Dir
+			return choice{Worktree: wt}
 		}
 	}
-	return slug, cfg.DirFor(slug)
+	return choice{Worktree: git.Worktree{Slug: slug, Dir: cfg.DirFor(slug)}}
 }
 
 // agentWorkingNote is the caveat about closing a window whose agent says it is
@@ -157,10 +179,14 @@ func closeCosts(window tmux.Window) []string {
 // openWindowNames lists the windows treewright can see, for the error about one
 // it cannot find. Sorted, since a map's order would make the same repository
 // answer differently each time.
-func openWindowNames(windows map[string]tmux.Window) []string {
-	seen := make(map[string]bool, len(windows))
+//
+// The scratch windows are listed beside the rest: they claim no directory, so the
+// first map never holds them, and a list of what is open that left them out
+// would be wrong about the very windows a reader of this error may have meant.
+func openWindowNames(windows, scratch map[string]tmux.Window) []string {
+	seen := make(map[string]bool, len(windows)+len(scratch))
 	var names []string
-	for _, w := range windows {
+	for _, w := range slices.Concat(slices.Collect(maps.Values(windows)), slices.Collect(maps.Values(scratch))) {
 		if w.Name == "" || seen[w.ID] {
 			continue
 		}
