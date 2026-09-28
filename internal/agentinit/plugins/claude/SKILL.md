@@ -189,7 +189,10 @@ shared by every worktree of a repository, so a `pop` in the wrong checkout is a
 keystroke away and the work is then in neither place you expected.
 
 `--keep` leaves the work in the main checkout as well, for when you want it in
-both places.
+both places. It is also the way past the one refusal `move` has of its own: while
+another agent reports working in the main checkout, clearing it would change
+files under that agent and could take its work, so the move waits for it —
+wait with it, or keep both copies.
 
 ## Put a second agent on a question
 

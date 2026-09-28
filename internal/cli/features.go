@@ -2,15 +2,12 @@ package cli
 
 import (
 	"fmt"
-	"maps"
 	"os"
-	"slices"
 	"strings"
 
 	"github.com/jay-snyder/treewright/internal/config"
 	"github.com/jay-snyder/treewright/internal/feature"
 	"github.com/jay-snyder/treewright/internal/git"
-	"github.com/jay-snyder/treewright/internal/tmux"
 )
 
 // `session-start` is the moment a repository's optional features run at: an
@@ -156,36 +153,6 @@ func freshBase(cfg *config.Config) string {
 	}
 	return fmt.Sprintf("%s here was %s behind origin/%s and has been fast-forwarded",
 		branch, count(behind, "commit", "commits"), cfg.BaseBranch)
-}
-
-// agentWorkingBeside finds another agent at work in the base checkout: a window
-// standing on it, other than the caller's own, whose agent reports `working`.
-//
-// The windows standing on it are the base window and the scratch windows, and
-// the caller's own is left out because a session starting in a window is that
-// window's agent — whatever state it last reported belongs to the session now
-// ending, not to one this move could land under. Outside tmux the caller has no
-// window, so every window on the checkout counts.
-//
-// Only `working`, as warnIfAgentWorking has it: `waiting` and `done` are agents
-// with nothing in flight, and an agent in flight is the one a moving checkout
-// can hurt.
-func agentWorkingBeside(cfg *config.Config) (tmux.Window, bool) {
-	own := tmux.CurrentWindow()
-	var standing []tmux.Window
-	if w, ok := tmux.Windows(sessionFor(cfg))[cfg.MainDir]; ok {
-		standing = append(standing, w)
-	}
-	scratch := tmux.Scratch(cfg.Name)
-	for _, name := range slices.Sorted(maps.Keys(scratch)) {
-		standing = append(standing, scratch[name])
-	}
-	for _, w := range standing {
-		if w.ID != own && w.State == stateWorking {
-			return w, true
-		}
-	}
-	return tmux.Window{}, false
 }
 
 // inTheBaseCheckout reports whether the caller is standing in the config's main

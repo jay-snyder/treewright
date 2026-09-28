@@ -623,6 +623,63 @@ func TestFreshBaseYieldsToAWorkingAgent(t *testing.T) {
 	}
 }
 
+// TestMoveWaitsForAWorkingAgentInTheBaseCheckout: with a second agent in the
+// base checkout, the uncommitted work there may be that agent's, mid-edit, and
+// clearing the checkout would take it — or restore to HEAD whatever it wrote
+// after the patch. So the move is refused before anything is written, --keep
+// is the way past it, and the agent running the move is never in its own way.
+func TestMoveWaitsForAWorkingAgentInTheBaseCheckout(t *testing.T) {
+	requireTmux(t)
+	f := newFixture(t, lingering)
+	f.mustRun("base")
+	f.mustRun("scratch", "ask")
+	base := windowIDNamed(t, "proj", "main")
+	setState(t, base, stateWorking)
+	dirtyBase(t, f)
+	const modified = "seed\nmodified in the base checkout\n"
+
+	t.Setenv("TMUX", "/dev/null,0,0")
+	t.Setenv("TMUX_PANE", paneIn(t, "proj", "ask"))
+	r := f.exec("move", "eng-1")
+	if r.err == nil {
+		t.Fatalf("move cleared the checkout under a working agent\n%s", r.both())
+	}
+	if msg := flat(r.err.Error()); !strings.Contains(msg, "window main is working") || !strings.Contains(msg, "--keep") {
+		t.Errorf("error = %q, want the working agent named and --keep offered", msg)
+	}
+	if f.Exists("eng-1") || f.Git(f.MainDir, "branch", "--list", f.BranchFor("eng-1")) != "" {
+		t.Error("a refused move created the worktree or its branch")
+	}
+	if exists(filepath.Join(f.MainDir, ".git", "treewright", "move-eng-1.patch")) {
+		t.Error("a refused move wrote its patch — the refusal is meant to come before anything is written")
+	}
+	if got := read(t, f.MainDir, "a.txt"); got != modified {
+		t.Errorf("a.txt in the base checkout = %q, want the work left where it was", got)
+	}
+
+	// --keep copies the work and leaves the checkout alone, which is safe under
+	// any agent.
+	if r := f.exec("move", "--keep", "eng-1"); r.err != nil {
+		t.Fatalf("move --keep: %v\n%s", r.err, r.both())
+	}
+	if got := read(t, f.DirFor("eng-1"), "a.txt"); got != modified {
+		t.Errorf("a.txt in the worktree = %q, want the work copied there", got)
+	}
+	if got := read(t, f.MainDir, "a.txt"); got != modified {
+		t.Errorf("a.txt in the base checkout = %q, want it left alone", got)
+	}
+
+	// Run from the working agent's own window, it is that agent moving its own
+	// work, and nothing stands in the way.
+	t.Setenv("TMUX_PANE", paneIn(t, "proj", "main"))
+	if r := f.exec("move", "eng-2"); r.err != nil {
+		t.Fatalf("move from the working agent's own window: %v\n%s", r.err, r.both())
+	}
+	if got := read(t, f.MainDir, "a.txt"); got != "seed\n" {
+		t.Errorf("a.txt in the base checkout = %q, want it cleared by its own agent's move", got)
+	}
+}
+
 // setState stamps an agent state on a window the way `signal` would, for a test
 // whose subject is what reads it.
 func setState(t *testing.T, id, state string) {

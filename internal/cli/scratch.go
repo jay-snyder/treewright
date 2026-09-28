@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 
@@ -38,6 +39,9 @@ import (
 // a principle — see "Scratch windows" in docs/design-notes.md — and the name is
 // kept as the stable handle, and .git/treewright/scratch/ kept free, so that a
 // scratch session can learn to come back after a restart without either moving.
+// Whatever records one has to record the base window's conversation too: until
+// then the base window resumes with --continue, which picks the most recent
+// conversation in the directory, and a scratch session is one.
 
 func cmdScratch(env *Env, args []string) error {
 	var prompt, promptFile, repoName string
@@ -168,4 +172,39 @@ func nothingToResume(env *Env, cfg *config.Config, managed []git.Worktree, name 
 			field("worktrees", worktrees),
 			field("open a new scratch window with", hint(env, cfg, "scratch", name)),
 		))
+}
+
+// agentWorkingBeside finds another agent at work in the base checkout: a window
+// standing on it, other than the caller's own, whose agent reports `working`.
+//
+// Two agents could not share the base checkout before scratch windows, and the
+// two things treewright does that rewrite files in it — fresh-base
+// fast-forwarding it, `move` clearing it — were written for one. Both now ask
+// this first, since each changes files under whatever agent is standing there.
+//
+// The windows standing on it are the base window and the scratch windows. The
+// caller's own is left out: it is the agent asking — the one running `move`, or
+// the session now starting, whose last reported state belongs to the session
+// that just ended. Outside tmux the caller has no window, so every window on the
+// checkout counts.
+//
+// Only `working`, as warnIfAgentWorking has it: `waiting` and `done` are agents
+// with nothing in flight, and an agent in flight is the one a moving checkout
+// can hurt.
+func agentWorkingBeside(cfg *config.Config) (tmux.Window, bool) {
+	own := tmux.CurrentWindow()
+	var standing []tmux.Window
+	if w, ok := tmux.Windows(sessionFor(cfg))[cfg.MainDir]; ok {
+		standing = append(standing, w)
+	}
+	scratch := tmux.Scratch(cfg.Name)
+	for _, name := range slices.Sorted(maps.Keys(scratch)) {
+		standing = append(standing, scratch[name])
+	}
+	for _, w := range standing {
+		if w.ID != own && w.State == stateWorking {
+			return w, true
+		}
+	}
+	return tmux.Window{}, false
 }

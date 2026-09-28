@@ -190,13 +190,28 @@ correctly: it stands exactly where the base agent stands.
 lost to a restart, there is nothing for `resume` to find, and `restore` does not
 reopen it: restore opens what the disk records, and nothing on disk records a
 scratch window. `resume <name>` for a name nothing answers to says exactly that,
-and names `tw scratch <name>` as the way to a new one. There is one cost of this
-worth knowing: claude's `--continue` resumes the most recent conversation *in a
-directory*, and a scratch session is a conversation in the base checkout — so a
-`resume` or `restore` of the base window after one may pick up the scratch
-conversation rather than the base window's own. The name is kept as the stable
-handle, and `.git/treewright/scratch/` kept free, so that a scratch session can
-learn to record its own conversation and come back without either moving.
+and names `tw scratch <name>` as the way to a new one.
+
+**One cost lands on the base window, not on the scratch one.** claude's
+`--continue` resumes the most recent conversation *in a directory*, and a
+scratch session is a conversation in the base checkout — so a `resume` or
+`restore` of the base window after one may pick up the scratch conversation
+rather than the base window's own. The directory was an exact key for a
+conversation exactly as long as one agent stood in each, which is also what the
+claude module's comment on `--continue` rests on.
+
+That shapes what brings scratch sessions back after a restart, whenever it is
+built. A record of the conversation a window is running — its `session_id`,
+written by the agent's own `SessionStart` hook, the one party that knows it, at
+the moment it knows it — is only half a fix if it covers scratch windows alone:
+the base window would still resume with `--continue`, and still choose between
+itself and every scratch session that ran after it. So the record has to cover
+every agent standing in the base checkout, the base window included, and resume
+has to use it for the base window whenever one exists — `--continue` staying
+the fallback for a base window with no record, and for every worktree, where the
+directory is still exact. The name is kept as the stable handle for a scratch
+window, and `.git/treewright/scratch/` kept free, so that record can arrive
+without either moving.
 
 ## Putting a session back after a restart
 
@@ -796,6 +811,17 @@ of the worktree is the work already in it rather than an empty checkout it is
 being asked to carry on with. `--keep` leaves the base checkout alone on success
 too, for when the work is wanted in both places.
 
+**It will not clear the checkout under another agent.** Until scratch windows,
+the base checkout held one agent, and a move could assume the uncommitted work
+in it was the caller's. With two standing there it may be the other one's, in
+the middle of being written — and anything that agent changes between the patch
+and the clear is not moved but lost, restored to HEAD with the rest. So while a
+window on the base checkout other than the caller's reports `working`, `move` is
+refused before anything is written. It refuses rather than warns, unlike closing
+a window with a working agent, because the way past it is not a `--force`:
+`--keep` is the safe variant of the same command, copying the work and leaving
+the checkout exactly as it was, and passing it by reflex costs nothing.
+
 ## Output contract
 
 stdout carries the answer and nothing else, so any command can be piped:
@@ -955,6 +981,11 @@ listing already carried.
 `ls` reports one status per worktree, in this precedence: `dirty` outranks
 everything because it is the most easily lost, then `merged`, then `unpushed`; a
 pushed-but-unmerged branch is `active`.
+
+Two rows stand outside that scale, because it answers "how safe is this to
+remove" and neither is anything `rm` could remove: the base checkout is `base`,
+and a scratch window is `scratch` — see "The base checkout" and "Scratch
+windows".
 
 The counts shown — `dirty (3)`, `unpushed (2)` — are the numbers the removal
 guards refuse over, so a listing says how much a `--force` would discard.

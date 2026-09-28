@@ -237,6 +237,12 @@ leaves the checkout untouched, says so, and names the patch, which is a second
 copy of the work and the way in by hand. --keep leaves the checkout alone even
 on success, for when you want the work in both places.
 
+While another agent reports working in the main checkout — a scratch window's,
+or the base window's when this is run from somewhere else — the move is refused
+before anything is written: clearing the checkout would change files under that
+agent, and the work in it may be that agent's. Wait for it to finish, or pass
+--keep, which copies the work and leaves the checkout alone.
+
 The work arrives staged, because a three-way apply goes through the index.
 
 stdout is the new worktree's path, so cd "$(treewright move eng-1)" works, and

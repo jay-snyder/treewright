@@ -483,7 +483,12 @@ is `--diff-filter=A`'s list, which includes a file the user had already staged;
 `git clean -fd` is what an improvising hand reaches for and it takes unrelated
 files and ignored ones inside untracked directories. `git stash` is not
 available to this — one stash stack is shared by every worktree of a repository.
-See "Moving work that was started in the wrong place" in `docs/design-notes.md`.
+And it refuses, short of `--keep`, while another window on the base checkout
+reports `working` (`agentWorkingBeside`, which `fresh-base` asks too): with a
+scratch agent beside the base agent, the work in the checkout may not be the
+caller's, and what that agent writes mid-move is restored to HEAD rather than
+moved. See "Moving work that was started in the wrong place" in
+`docs/design-notes.md`.
 
 **treewright never prints a tmux command for someone to run.** `rm`, `prune` and
 `send` name `treewright close <slug>`; the one command still spelled as tmux is
