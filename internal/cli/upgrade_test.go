@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -273,29 +274,6 @@ func TestRefreshInstallsNothingNew(t *testing.T) {
 	}
 }
 
-// TestRefreshSaysWhatItCannotReach: a wrapper function lives in the shell that
-// loaded it, and no process can define one in its parent. Saying so is the whole
-// of what this can do about it, and leaving it unsaid is how somebody runs
-// refresh after an upgrade and keeps the old wrapper for the rest of the day.
-func TestRefreshSaysWhatItCannotReach(t *testing.T) {
-	f := newFixture(t, "agent = 'claude'\n")
-	t.Setenv("TREEWRIGHT_EVAL_FILE", filepath.Join(t.TempDir(), "eval"))
-	t.Setenv(shellinit.VersionVar, "000000000000")
-
-	if got := f.exec("refresh").stderr; !strings.Contains(got, "open a new terminal") {
-		t.Errorf("stderr = %q, want the one thing refresh cannot do named", got)
-	}
-
-	current, err := shellinit.Version("zsh")
-	if err != nil {
-		t.Fatalf("Version: %v", err)
-	}
-	t.Setenv(shellinit.VersionVar, current)
-	if got := f.exec("refresh").stderr; strings.Contains(got, "open a new terminal") {
-		t.Errorf("stderr = %q, want silence about a wrapper that is already current", got)
-	}
-}
-
 // TestRefreshScopesTheWarningWhenWorktreesCannotBeListed pins what the failure
 // actually costs. The old warning said "only the main checkout was refreshed",
 // which was wrong twice: it was emitted while the targets were still being
@@ -460,6 +438,163 @@ func TestDoctorTellsALoadedShellWrapperFromACurrentOne(t *testing.T) {
 	after := findings(t, f)
 	if got := has(t, after, "shell integration loaded"); got != "ok" {
 		t.Errorf("finding = %q, want a current wrapper reported ok\nall: %v", got, after)
+	}
+}
+
+// refreshThroughAWrapper runs refresh the way the shell integration does: with
+// an eval file the shell will source afterwards, and the fingerprint the shim in
+// that shell exported. It returns what refresh said and what it left in the file.
+func refreshThroughAWrapper(t *testing.T, f *fixture, version string) (stderr, evalText string) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "eval")
+	t.Setenv("TREEWRIGHT_EVAL_FILE", path)
+	t.Setenv(shellinit.VersionVar, version)
+	r := f.exec("refresh")
+	if r.err != nil {
+		t.Fatalf("refresh: %v\n%s", r.err, r.both())
+	}
+	written, err := os.ReadFile(path)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("read the eval file: %v", err)
+	}
+	return r.stderr, string(written)
+}
+
+// TestRefreshReloadsAStaleWrapperInTheShellItRanFrom: the shell refresh is
+// typed into is one it can reach after all, through the eval file its wrapper
+// sources on the way out. A wrapper exporting no fingerprint at all predates
+// the fingerprint, and is as stale as one exporting somebody else's.
+func TestRefreshReloadsAStaleWrapperInTheShellItRanFrom(t *testing.T) {
+	f := newFixture(t, "agent = 'claude'\n")
+	t.Setenv(shellinit.ShellVar, "zsh")
+
+	for _, stale := range []string{"000000000000", ""} {
+		stderr, evalText := refreshThroughAWrapper(t, f, stale)
+		if evalText != shellinit.Reload()+"\n" {
+			t.Errorf("with %q loaded, the eval file holds %d bytes that are not the reload", stale, len(evalText))
+		}
+		got := flat(stderr)
+		if !strings.Contains(got, "reloaded the shell wrapper in this shell") {
+			t.Errorf("stderr = %q, want the reload reported", got)
+		}
+		// This shell is fixed and every other one is not, so the line that
+		// fixes one by hand is still the thing to print.
+		if !strings.Contains(got, `in each, run eval "$(treewright shell-init zsh)"`) {
+			t.Errorf("stderr = %q, want the line for every other shell named", got)
+		}
+	}
+}
+
+// TestRefreshSaysNothingAboutAWrapperThatIsCurrent: after the first refresh,
+// every one after it finds the wrapper current, and a line about it on each
+// would be a line people learn to skip.
+func TestRefreshSaysNothingAboutAWrapperThatIsCurrent(t *testing.T) {
+	f := newFixture(t, "agent = 'claude'\n")
+	for _, shell := range shellinit.Shells() {
+		current, err := shellinit.Version(shell)
+		if err != nil {
+			t.Fatalf("Version: %v", err)
+		}
+		stderr, evalText := refreshThroughAWrapper(t, f, current)
+		if evalText != "" {
+			t.Errorf("with the current %s wrapper loaded, refresh wrote %d bytes for the shell to run", shell, len(evalText))
+		}
+		if strings.Contains(stderr, "shell wrapper") {
+			t.Errorf("stderr = %q, want nothing said about a %s wrapper that is current", stderr, shell)
+		}
+	}
+}
+
+// TestRefreshLeavesAShellWithoutTheIntegrationAlone is the scoping rule. The
+// fingerprint is exported, so every process below a shell that loaded the
+// wrapper inherits it, including a shell that never did. A stale value there
+// says nothing about the shell refresh runs in. The eval file is the one thing
+// that says a wrapper is calling, and without one this is not refresh's
+// business.
+func TestRefreshLeavesAShellWithoutTheIntegrationAlone(t *testing.T) {
+	f := newFixture(t, "agent = 'claude'\n")
+	for _, version := range []string{"000000000000", ""} {
+		t.Setenv(shellinit.VersionVar, version)
+		r := f.exec("refresh")
+		if r.err != nil {
+			t.Fatalf("refresh: %v\n%s", r.err, r.both())
+		}
+		if strings.Contains(r.stderr, "wrapper") {
+			t.Errorf("with no eval file and %q exported, stderr = %q, want nothing said about the shell", version, r.stderr)
+		}
+	}
+}
+
+// TestRefreshWarnsWhenItCannotReachTheShellItRanFrom: the wrapper is calling
+// but its eval file cannot be written, as when a tmpdir has been swept. Nothing
+// is reloaded, so the report says why and gives the line, and refresh still
+// succeeds: the plugin and the bindings were its to fix, and they are fixed.
+func TestRefreshWarnsWhenItCannotReachTheShellItRanFrom(t *testing.T) {
+	f := newFixture(t, "agent = 'claude'\n")
+	t.Setenv("TREEWRIGHT_EVAL_FILE", filepath.Join(t.TempDir(), "swept", "eval"))
+	t.Setenv(shellinit.VersionVar, "000000000000")
+	t.Setenv(shellinit.ShellVar, "bash")
+
+	r := f.exec("refresh")
+	if r.err != nil {
+		t.Fatalf("refresh: %v\n%s", r.err, r.both())
+	}
+	got := flat(r.stderr)
+	if !strings.Contains(got, "warning: the shell integration is loaded, but its eval file could not be written") {
+		t.Errorf("stderr = %q, want the unwritable eval file reported", got)
+	}
+	if !strings.Contains(got, `run eval "$(treewright shell-init bash)"`) {
+		t.Errorf("stderr = %q, want the by-hand line under it", got)
+	}
+	if strings.Contains(got, "reloaded") {
+		t.Errorf("stderr = %q, claims a reload that did not happen", got)
+	}
+}
+
+// TestTheReloadNeedsNoGuessAboutTheShell: what goes in the eval file is the same
+// whichever shell refresh thinks it is talking to, so a $SHELL naming none of
+// the three still gets its wrapper reloaded. Only the by-hand line depends on
+// knowing the shell, and where nothing says which, it points at the help that
+// has all three instead of picking one.
+func TestTheReloadNeedsNoGuessAboutTheShell(t *testing.T) {
+	f := newFixture(t, "agent = 'claude'\n")
+	t.Setenv("SHELL", "/bin/ksh")
+
+	stderr, evalText := refreshThroughAWrapper(t, f, "000000000000")
+	if evalText != shellinit.Reload()+"\n" {
+		t.Errorf("with $SHELL naming no shell treewright knows, the eval file holds %d bytes that are not the reload", len(evalText))
+	}
+	got := flat(stderr)
+	if !strings.Contains(got, "in each, run the line treewright help shell-init gives for your shell") {
+		t.Errorf("stderr = %q, want the help named rather than a guessed line", got)
+	}
+	if strings.Contains(got, "shell-init zsh") || strings.Contains(got, "shell-init bash") || strings.Contains(got, "shell-init fish |") {
+		t.Errorf("stderr = %q, names a line for a shell nothing said was running", got)
+	}
+}
+
+// TestTheLineForOtherShellsTakesTheShimsWordOverTheLoginShell: $SHELL is the
+// login shell, so a fish started from a bash login would be told to run bash's
+// line. The shim saying which shell it was written for is what fixes that, and
+// $SHELL is the fallback for the shims too old to say.
+func TestTheLineForOtherShellsTakesTheShimsWordOverTheLoginShell(t *testing.T) {
+	f := newFixture(t, "agent = 'claude'\n")
+	cases := []struct {
+		name, shim, login, want string
+	}{
+		{"the shim names its shell", "fish", "/bin/bash", "treewright shell-init fish | source"},
+		{"an older shim says nothing", "", "/usr/local/bin/bash", `eval "$(treewright shell-init bash)"`},
+		{"the shim names no shell treewright has", "tcsh", "/bin/zsh", `eval "$(treewright shell-init zsh)"`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(shellinit.ShellVar, tc.shim)
+			t.Setenv("SHELL", tc.login)
+			stderr, _ := refreshThroughAWrapper(t, f, "000000000000")
+			if got := flat(stderr); !strings.Contains(got, "in each, run "+tc.want) {
+				t.Errorf("stderr = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 

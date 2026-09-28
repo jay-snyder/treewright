@@ -1,10 +1,13 @@
 # treewright shell integration for bash. Load with: eval "$(treewright shell-init bash)"
 
-# Which treewright emitted the wrapper below, for "treewright doctor" to compare
-# against itself. A shell keeps whatever it loaded at start, and a binary cannot
-# read its parent's function table, so this is the only way the two can be told
-# apart. Exported because doctor is a child process.
+# Which treewright emitted the wrapper below, and for which shell. A shell keeps
+# whatever it loaded at start, and a binary cannot read its parent's function
+# table, so these are the only way either can be asked: "treewright doctor"
+# compares the first against itself, and "treewright refresh" reads the second
+# to name the line that reloads a shell it cannot reach. Exported because both
+# are child processes.
 export TREEWRIGHT_SHELL_INIT_VERSION="{{version}}"
+export TREEWRIGHT_SHELL_INIT_SHELL=bash
 
 treewright() {
   local evalfile rc

@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/jay-snyder/treewright/internal/shellinit"
 )
 
 func TestShellQuoteSurvivesEveryShell(t *testing.T) {
@@ -118,6 +120,29 @@ func TestMoveShellReportsAnUnwritableEvalFile(t *testing.T) {
 	}
 	if !strings.Contains(got, "cd /somewhere") {
 		t.Errorf("stderr = %q, want the by-hand cd line", got)
+	}
+}
+
+// TestReloadShellWithoutIntegrationSaysWhatToRun is moveShell's invariant held
+// for reloadShell. refresh never calls it without an eval file, but the
+// by-hand line lives beside the emit so that no caller has to remember it.
+func TestReloadShellWithoutIntegrationSaysWhatToRun(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	t.Setenv(shellinit.ShellVar, "")
+	t.Setenv("SHELL", "/bin/zsh")
+	var stderr strings.Builder
+	env := &Env{EvalFile: "", Stderr: &stderr, Argv0: "tw"}
+
+	reloadShell(env)
+
+	if entries, err := os.ReadDir(dir); err != nil || len(entries) != 0 {
+		t.Errorf("with no eval file configured, reloadShell wrote %v (%v)", entries, err)
+	}
+	got := flat(stderr.String())
+	if !strings.Contains(got, "the shell wrapper was not reloaded") ||
+		!strings.Contains(got, `run eval "$(treewright shell-init zsh)"`) {
+		t.Errorf("stderr = %q, want what did not happen and the by-hand line", got)
 	}
 }
 

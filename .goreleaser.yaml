@@ -137,11 +137,10 @@ homebrew_casks:
             That rewrites every copy of the agent plugin — the user-level one, and
             any a worktree was given when it was created, which nothing has looked
             at since — and reloads the tmux key bindings into the server you are
-            attached to.
+            attached to, and the shell wrapper in the terminal you run it in.
 
-            Open a new terminal as well: only a shell can replace its own
-            functions, so this one keeps the old wrapper until it restarts.
-            "tw doctor" says whether anything is still behind.
+            Any other terminal keeps the old wrapper until it restarts, so open
+            new ones as well. "tw doctor" says whether anything is still behind.
           AFTER_UPGRADE
         end
       end

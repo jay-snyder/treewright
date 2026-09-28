@@ -394,9 +394,9 @@ three are quiet about it:
 - **The tmux server you're attached to.** It keeps what it loaded at start,
   which may have been weeks ago. `tw refresh` reloads the bindings onto whatever
   keys they're already on.
-- **The shell you're sitting in.** Only that shell can replace its own
-  functions, so open a new terminal. `tw doctor` and `tw refresh` both say when
-  yours is out of date, since it's the one thing neither can fix.
+- **The shells you have open.** Each keeps the `tw` it loaded when it started.
+  `tw refresh` reloads the one you run it in, and names the line that reloads
+  any other — or open a new terminal. `tw doctor` says when yours is out of date.
 
 Your config file is yours and never gets rewritten behind you. When you want the
 newer commentary and any key added since, `tw setup --refresh` regenerates one in

@@ -27,9 +27,9 @@ import (
 //
 // The other two are here because "after upgrading, run this" is worth being one
 // command rather than three, and because a tmux server routinely outlives an
-// upgrade by weeks with nobody noticing. What is deliberately not here is the
-// shell: a wrapper function lives in the shell that loaded it, and no child
-// process can replace its parent's. That one is said rather than done.
+// upgrade by weeks with nobody noticing. So is the shell, as far as it can be
+// reached: the one shell refresh can reload is the one whose wrapper ran it,
+// and every other one is told the line that reloads it.
 //
 // It refreshes and does not install. A checkout with no plugin in it is left
 // alone unless the config carries one, the tmux bindings are reloaded only into
@@ -55,7 +55,7 @@ func cmdRefresh(env *Env, args []string) error {
 
 	refreshAgentPlugin(env, cfg)
 	refreshTmuxBindings(env)
-	reportStaleShell(env)
+	refreshShell(env)
 	return nil
 }
 
@@ -233,32 +233,28 @@ func describeKeys(keys tmuxinit.Keys) string {
 	return strings.Join(lines, "\n")
 }
 
-// reportStaleShell says when the wrapper in the calling shell is not the one
-// this binary emits — the one part of the integration refresh cannot fix.
+// refreshShell reloads the wrapper in the calling shell when it is not the one
+// this binary emits.
 //
-// treewright runs in its own process and cannot define a function in its
-// parent's, which is the same limitation the eval-file protocol exists to work
-// around and cannot help with here: there is no shell command that replaces a
-// function whose text this process would have to produce first. Opening a new
-// terminal is the fix, and saying so is the whole of what this can do.
+// A wrapper function lives in the shell that loaded it, and no child process
+// can define one in its parent. But treewright is not a bare child when the
+// wrapper runs it: the wrapper sources the eval file afterwards, which is how
+// cd moves the shell, and a shim sourced there redefines treewright and tw in
+// place. The call doing the sourcing finishes on the body it started with and
+// the next call gets the new one, so a wrapper replacing itself is safe. See
+// shellinit.Reload for what is written and why it names no shell.
 //
-// Silent when nothing is loaded at all. That is a state doctor reports with the
-// line to paste, and a command about upgrading is not where somebody finds out
-// they never installed it.
-func reportStaleShell(env *Env) {
-	if env.EvalFile == "" {
+// Silent without the eval file. The file is the one fact that says a wrapper
+// is calling. TREEWRIGHT_SHELL_INIT_VERSION alone is inherited by every child
+// process, including a shell that never loaded the integration, so a stale
+// value proves nothing about the shell this runs in. Where nothing is loaded
+// at all, doctor reports that with the line to paste, and a command about
+// upgrading is not where somebody finds out they never installed it. Loading
+// it is shell-init's decision, made in a file the user owns. Silent, too,
+// when the wrapper is already current, which is most runs.
+func refreshShell(env *Env) {
+	if env.EvalFile == "" || shellinit.Current(os.Getenv(shellinit.VersionVar)) {
 		return
 	}
-	if shellinit.Current(os.Getenv(shellinit.VersionVar)) {
-		return
-	}
-	env.progressf("your shell still holds the wrapper an older treewright emitted\n" +
-		"nothing here can replace a function in the shell that loaded it\n" +
-		staleShellAdvice)
+	reloadShell(env)
 }
-
-// staleShellAdvice is the way out of a wrapper an older treewright emitted,
-// spelled once for the two commands that meet one — doctor and refresh. No
-// process can define a function in its parent, so this sentence is the whole of
-// the fix in either place.
-const staleShellAdvice = "open a new terminal, or re-run the line in your startup file"

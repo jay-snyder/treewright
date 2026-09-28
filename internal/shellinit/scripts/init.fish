@@ -1,10 +1,13 @@
 # treewright shell integration for fish. Load with: treewright shell-init fish | source
 
-# Which treewright emitted the wrapper below, for "treewright doctor" to compare
-# against itself. A shell keeps whatever it loaded at start, and a binary cannot
-# read its parent's function table, so this is the only way the two can be told
-# apart. Exported because doctor is a child process.
+# Which treewright emitted the wrapper below, and for which shell. A shell keeps
+# whatever it loaded at start, and a binary cannot read its parent's function
+# table, so these are the only way either can be asked: "treewright doctor"
+# compares the first against itself, and "treewright refresh" reads the second
+# to name the line that reloads a shell it cannot reach. Exported because both
+# are child processes.
 set -gx TREEWRIGHT_SHELL_INIT_VERSION "{{version}}"
+set -gx TREEWRIGHT_SHELL_INIT_SHELL fish
 
 function treewright
     # ${TMPDIR:-/tmp}, as the other shims spell it: the fallback has to cover a
@@ -31,6 +34,12 @@ function treewright
     return $saved
 end
 
+# Erased before any is added, because fish keeps every completion it is given:
+# sourced a second time, by "treewright refresh" or by re-running the startup
+# line, this file would leave two of each behind. Every __complete below would
+# then run once per copy, and a completion a newer shim dropped would still be
+# offered.
+complete -c treewright -e
 complete -c treewright -f
 complete -c treewright -n __fish_use_subcommand -a new           -d 'create a worktree and branch, and open a tmux window in it'
 complete -c treewright -n __fish_use_subcommand -a move          -d 'move uncommitted work out of the main checkout into a new worktree'

@@ -342,8 +342,8 @@ func checkShellIntegration(env *Env, r *report) {
 			// An empty variable and a stale one are one finding: both mean the
 			// function in this shell came from a binary that is no longer the one
 			// running, and the fix — a shell that evaluates the line again — is the
-			// same. treewright cannot do it from here, a process having no way to
-			// define a function in its parent.
+			// same. doctor reports and changes nothing, so it names the fix rather
+			// than making it.
 			r.addf(levelWarn, "shell integration", "loaded, but not by this treewright\n"+
 				"the wrapper in this shell is the one it started with\n"+staleShellAdvice)
 		}
@@ -354,15 +354,21 @@ func checkShellIntegration(env *Env, r *report) {
 	const notLoaded = "not loaded\ncd and rm cannot move your shell\n"
 
 	shell := filepath.Base(os.Getenv("SHELL"))
-	switch shell {
-	case "zsh", "bash":
-		r.addf(levelWarn, "shell integration", notLoaded+"add to your startup file:  eval \"$(treewright shell-init %s)\"", shell)
-	case "fish":
-		r.addf(levelWarn, "shell integration", notLoaded+"add to your config:  treewright shell-init fish | source")
-	default:
+	line, known := shellinit.LoadLine(shell)
+	switch {
+	case !known:
 		r.addf(levelWarn, "shell integration", notLoaded+"see \"%s help shell-init\" for the line your shell wants", env.Argv0)
+	case shell == "fish":
+		r.addf(levelWarn, "shell integration", notLoaded+"add to your config:  %s", line)
+	default:
+		r.addf(levelWarn, "shell integration", notLoaded+"add to your startup file:  %s", line)
 	}
 }
+
+// staleShellAdvice is how doctor says to replace a wrapper an older treewright
+// emitted. doctor only reports, so it names the fix. refresh makes it, in the
+// shell refresh is run from, and names the line for every other shell.
+const staleShellAdvice = "open a new terminal, or re-run the line in your startup file"
 
 // checkRelease says whether a newer treewright has been published.
 //

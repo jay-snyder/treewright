@@ -27,7 +27,7 @@ import (
 // Deliberately not shared with internal/agentinit's equivalent, which enforces
 // the same shape over its plugin folder. What each one is really made of is
 // the sentence it fails with — one sends you to a module's Plugin list, the
-// other to the scripts map and an embed directive — and a helper taking both
+// other to the shims table and an embed directive — and a helper taking both
 // the declared set and the message it should print would be a parameterized
 // wrapper around a directory walk, which is not an abstraction worth a package.
 func TestEveryScriptIsDeclared(t *testing.T) {
@@ -51,7 +51,7 @@ func TestEveryScriptIsDeclared(t *testing.T) {
 
 	for name := range checkedIn {
 		if !declared[name] {
-			t.Errorf("scripts/%s is checked in but no shell emits it — add it to the scripts map with an embed directive, or delete it", name)
+			t.Errorf("scripts/%s is checked in but no shell emits it — add it to the shims table with an embed directive, or delete it", name)
 		}
 	}
 	for name := range declared {
