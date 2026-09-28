@@ -72,11 +72,12 @@ in that package sets session options.
 
 A tmux server does not outlive a reboot; the checkouts it had windows on do. So a
 repository's session is something you reopen, and `tw restore` reopens all of one
-at once — the base window, a window per worktree, each running `resume_command`
-with `command` behind it, and then this terminal attached to the session. What it
-opens is what `tw ls` lists. Why nothing is saved, and why it stays out of the
-session on the one run that has something to report, is in
-[`design-notes.md`](design-notes.md).
+at once — the base window, a window for each scratch session the reboot
+interrupted, a window per worktree, each resuming its conversation with
+`command` behind it, and then this terminal attached to the session. What it
+opens is what `tw ls` lists. Why no layout is saved, what is kept instead, and
+why it stays out of the session on the one run that has something to report, is
+in [`design-notes.md`](design-notes.md).
 
 **One tab per repository is the pattern, and generating it is not treewright's
 job.** `restore` takes one repository, so the terminal side is a tab per

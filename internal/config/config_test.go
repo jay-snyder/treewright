@@ -338,6 +338,42 @@ func TestAgentKeyIsADefaultsBundle(t *testing.T) {
 	}
 }
 
+// TestResumingByIDFollowsTheModulesResumeCommand: the id form is the module's
+// other spelling of its own resume, so it applies exactly while resume_command
+// is the module's — however the file came to say so — and a config that wrote
+// its own keeps its own, flags and all.
+func TestResumingByIDFollowsTheModulesResumeCommand(t *testing.T) {
+	dir := registry(t, map[string]string{
+		"bare":      "main_dir = \"/tmp/repo\"\nagent = \"claude\"\n",
+		"spelled":   "main_dir = \"/tmp/repo\"\nagent = \"claude\"\nresume_command = \"claude --continue {prompt}\"\n",
+		"command":   "main_dir = \"/tmp/repo\"\nagent = \"claude\"\ncommand = \"claude --model other {prompt}\"\n",
+		"own":       "main_dir = \"/tmp/repo\"\nagent = \"claude\"\nresume_command = \"claude --continue --model other {prompt}\"\n",
+		"no-module": "main_dir = \"/tmp/repo\"\n",
+	})
+	for name, want := range map[string]bool{
+		"bare":    true,
+		"spelled": true,
+		// command is not what resuming runs, so it has no say over the id form.
+		"command": true,
+		"own":     false,
+		// The defaults are claude's own commands, and still no module is named:
+		// a module is never guessed from what a command says.
+		"no-module": false,
+	} {
+		c, err := Load(filepath.Join(dir, name+".toml"))
+		if err != nil {
+			t.Fatalf("Load(%s): %v", name, err)
+		}
+		got := c.SessionResumeCommand()
+		if (got != "") != want {
+			t.Errorf("%s: SessionResumeCommand() = %q, want one: %v", name, got, want)
+		}
+		if quit := c.SessionQuitReason(); (quit != "") != want {
+			t.Errorf("%s: SessionQuitReason() = %q, want one: %v — a record must never be written by a rule that cannot also end it", name, quit, want)
+		}
+	}
+}
+
 func TestLoadExpandsHomeAndEnv(t *testing.T) {
 	home, err := os.UserHomeDir()
 	if err != nil {

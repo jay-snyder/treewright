@@ -72,8 +72,9 @@ type Env struct {
 	Stdout  io.Writer // the answer
 	Stderr  io.Writer // progress, warnings, prompts
 
-	// Stdin is a payload a caller pipes in. Only `guard` reads it — agent hooks
-	// hand their tool call over that way — and it is here rather than read from
+	// Stdin is a payload a caller pipes in. Only the commands agent hooks run
+	// read it — `guard` its tool call, `session-start` and `signal clear` the
+	// session starting or ending — and it is here rather than read from
 	// os.Stdin directly for the reason every other stream is: a test points it
 	// at a buffer.
 	Stdin io.Reader
@@ -267,15 +268,26 @@ With no slug a menu is shown. Naming a slug skips it, and an unambiguous prefix
 of one is enough.
 
 The scratch windows standing in the main checkout are rows too, under the base
-row, and naming one — in full — switches to it. That works only while it is
-open: a closed scratch window keeps nothing, so there is nothing to resume, and
+row, and naming one — in full — switches to it. One whose window a restart or a
+kill took is still a row, and resuming it reopens the window on the conversation
+its agent was having. A scratch session ends when its agent is quit or when
+"treewright close" closes it, and an ended one has nothing to resume:
 "treewright scratch <name>" is what opens another.
 
 The base checkout heads that menu, so the window you return to between worktrees
 is reachable from the same key as the rest — and after a reboot, which a checkout
 on disk survives and a tmux session does not, it is reopened along with them. Name
-it "base" or name the branch it is parked on. It runs resume_command like every
-other row; "treewright base" is the way in that opens it fresh.
+it "base" or name the branch it is parked on. It resumes like every other row,
+on the base window's own conversation rather than the latest one in the main
+checkout, which may be a scratch window's; "treewright base" is the way in that
+opens it fresh.
+
+Those conversations are the agent's to name. Its SessionStart hook reports each
+one as it begins, and treewright keeps the id under .git/treewright/sessions/
+for the base window and each scratch window. That needs an agent module that
+resumes by id — agent = "claude" — and a resume_command left as the module's
+own; otherwise every window resumes with resume_command, as a worktree always
+does.
 
 resume_command is "carry on where I left off", and there is not always anything
 to carry on from: a worktree whose first window never opened, or an agent that
@@ -414,9 +426,12 @@ the one window "base" means, however many of these stand beside it. The window
 is named after a ticket key in the name, or after the name itself, as a
 worktree's window is, unless [window-name] overrides it.
 
-Nothing about a scratch window outlives it. Once it is closed, or lost to a
-restart, there is nothing for resume to find, and "treewright restore" does not
-reopen it.
+Its conversation outlives its window. Lost to a restart or a kill, it is
+listed with no window, "treewright resume <name>" reopens it on the same
+conversation, and "treewright restore" reopens it with the rest. It ends when
+its agent is quit, or when "treewright close <name>" closes it, window or no
+window — after which the name is free again. This needs an agent module that
+resumes by id, as "treewright help resume" says.
 
 --prompt and --prompt-file hand the agent its first instruction, as they do on
 "new". --repo opens the window in another repository and leaves your tmux
@@ -436,23 +451,25 @@ Nothing is printed to stdout: the answer is a window, and the name you gave it.`
 			args:    "[-d] [--fresh] " + argRepo,
 			summary: "reopen a repository's windows after a restart, and attach to them",
 			long: `Opens the windows a repository's session should have after the
-machine has restarted: the base window in the main checkout, then one window
-per worktree, each running resume_command with command behind it — the same
-"carry on where I left off" that "treewright resume" gives one worktree at a
-time. Then attaches this terminal to the session.
+machine has restarted: the base window in the main checkout, then a window for
+each scratch session the restart interrupted, then one window per worktree,
+each carrying on where it left off with command behind it — the same resume
+that "treewright resume" gives one window at a time. Then attaches this
+terminal to the session.
 
 What it opens is what "treewright ls" lists, which is why there is nothing to
 preview and no --dry-run: the listing is the answer.
 
-Nothing is saved and nothing is replayed. The worktrees on disk are the record,
-so what you get is a tidied session — the base window first, then the worktrees
-in the order ls prints them — rather than a photocopy of the session you lost,
-with its window order and its splits.
+No layout is saved and none is replayed. The worktrees on disk are the record,
+so what you get is a tidied session — the base window first, then its scratch
+windows, then the worktrees, in the order ls prints them — rather than a
+photocopy of the session you lost, with its window order and its splits. What
+is kept is only which conversation each agent in the main checkout was having,
+written by the agent's own hooks, so the base window and each scratch window
+resume that one rather than the latest one there.
 
-A window already open on a worktree is left exactly as it is, so this is also
-what to type in a session that is already up: it opens whatever is missing.
-Scratch windows are neither reopened nor touched, since nothing on disk records
-one.
+A window already open is left exactly as it is, so this is also what to type in
+a session that is already up: it opens whatever is missing.
 
 On a clean restore it attaches at once and says nothing, the session being its
 own report. Where a window could not be opened it stays out instead, so that
@@ -538,6 +555,11 @@ fires when the agent starts work, blocks on you, or finishes runs
 your worktrees wants attention. The state lives on the window and dies with it,
 so a closed window never leaves a stale claim behind.
 
+"clear" is what an agent's SessionEnd hook runs, and it also reads that hook's
+payload on stdin: when the agent in a scratch window ended because a person quit
+it, the scratch session is over, and its recorded conversation goes with it.
+Every other ending — a kill, a restart, a /clear — leaves the record alone.
+
 Anywhere out of scope — outside tmux, outside a registered repository, in a
 checkout with no window — it exits 0 and prints nothing. Hooks fire in every
 session the agent runs, and most of those are none of treewright's business; a
@@ -585,6 +607,13 @@ hook's plain stdout is added to the session as context, so what this prints is
 addressed to the agent: it is how the agent learns that the checkout it is
 about to work in moved under it.
 
+It also records, without a word, which conversation the session is, when it
+starts in the base window or a scratch window: the id in the hook's payload on
+stdin, kept under .git/treewright/sessions/. That is what lets resume and
+restore reopen those windows on their own conversations, the directory not
+being enough to tell them apart. It is not a feature and is not switched on:
+it happens wherever the agent module resumes by id.
+
 Features are off unless a config lists them by name, and off is the permanent
 default — each one is work treewright does on its own initiative, at a moment
 nobody typed anything:
@@ -615,8 +644,9 @@ is marked with an asterisk.
 The base checkout heads the listing, as it heads the resume menu, under the branch
 it is parked on. Its status is "base" rather than one of the removable ones, and
 its divergence is how far your main checkout has drifted from origin — whether
-what you are reading there is stale. Any scratch windows open on it follow, by
-name, with the status "scratch" and no divergence of their own.
+what you are reading there is stale. Its scratch sessions follow, by name, with
+the status "scratch" and no divergence of their own — with no window, where a
+restart took one that resume and restore will reopen.
 
 With no worktrees yet the table prints nothing, "no worktrees" being the whole of
 the answer, while --json still carries the base row: a schema whose first row
@@ -693,6 +723,12 @@ An unambiguous prefix of a slug is enough while the worktree is still there;
 once it has been removed there is nothing to match against, so name it in full.
 "base" closes the main checkout's window, and a scratch window's name closes
 that one.
+
+Closing a scratch window ends its session, not only its window: its
+conversation is no longer kept, so neither resume nor restore will reopen it.
+A scratch session whose window a restart took is ended the same way, with no
+window to close. The base window's conversation is kept however its window is
+closed.
 
 --repo closes a window in another repository's session. Slugs collide across
 repositories — two of them called "fix" is the ordinary case, not a contrived

@@ -32,9 +32,12 @@ import (
 // for the same reason.
 //
 // A scratch window is the exception in both directions. It is found by its name,
-// since the window standing for its directory is the base window — and a name
-// that finds no open scratch window finds nothing, since a scratch window has no
-// worktree whose record could outlive it.
+// since the window standing for its directory is the base window — and closing
+// it ends the scratch session, not only the window: the record of its
+// conversation goes too, so restore will not bring it back. That is what makes
+// this the way a person says a scratch session is done, and why it also takes a
+// recorded session whose window is already gone, which then has nothing but its
+// record to lose.
 
 func cmdClose(env *Env, args []string) error {
 	var repoName string
@@ -59,11 +62,20 @@ func cmdClose(env *Env, args []string) error {
 		return fmt.Errorf("tmux is not installed, so there is no window to close")
 	}
 	session := sessionFor(cfg)
-	windows, scratch := tmux.Windows(session), tmux.Scratch(cfg.Name)
-	target := closeTarget(env, cfg, slug, scratch)
+	windows := tmux.Windows(session)
+	target := closeTarget(env, cfg, slug, scratchSessions(cfg))
 	window, ok := target.Window, target.Scratch
 	if !target.Scratch {
 		window, ok = windows[target.Dir]
+	}
+	// A recorded scratch session whose window is gone — a restart took it, and
+	// restore has not been run — has only its record left, and ending it is
+	// removing that. Said rather than refused: closing is the request, and the
+	// session is exactly as closed afterwards as one whose window was open.
+	if target.Scratch && window.ID == "" {
+		forgetSession(cfg, target.name())
+		env.progressf("ended scratch session %s, which had no window open\nrestore will not reopen it", target.name())
+		return nil
 	}
 	if !ok || window.ID == "" {
 		// Said for every name but the base checkout's: the reader may have meant a
@@ -75,7 +87,7 @@ func cmdClose(env *Env, args []string) error {
 		}
 		return fmt.Errorf("no window is open on %s in %s%s%s", target.name(), cfg.Name, under(notScratch), asFields(
 			field("looked for a window on", target.Dir),
-			field("open in that session now", strings.Join(openWindowNames(windows, scratch), "\n")),
+			field("open in that session now", strings.Join(openWindowNames(windows, tmux.Scratch(cfg.Name)), "\n")),
 		))
 	}
 
@@ -86,7 +98,15 @@ func cmdClose(env *Env, args []string) error {
 	// that would have read it. A message that arrives only when nothing important
 	// happened is not a message.
 	warnIfAgentWorking(env, window)
-	env.progressf("closing tmux window %s%s", window.Name, under(strings.Join(closeCosts(window), "\n")))
+	costs := closeCosts(window)
+	// Before the window goes, like everything else here, and for the stronger
+	// reason: killing the window kills its agent, which reports the ending as a
+	// kill — the one ending that leaves a record alone, since it is also what a
+	// restart looks like.
+	if target.Scratch && forgetSession(cfg, target.name()) {
+		costs = append(costs, "its conversation is no longer recorded, so restore will not reopen it")
+	}
+	env.progressf("closing tmux window %s%s", window.Name, under(strings.Join(costs, "\n")))
 	if err := tmux.KillWindow(window.ID); err != nil {
 		return err
 	}
@@ -105,9 +125,10 @@ func cmdClose(env *Env, args []string) error {
 //
 // The base checkout answers to its own names, as it does in the resume menu.
 // Closing its window is a legitimate thing to want — it usually ends the
-// repository's session, which is said rather than refused. An open scratch
-// window answers to its exact name next, as it does in chooseWorktree and for
-// its reasons.
+// repository's session, which is said rather than refused — and it leaves the
+// base window's record alone, closing the window being no reason for the next
+// `resume base` to lose its conversation. A scratch session answers to its exact
+// name next, open or recorded, as it does in chooseWorktree and for its reasons.
 func closeTarget(env *Env, cfg *config.Config, slug string, scratch map[string]tmux.Window) choice {
 	if base := baseChoice(cfg); slices.Contains(baseNames(cfg, base), slug) {
 		return base

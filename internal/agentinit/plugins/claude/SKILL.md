@@ -58,7 +58,7 @@ does outside tmux.
 
     treewright ls --json
 
-One JSON object per checkout, and one per open scratch window:
+One JSON object per checkout, and one per scratch window:
 
 - `"base": true` marks the main checkout. It is not a worktree,
   never a target for rm or prune, and new work should fork from it rather than
@@ -70,7 +70,9 @@ One JSON object per checkout, and one per open scratch window:
   opened under — what send, close and resume take — and it has no branch and a
   `null` divergence of its own. It is not a worktree either: rm and prune
   cannot name it, and work that will be committed never goes there. Its row
-  with `window_is_current` set is how an agent in one knows it is in one.
+  with `window_is_current` set is how an agent in one knows it is in one. A row
+  with an empty `window_id` is one a restart interrupted, waiting for `resume`
+  or `restore` to reopen it on its conversation.
 - `status`: `dirty` and `unpushed` mean work
   that exists nowhere else; `merged` has landed and is safe to
   remove; `active` is pushed and unmerged — an open pull request.
@@ -246,10 +248,11 @@ Unlike `base`, which always means the one base window, `scratch` always opens a
 new window. `--prompt`, `--prompt-file`, `--repo` and a third positional that
 renames the window all work as they do on `new`.
 
-**Nothing about it outlives its window.** Once it is closed, or lost when the
-machine restarts, there is nothing for `resume` to find, and `restore` does not
-reopen it. So what it finds has to land somewhere that lasts before the window
-goes — a file, a pull request comment, or a message back to whoever asked:
+**A restart does not end it; quitting its agent or closing it does.** After a
+reboot, `resume <name>` and `restore` reopen it on the conversation it was
+having. Once it has ended there is nothing to reopen, so what it finds has to
+land somewhere that lasts before then — a file, a pull request comment, or a
+message back to whoever asked:
 
     treewright send --repo cibo base "findings are in /tmp/retry-loop-findings.md"
 

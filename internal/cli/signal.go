@@ -47,7 +47,15 @@ var signalStates = []string{stateWorking, stateWaiting, stateDone, stateClear}
 // such session into a nagging one, which is how integrations get ripped out.
 // This is the one command deliberately outside the "a background failure needs
 // somewhere to be reported" rule: a no-op signal is not a failure.
-func cmdSignal(_ *Env, args []string) error {
+//
+// `clear` is also the one state that reads its hook's payload. It is what the
+// agent's SessionEnd hook runs, and a scratch session whose agent a person quit
+// is over — so its record goes, and restore will not bring it back. Every other
+// ending leaves the record, a killed agent above all; see forgetAQuitSession.
+// Read here rather than by a hook of its own because every installed copy of
+// the plugin already runs this at SessionEnd, and a new hook would be wiring no
+// copy on disk has.
+func cmdSignal(env *Env, args []string) error {
 	positional, err := parseArgs("signal", args, nil, nil, 1)
 	if err != nil {
 		return err
@@ -58,6 +66,9 @@ func cmdSignal(_ *Env, args []string) error {
 	}
 	if !slices.Contains(signalStates, state) {
 		return usageErrorf("signal", "unknown state %q (one of: %s)", state, strings.Join(signalStates, ", "))
+	}
+	if state == stateClear {
+		forgetAQuitSession(env)
 	}
 
 	w, ok := signalTarget()

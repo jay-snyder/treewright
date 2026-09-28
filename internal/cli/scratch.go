@@ -35,13 +35,14 @@ import (
 // going to address it: an "ask-1" that has to be looked up before it can be sent
 // to is worse than typing a word.
 //
-// Nothing about one survives its window. That is the state of affairs rather than
-// a principle — see "Scratch windows" in docs/design-notes.md — and the name is
-// kept as the stable handle, and .git/treewright/scratch/ kept free, so that a
-// scratch session can learn to come back after a restart without either moving.
-// Whatever records one has to record the base window's conversation too: until
-// then the base window resumes with --continue, which picks the most recent
-// conversation in the directory, and a scratch session is one.
+// Its conversation survives its window. The agent's own SessionStart hook
+// records it under the name, and resume and restore reopen the window on that
+// conversation after a restart takes it — the name being the stable handle that
+// always made that possible. The same record is kept for the base window, whose
+// --continue would otherwise pick up a scratch session's conversation, a
+// scratch session being the most recent conversation in the directory as often
+// as not. `close` ends one, and so does quitting its agent; see sessions.go for
+// why nothing else does.
 
 func cmdScratch(env *Env, args []string) error {
 	var prompt, promptFile, repoName string
@@ -107,6 +108,12 @@ func cmdScratch(env *Env, args []string) error {
 //
 // The base checkout's names are refused too. They win every lookup, so a scratch
 // window called "base" could be opened and never reached.
+//
+// So is the name of a recorded scratch session whose window is gone. It is still
+// that session's name — resume reopens it by that name, and restore will — so a
+// second window under it would be a second session answering to one word, and
+// the first time its agent started, its record would overwrite the one it
+// collided with.
 func refuseScratchName(env *Env, cfg *config.Config, name string) error {
 	if slices.Contains(baseNames(cfg, baseChoice(cfg)), name) {
 		return fmt.Errorf("%q already names the base checkout in %s\n"+
@@ -121,25 +128,38 @@ func refuseScratchName(env *Env, cfg *config.Config, name string) error {
 			"pick another name, or reach the worktree's agent with %s",
 			name, cfg.Name, hint(env, cfg, "resume", name))
 	}
-	if _, open := tmux.Scratch(cfg.Name)[name]; open {
-		return fmt.Errorf("a scratch window called %s is already open in %s\n"+
-			"pick another name for a second one, or go to it with %s",
-			name, cfg.Name, hint(env, cfg, "resume", name))
+	if w, known := scratchSessions(cfg)[name]; known {
+		if w.ID != "" {
+			return fmt.Errorf("a scratch window called %s is already open in %s\n"+
+				"pick another name for a second one, or go to it with %s",
+				name, cfg.Name, hint(env, cfg, "resume", name))
+		}
+		return fmt.Errorf("a scratch session called %s is recorded in %s, waiting to be reopened\n"+
+			"its window went, but its conversation did not%s",
+			name, cfg.Name, asFields(
+				field("reopen it with", hint(env, cfg, "resume", name)),
+				field("or end it with", hint(env, cfg, "close", name)),
+			))
 	}
 	return nil
 }
 
 // refuseSlugOfAScratchWindow is refuseScratchName from the other side: a slug
-// `new` or `move` is about to give a worktree, already answering for an open
-// scratch window.
+// `new` or `move` is about to give a worktree, already answering for a scratch
+// session — open, or recorded and waiting to be reopened.
 func refuseSlugOfAScratchWindow(env *Env, cfg *config.Config, slug string) error {
-	if _, open := tmux.Scratch(cfg.Name)[slug]; !open {
+	w, known := scratchSessions(cfg)[slug]
+	if !known {
 		return nil
 	}
-	return fmt.Errorf("%s is the name of a scratch window open in %s\n"+
+	what := "a scratch window open"
+	if w.ID == "" {
+		what = "a scratch session recorded"
+	}
+	return fmt.Errorf("%s is the name of %s in %s\n"+
 		"send, close and resume could not tell a worktree by that name from it\n"+
-		"pick another slug, or close the scratch window first with %s",
-		slug, cfg.Name, hint(env, cfg, "close", slug))
+		"pick another slug, or end the scratch session first with %s",
+		slug, what, cfg.Name, hint(env, cfg, "close", slug))
 }
 
 // namesNoWorktree reports that no worktree answers to a name, even as a prefix —
@@ -152,23 +172,26 @@ func namesNoWorktree(managed []git.Worktree, name string) bool {
 }
 
 // nothingToResume is `resume`'s answer to a name nothing answers to: no worktree,
-// and no scratch window open under it.
+// and no scratch session under it, open or recorded.
 //
 // It names `scratch`, because a name typed at resume that matches no worktree is
-// as likely to be a scratch window's as a mistyped slug — and it says outright
-// that a scratch window which has closed has nothing to resume, since that is
-// the state of things, and a reader told only "no such worktree" would go looking
-// for a session that is not kept anywhere.
+// as likely to be a scratch window's as a mistyped slug — and it says which
+// scratch sessions are not kept, since a reader told only "no such worktree"
+// would go looking for a session that is not recorded anywhere. Which those are
+// depends on whether this repository records sessions at all.
 func nothingToResume(env *Env, cfg *config.Config, managed []git.Worktree, name string) error {
 	worktrees := "none yet"
 	if len(managed) > 0 {
 		worktrees = strings.Join(slugsOf(managed), "\n")
 	}
+	gone := "a scratch session ended by quitting its agent, or by close, has nothing to resume"
+	if !sessionsKept(cfg) {
+		gone = "this repository's agent is not resumed by conversation, so a closed scratch window has nothing to resume"
+	}
 	// The worktree half first, since a mistyped slug is the commoner reason to
 	// be here and its reader is looking for the list.
-	return fmt.Errorf("no worktree %q in %s, and no scratch window open by that name\n"+
-		"a scratch window keeps nothing once it closes, so a closed one has nothing to resume%s",
-		name, cfg.Name, asFields(
+	return fmt.Errorf("no worktree %q in %s, and no scratch session by that name\n%s%s",
+		name, cfg.Name, gone, asFields(
 			field("worktrees", worktrees),
 			field("open a new scratch window with", hint(env, cfg, "scratch", name)),
 		))

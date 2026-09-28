@@ -166,8 +166,9 @@ func cmdSend(env *Env, args []string) error {
 // against the last line rather than the whole capture, so an agent that happens
 // to print those words mid-screen is not mistaken for a dead one.
 //
-// Starting again is `scratch` rather than `resume` for a scratch window, which
-// once closed has nothing for resume to find.
+// Starting again is `scratch` rather than `resume` for a scratch window: `close`
+// ends a scratch session along with its window, record and all, so a resume
+// after it would find nothing to reopen.
 func refuseHeldOpen(env *Env, cfg *config.Config, window tmux.Window, pane string, target choice) error {
 	lines := strings.Split(pane, "\n")
 	if len(lines) == 0 || strings.TrimSpace(lines[len(lines)-1]) != heldOpenNotice {

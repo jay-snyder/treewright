@@ -75,20 +75,39 @@ import _ "embed"
 // own directory, and claude resumes the session that last ran in the directory
 // it is started from. The base checkout is where that stops being exact, since a
 // scratch window's agent runs there beside the base window's and whichever ran
-// last is the one continued — see "Scratch windows" in docs/design-notes.md. {prompt} is where a --prompt lands, as a positional
-// argument in both templates — claude takes an initial prompt that way fresh
-// or resumed. The templates must agree with the config package's defaults,
-// which a test holds them to.
+// last is the one continued. So there, resume names the conversation instead —
+// `--resume <session_id>`, the id claude's own SessionStart hook reported and
+// `treewright session-start` recorded for the window. See "Scratch windows" in
+// docs/design-notes.md. {prompt} is where a --prompt lands, as a positional
+// argument in all three templates — claude takes an initial prompt that way
+// fresh or resumed. The first two must agree with the config package's
+// defaults, which a test holds them to.
+//
+// What claude reports at the two ends of a session was read off the binary
+// (2.1.283) rather than taken from its documentation, which is silent on the
+// half that matters. `/clear` ends the session with reason `clear` and then
+// starts one under a new id with source `clear`, so the record is rewritten
+// rather than left pointing at a conversation the window no longer runs.
+// `/exit` and a double Ctrl-C end it with `prompt_input_exit` — the QuitReason
+// below. Killing the process ends it with `other`: `tmux kill-window`, the tmux
+// server going away and a SIGTERM all do, which is why that reason must never
+// end a record, a reboot being that ending delivered to every agent at once.
+// `--resume` keeps the id it was given, so the SessionStart after it records
+// what was already there; for an id with no conversation behind it, it prints
+// "No conversation found" and exits 1 within a second, which is the fast
+// failure resume's fallback runs `command` behind.
 var claude = Agent{
-	Name:            "claude",
-	Command:         "claude {prompt}",
-	ResumeCommand:   "claude --continue {prompt}",
-	ProjectSettings: ".claude/settings.local.json",
-	UserDir:         "~/.claude",
-	UserDirVar:      "CLAUDE_CONFIG_DIR",
-	UserSettings:    "settings.json",
-	UserPlugin:      "skills/treewright",
-	ProjectPlugin:   ".claude/skills/treewright",
+	Name:                 "claude",
+	Command:              "claude {prompt}",
+	ResumeCommand:        "claude --continue {prompt}",
+	SessionResumeCommand: "claude --resume {session} {prompt}",
+	QuitReason:           "prompt_input_exit",
+	ProjectSettings:      ".claude/settings.local.json",
+	UserDir:              "~/.claude",
+	UserDirVar:           "CLAUDE_CONFIG_DIR",
+	UserSettings:         "settings.json",
+	UserPlugin:           "skills/treewright",
+	ProjectPlugin:        ".claude/skills/treewright",
 	// The plugin's manifest, in both senses. Each file is checked in under
 	// plugins/claude and named here, so the bytes are a real file a contributor
 	// can read, lint and point `claude plugin validate` at — while what *ships*

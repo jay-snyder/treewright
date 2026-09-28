@@ -71,6 +71,33 @@ type Agent struct {
 	Command       string
 	ResumeCommand string
 
+	// SessionResumeCommand resumes one particular conversation rather than the
+	// directory's latest, with the conversation's id at {session}. It is what
+	// keeps resuming exact where ResumeCommand stops being: in the base
+	// checkout, where a scratch window's agent stands beside the base window's
+	// and "carry on in this directory" cannot say which of them it means. The
+	// id is the one the agent's own SessionStart hook reported, recorded by
+	// `treewright session-start` for each window standing in the base
+	// checkout. Empty for an agent with no such form, which then resumes there
+	// the way ResumeCommand resumes everywhere.
+	//
+	// A field of the module's rather than a config key, and deliberately.
+	// command and resume_command are settings a user overrides for reasons of
+	// their own, and a third one they had to know about to keep resume exact
+	// would be a trap. So it applies while resume_command is the module's own:
+	// a config that wrote its own has taken resuming into its own hands, and
+	// its flags are not treewright's to drop. See Config.SessionResumeCommand.
+	SessionResumeCommand string
+
+	// QuitReason is the reason the agent's SessionEnd hook payload gives when
+	// a person quit it, as opposed to the session being cleared, being swapped
+	// for another, or the process being killed. It is the one ending that
+	// means a scratch session is over. The rest either start another session
+	// in the same window, which rewrites the record, or are a restart, which
+	// the record exists to survive. Empty for an agent that reports no such
+	// thing, whose recorded sessions then end only by `treewright close`.
+	QuitReason string
+
 	// ProjectSettings is where the agent reads a checkout's own configuration,
 	// relative to its root. treewright does not write there — its wiring lives
 	// in the plugin below, a directory of its own — but the file still holds

@@ -106,8 +106,8 @@ func cmdGuard(env *Env, args []string) error {
 	if len(args) > 0 {
 		return nil
 	}
-	call, ok := readHookCall(env)
-	if !ok {
+	var call hookCall
+	if !readHookPayload(env, &call) {
 		return nil
 	}
 	if !slices.Contains(guardedTools, call.ToolName) {
@@ -125,23 +125,21 @@ func cmdGuard(env *Env, args []string) error {
 	return ErrRefused
 }
 
-// readHookCall decodes the payload, reporting ok=false for every way there is
-// not one to read.
+// readHookPayload decodes the payload an agent hook hands its command on stdin
+// into the struct given, reporting false for every way there is not one to
+// read. The guard reads a tool call through it, and session-start and `signal
+// clear` read the session that is starting or ending.
 //
 // The terminal check is the one that matters to a person: typed at a prompt
 // rather than run by a hook, a decoder on os.Stdin would sit there waiting for
 // input nobody intends to give, and a command that hangs is worse than one that
 // refuses. Decoding rather than reading first is what keeps a large tool_input
 // from being buffered whole for the sake of three fields.
-func readHookCall(env *Env) (hookCall, bool) {
+func readHookPayload(env *Env, into any) bool {
 	if f, ok := env.Stdin.(*os.File); ok && term.IsTerminal(int(f.Fd())) {
-		return hookCall{}, false
+		return false
 	}
-	var call hookCall
-	if err := json.NewDecoder(env.Stdin).Decode(&call); err != nil {
-		return hookCall{}, false
-	}
-	return call, true
+	return json.NewDecoder(env.Stdin).Decode(into) == nil
 }
 
 // ---- scope -------------------------------------------------------------------

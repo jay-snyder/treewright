@@ -169,6 +169,7 @@ breaks `brew upgrade` for everyone.
 | `internal/cli/close.go` | `close`: the tmux window on a worktree, gone worktree or not. |
 | `internal/cli/scratch.go` | `scratch`: another agent window on the main checkout, and the rule that its name and a slug never coincide. |
 | `internal/cli/restore.go` | `restore`: every window a repository's session should have, after a restart. |
+| `internal/cli/sessions.go` | The record of which conversation each agent in the base checkout is running: written from `session-start`, ended by `close` and by `signal clear` on a quit, read by `resume` and `restore`. |
 | `internal/cli/prompt.go` | `{prompt}`, the two flags that fill it, and what `--prompt-file` builds. |
 | `internal/cli/setup.go` | `setup` (config generation, `--refresh`) and `config`. |
 | `internal/cli/refresh.go` | `refresh`: the one post-upgrade action. |
@@ -225,8 +226,9 @@ and `tw ls --json | jq` must both stay clean. Enforced by
 code. That is what makes every command testable through `Run`.
 
 **No globals for I/O.** Streams, args, and the eval file arrive on `Env`. Tests
-point them at buffers — `Env.Stdin` included, which only `guard` reads, and
-which is on `Env` rather than taken from `os.Stdin` for exactly that reason.
+point them at buffers — `Env.Stdin` included, which only the hook verbs read
+(`guard`, `session-start`, `signal clear`), and which is on `Env` rather than
+taken from `os.Stdin` for exactly that reason.
 
 **Argv0 vs. the canonical name.** Anything the user is told to *type* uses
 `env.Argv0` (`tw`, usually). Anything destined for a *file* a program reads —
@@ -285,9 +287,30 @@ They are found through `tmux.Scratch(repo)`, a separate index keyed by name, so
 nothing that must never see one can reach one by accident — and a `choice`
 carries a scratch window as a `Scratch` flag plus the window, never as a slug. A
 scratch name and a worktree slug share one namespace, since `send`, `close` and
-`resume` take either: `scratch` refuses a live slug, an open scratch name and the
-base checkout's names, and `new`/`move` refuse an open scratch name. Lookups take
-scratch names exactly, before worktree prefixes. See "Scratch windows" in
+`resume` take either: `scratch` refuses a live slug, a scratch session's name
+(open or recorded) and the base checkout's names, and `new`/`move` refuse a
+scratch session's name. Lookups take scratch names exactly, before worktree
+prefixes — through `scratchSessions`, which is `tmux.Scratch` plus the recorded
+sessions whose windows are gone, each carried as a `Window` with no ID. See
+"Scratch windows" in `docs/design-notes.md`.
+
+**The base checkout's windows resume by conversation, and only a quit or `close`
+ends a record.** `session-start` writes `.git/treewright/sessions/<name>` — `base`
+or the scratch name — from the SessionStart payload's `session_id`, and
+`resumeWindow` hands that window the module's `SessionResumeCommand` with
+`command` behind it; worktrees keep `resume_command`. Three things are easy to
+get wrong. **A killed agent ends its session with reason `other`**, and a reboot
+kills every one — so `signal clear` removes a scratch record only on the
+module's `QuitReason`, and only while it still names the ending session;
+removing on any SessionEnd erases every scratch session at the moment the record
+exists for. **The base window's record is never removed**, only rewritten by its
+next session. **The id form is the module's, not a setting**: it applies while
+`resume_command` equals the module's own (`Config.SessionResumeCommand`), and a
+config that wrote its own keeps no records. Ids are validated on the way in and
+on the way out, since they reach a shell line. A record that cannot be written is
+the one unattended failure left silent, as `signal`'s are: the agent reading
+`session-start`'s stdout can do nothing about it, and what it costs is resuming
+by directory, as before. See "A scratch session outlives its window" in
 `docs/design-notes.md`.
 
 **The pane treewright is typed into is not a window to switch to** —
@@ -365,8 +388,9 @@ on a window that was already open and its command never ran.
 
 **treewright writes its own registry, its own plugin directory, and nothing
 else.** The whole list is `<config dir>/<name>.toml`,
-`.git/treewright/post-create-*` and `.git/treewright/move-*.patch` inside the
-repo, the worktrees, and `~/.claude/skills/treewright/` —
+`.git/treewright/post-create-*`, `.git/treewright/move-*.patch` and
+`.git/treewright/sessions/*` inside the repo, the worktrees, and
+`~/.claude/skills/treewright/` —
 `<main_dir>/.claude/skills/treewright/` when `agent-init --local` names it, and
 `$CLAUDE_CONFIG_DIR/skills/treewright/` when the agent's own variable moves that
 directory. **A user-level path is resolved through the agent module, never
@@ -536,8 +560,10 @@ runs unattended needs the same, or it fails silently.
 **`signal` is silent out of scope — deliberately outside the rule above.** Agent
 hooks run it in every session the agent has, so outside tmux, outside a
 registered repo, or with no window it exits 0 and prints nothing; a hook that
-warns is an integration that nags. It stamps the window the agent is running in
-— `tmux.CallersWindow`, when treewright opened that window for this repository —
+warns is an integration that nags. `clear` is the one state that reads its
+hook's payload, for the session record above. It stamps the window the agent is
+running in — `tmux.CallersWindow`, when treewright opened that window for this
+repository —
 and only otherwise the window of the checkout it stands in, because a scratch
 agent stands in the base checkout and asked by directory it would stamp the base
 window. The state it writes lives on the window option `@treewright_agent_state`,

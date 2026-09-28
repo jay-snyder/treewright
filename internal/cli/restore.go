@@ -2,7 +2,9 @@ package cli
 
 import (
 	"fmt"
+	"maps"
 	"os"
+	"slices"
 	"strings"
 
 	"golang.org/x/term"
@@ -33,11 +35,19 @@ import (
 // registry check calls anything else a stray, so a snapshot would need a
 // directory of its own to live in.
 //
+// The one thing on disk that is not a checkout is the record of which
+// conversation each agent in the base checkout is running, and it is not that
+// snapshot. It has one writer — the agent it names, from its own hooks — and it
+// says nothing about layout: it is how the base window gets its own
+// conversation back rather than the latest one in the directory, and how a
+// scratch session lost to the restart is known about at all. See sessions.go.
+//
 // What follows from that is what the help says out loud: restore gives you a
 // tidied session rather than a photocopy of the one you lost. The base window,
-// then the worktrees in the order `ls` prints them, and a window already open on
-// one left exactly as it is — which is also what makes this safe to type into a
-// session that is already up, where it means "open whatever is missing here".
+// then the scratch sessions it has a record of, then the worktrees — the order
+// `ls` prints them in — and a window already open on one left exactly as it is,
+// which is also what makes this safe to type into a session that is already up,
+// where it means "open whatever is missing here".
 //
 // **One repository, the one you are standing in.** No --all: a terminal tab per
 // repository is the shape of the day anyway, so batching across repositories
@@ -71,9 +81,11 @@ func cmdRestore(env *Env, args []string) error {
 
 	// resume's own pair, built by resume's own function: resume_command with
 	// command behind it, or command alone under --fresh. That is what gives every
-	// restored agent its conversation back — claude --continue picks the
+	// restored worktree agent its conversation back — claude --continue picks the
 	// conversation by directory, and the directory is what survived the reboot —
 	// and what starts a fresh agent in a worktree that has nothing to continue.
+	// The windows standing in the base checkout get the same thing through
+	// resumeWindow, which reaches their recorded conversations first.
 	//
 	// Built before anything is opened, so a command too long for tmux is one
 	// refusal rather than a dozen.
@@ -87,7 +99,7 @@ func cmdRestore(env *Env, args []string) error {
 		return err
 	}
 
-	opened, failed := restoreWindows(env, cfg, run, managed)
+	opened, failed := restoreWindows(env, cfg, run, fresh, managed)
 	selectBaseWindow(cfg)
 	session := sessionFor(cfg)
 
@@ -145,23 +157,54 @@ func cmdRestore(env *Env, args []string) error {
 	return attachTo(env, session)
 }
 
-// restoreWindows opens the base window and one window per worktree, and says
-// which of them it could not open.
+// restoreWindows opens the base window, one window per recorded scratch session
+// whose window is gone, and one per worktree, and says which of them it could
+// not open.
 //
 // The base window goes first, so that it is the session's first window — the one
 // that keeps the session alive as worktrees come and go — and so that the status
-// line reads in the order `ls` prints. The worktrees follow in the order
+// line reads in the order `ls` prints. The scratch sessions follow it in name
+// order, standing where it stands, and the worktrees follow them in the order
 // repo.Managed returns them, which is slug order.
 //
-// A worktree whose window fails does not take the worktrees behind it down with
-// it. Each failure is reported where it happened, naming the worktree, because
-// that is the one thing the summary afterwards cannot say and the reader needs:
-// which windows they are about to open by hand.
-func restoreWindows(env *Env, cfg *config.Config, run windowCommand, managed []git.Worktree) (opened int, failed []string) {
-	if _, err := openBaseWindow(env, cfg, run, leaveTheClient); err != nil {
+// The base window and the scratch windows resume their recorded conversations,
+// and the worktrees resume by directory with run. A scratch window already open
+// is left exactly as it is, as a worktree's is.
+//
+// A window that fails does not take the windows behind it down with it. Each
+// failure is reported where it happened, naming the window, because that is the
+// one thing the summary afterwards cannot say and the reader needs: which windows
+// they are about to open by hand.
+func restoreWindows(env *Env, cfg *config.Config, run windowCommand, fresh bool, managed []git.Worktree) (opened int, failed []string) {
+	baseRun, err := resumeWindow(cfg, "", fresh, baseName)
+	if err == nil {
+		_, err = openBaseWindow(env, cfg, baseRun, leaveTheClient)
+	}
+	if err != nil {
 		env.warnf("could not open the base window%s", asFields(field("tmux said", err.Error())))
 		failed = append(failed, baseName)
 	} else {
+		opened++
+	}
+
+	scratch := scratchSessions(cfg)
+	for _, name := range slices.Sorted(maps.Keys(scratch)) {
+		if scratch[name].ID != "" {
+			// Open already, so counted as a worktree's open window is: the count
+			// is of what the session holds, not of what this run had to add.
+			opened++
+			continue
+		}
+		scratchRun, err := resumeWindow(cfg, "", fresh, name)
+		if err == nil {
+			_, err = reopenScratchWindow(env, cfg, name, scratchRun, leaveTheClient)
+		}
+		if err != nil {
+			env.warnf("could not open scratch window %s%s", name,
+				asFields(field("tmux said", err.Error())))
+			failed = append(failed, name)
+			continue
+		}
 		opened++
 	}
 

@@ -304,6 +304,17 @@ func TestClaudeModuleFacts(t *testing.T) {
 	if module.Command != "claude {prompt}" || module.ResumeCommand != "claude --continue {prompt}" {
 		t.Errorf("launch defaults = %q / %q, want the {prompt} template forms", module.Command, module.ResumeCommand)
 	}
+	// Resuming one conversation by id, which is what keeps the base checkout's
+	// windows from continuing each other's. Both placeholders, since a --prompt
+	// reaches a window resumed this way as it reaches one resumed by directory.
+	if module.SessionResumeCommand != "claude --resume {session} {prompt}" {
+		t.Errorf("SessionResumeCommand = %q, want the --resume form taking the id and a prompt", module.SessionResumeCommand)
+	}
+	// The one SessionEnd reason that is a person quitting — read off claude
+	// itself, since a kill reports "other" and must never end a record.
+	if module.QuitReason != "prompt_input_exit" {
+		t.Errorf("QuitReason = %q, want the reason /exit and a double Ctrl-C report", module.QuitReason)
+	}
 	if module.ProjectSettings != ".claude/settings.local.json" {
 		t.Errorf("ProjectSettings = %q, want the checkout's own settings file", module.ProjectSettings)
 	}
