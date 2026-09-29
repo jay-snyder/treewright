@@ -1,11 +1,11 @@
 package shellinit
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -232,10 +232,16 @@ func TestEveryShellHasTheLineItsScriptSaysItLoadsWith(t *testing.T) {
 	}
 }
 
-// TestSourcingTheFishShimAgainAddsNoCompletions: fish keeps every completion it
-// is given rather than replacing one, so a shim sourced a second time — which a
-// reload is — would double every entry, running each __complete once per copy.
-func TestSourcingTheFishShimAgainAddsNoCompletions(t *testing.T) {
+// TestSourcingTheFishShimAgainRunsEachCompletionOnce: fish keeps every
+// completion it is given rather than replacing one, so a shim sourced a second
+// time, which a reload is, would leave two of each. Completing a slug would
+// then ask the binary for the list once per copy.
+//
+// Counted by that cost, the calls to __complete, rather than by listing the
+// completions. fish 3.1 lists them from a bare `complete` and later versions
+// only from `complete -c`, so a count read either way is zero in one of them,
+// and a test comparing zero with zero passes whatever the shim does.
+func TestSourcingTheFishShimAgainRunsEachCompletionOnce(t *testing.T) {
 	bin := requireShell(t, "fish")
 	script, err := Script("fish")
 	if err != nil {
@@ -243,19 +249,34 @@ func TestSourcingTheFishShimAgainAddsNoCompletions(t *testing.T) {
 	}
 	dir := t.TempDir()
 	shim := writeFile(t, dir, "shim", script, 0o644)
-	stdout, stderr := runShell(t, bin, dir,
-		"source "+shim+"\nset -l once (complete -c treewright | count)\n"+
-			"source "+shim+"\nset -l twice (complete -c treewright | count)\n"+
-			"echo $once $twice\n")
+	stubTreewright(t, dir, `echo "$*" >> "$HOME/$TW_LOG"`+"\n")
+	_, stderr := runShell(t, bin, dir,
+		"source "+shim+"\nset -gx TW_LOG once; complete -C 'treewright rm ' >/dev/null\n"+
+			"source "+shim+"\nset -gx TW_LOG twice; complete -C 'treewright rm ' >/dev/null\n")
+	if stderr != "" {
+		t.Errorf("fish printed while completing:\n%s", stderr)
+	}
 
-	counts := strings.Fields(stdout)
-	if len(counts) != 2 || stderr != "" {
-		t.Fatalf("could not count fish's completions: stdout %q, stderr %q", stdout, stderr)
+	once, twice := callsLogged(t, dir, "once"), callsLogged(t, dir, "twice")
+	if once == 0 {
+		t.Fatal("completing a slug never asked the binary, so this run proves nothing about duplicates")
 	}
-	once, _ := strconv.Atoi(counts[0])
-	if once == 0 || counts[0] != counts[1] {
-		t.Errorf("fish holds %s completions after one load and %s after two, want the same nonzero count", counts[0], counts[1])
+	if twice != once {
+		t.Errorf("calls to __complete for one slug completion: %d after one load, %d after two, want the same", once, twice)
 	}
+}
+
+// callsLogged counts the calls the stub binary logged under name.
+func callsLogged(t *testing.T, dir, name string) int {
+	t.Helper()
+	body, err := os.ReadFile(filepath.Join(dir, name))
+	if errors.Is(err, os.ErrNotExist) {
+		return 0
+	}
+	if err != nil {
+		t.Fatalf("read %s: %v", name, err)
+	}
+	return strings.Count(string(body), "\n")
 }
 
 // requireShell finds a shell or stands the test aside — a skip locally, a

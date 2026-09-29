@@ -1303,7 +1303,10 @@ exactly as before. The fingerprint alone is inherited by every process below a
 shell that loaded it, including a shell that never did, so it says nothing about
 the shell `refresh` is running in. The eval file is the one fact that does.
 Loading the integration into a shell that never had it would be an install,
-and that is `shell-init`'s decision.
+and that is `shell-init`'s decision. It is also why `doctor`'s finding for a
+stale wrapper names `tw refresh` rather than a new terminal: doctor makes that
+finding only where the wrapper is calling, which is exactly where refresh can
+reach.
 
 ### What the cask says after an upgrade
 
@@ -1818,6 +1821,12 @@ never drift out of sync with it — the same approach fzf, zoxide, direnv, and
 starship take, and for the same reason. The commands written to the eval file are
 restricted to what zsh, bash, and fish all parse identically, so one writer serves
 every shell.
+
+The fish shim needs fish 3.1 or later, because that is where `complete -F`
+arrived. The reload `refresh` writes needs only 3.0, for `&&`, so it adds no
+requirement of its own. Both were checked by running the suite against real 3.0,
+3.1 and 3.7 builds rather than read off changelogs. On 3.0 the shim fails to
+load at the `-F`.
 
 They are *stored* as files even so: `internal/shellinit/scripts/init.zsh` and
 its two siblings, embedded into the binary by name. Emitting from the binary was

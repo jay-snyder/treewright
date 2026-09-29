@@ -426,8 +426,10 @@ func TestDoctorTellsALoadedShellWrapperFromACurrentOne(t *testing.T) {
 	if got := has(t, found, "shell integration loaded, but not by this treewright"); got != "warn" {
 		t.Errorf("finding = %q, want a wrapper from another build reported\nall: %v", got, found)
 	}
-	if got := has(t, found, "open a new terminal"); got != "warn" {
-		t.Errorf("finding = %q, want the fix named — treewright cannot do this one itself", got)
+	// The finding only appears where the wrapper is calling, which is where
+	// refresh reloads it, so refresh is the fix to name.
+	if got := has(t, found, "the one it started with reload it:  treewright refresh"); got != "warn" {
+		t.Errorf("finding = %q, want refresh named as the fix\nall: %v", got, found)
 	}
 
 	current, err := shellinit.Version("bash")
