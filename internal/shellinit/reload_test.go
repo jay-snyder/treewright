@@ -303,46 +303,31 @@ func stubTreewright(t *testing.T, dir, body string) {
 }
 
 // runShell runs program in shell with the test's own HOME and TMPDIR, and none
-// of the wrapper's variables.
+// of the wrapper's variables. Whatever env holds is set last, over those, which
+// is how a test that is about one of them gives it a value of its own.
 //
 // The environment is scrubbed rather than inherited because this suite is
 // usually run from inside a tw window, which exports all of them, and because
 // zsh reads the developer's .zshenv even for -c. A reload asserted on top of
-// the developer's own wrapper would prove nothing.
-func runShell(t *testing.T, bin, dir, program string) (stdout, stderr string) {
+// the developer's own wrapper would prove nothing. TestMain holds every test
+// here to that.
+func runShell(t *testing.T, bin, dir, program string, env ...string) (stdout, stderr string) {
 	t.Helper()
 	tmp := filepath.Join(dir, "tmp")
 	if err := os.MkdirAll(tmp, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
 	cmd := exec.Command(bin, "-c", program)
-	cmd.Env = append(scrubbedEnv(),
-		"HOME="+dir,
+	cmd.Env = append(testenv.ShellEnv(dir),
 		"TMPDIR="+tmp,
 		"PATH="+dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	cmd.Env = append(cmd.Env, env...)
 	var out, errOut strings.Builder
 	cmd.Stdout, cmd.Stderr = &out, &errOut
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("%s: %v\nstdout:\n%s\nstderr:\n%s", filepath.Base(bin), err, out.String(), errOut.String())
 	}
 	return out.String(), errOut.String()
-}
-
-// scrubbedEnv is this process's environment less what a wrapper exports and
-// what points a shell at somebody's startup files.
-func scrubbedEnv() []string {
-	var env []string
-	for _, kv := range os.Environ() {
-		name, _, _ := strings.Cut(kv, "=")
-		switch {
-		case strings.HasPrefix(name, "TREEWRIGHT_"),
-			name == "HOME", name == "TMPDIR", name == "PATH",
-			name == "ZDOTDIR", name == "BASH_ENV", name == "ENV", name == "XDG_CONFIG_HOME":
-			continue
-		}
-		env = append(env, kv)
-	}
-	return env
 }
 
 // leftoverEvalFiles lists the eval files a wrapper made under dir's TMPDIR and

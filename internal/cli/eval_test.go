@@ -60,7 +60,7 @@ func TestACdLineLandsEveryShellInTheDirectoryItNames(t *testing.T) {
 				}
 
 				cmd := exec.Command(bin, "-c", "source "+evalFile+"\npwd")
-				cmd.Env = shellEnv(root)
+				cmd.Env = testenv.ShellEnv(root)
 				var out, errOut strings.Builder
 				cmd.Stdout, cmd.Stderr = &out, &errOut
 				// Stderr rather than the exit status alone, because a cd that
@@ -79,24 +79,6 @@ func TestACdLineLandsEveryShellInTheDirectoryItNames(t *testing.T) {
 			}
 		})
 	}
-}
-
-// shellEnv is this process's environment for a shell that has to answer for
-// itself, with the parts removed that would let the developer's own setup
-// answer for it: a startup file (zsh reads .zshenv even for -c, and fish reads
-// config.fish for everything) and the variables a tw window exports.
-func shellEnv(home string) []string {
-	var env []string
-	for _, kv := range os.Environ() {
-		name, _, _ := strings.Cut(kv, "=")
-		switch {
-		case strings.HasPrefix(name, "TREEWRIGHT_"), name == "HOME",
-			name == "ZDOTDIR", name == "BASH_ENV", name == "ENV", name == "XDG_CONFIG_HOME":
-			continue
-		}
-		env = append(env, kv)
-	}
-	return append(env, "HOME="+home)
 }
 
 func TestAppendEvalAppends(t *testing.T) {

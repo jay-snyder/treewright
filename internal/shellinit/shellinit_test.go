@@ -218,17 +218,12 @@ func TestShortNameReachesTheBinary(t *testing.T) {
 				t.Fatalf("write stub: %v", err)
 			}
 
-			cmd := exec.Command(bin, "-c", fmt.Sprintf(programs[shell], shim))
-			cmd.Env = append(os.Environ(), "PATH="+dir+string(os.PathListSeparator)+os.Getenv("PATH"), "TMPDIR="+dir)
-			out, err := cmd.CombinedOutput()
-			if err != nil {
-				t.Fatalf("%s could not run the wrappers: %v\n%s", shell, err, out)
-			}
-			if !strings.Contains(string(out), "argv0=tw") {
+			out, _ := runShell(t, bin, dir, fmt.Sprintf(programs[shell], shim))
+			if !strings.Contains(out, "argv0=tw") {
 				t.Errorf("tw did not tell the binary its name:\n%s", out)
 			}
 			// The second call, as treewright, must not still be wearing tw's name.
-			if !strings.Contains(string(out), "argv0=unset") {
+			if !strings.Contains(out, "argv0=unset") {
 				t.Errorf("TREEWRIGHT_ARGV0 leaked past the tw call it was set for:\n%s", out)
 			}
 		})
@@ -294,25 +289,20 @@ func TestWrapperSurvivesAnRmAlias(t *testing.T) {
 				"  *) echo 'wrapper-rewritten=no' ;;\n" +
 				"esac\n"
 
-			cmd := exec.Command(bin, "-c", program)
-			cmd.Env = append(os.Environ(), "PATH="+dir+string(os.PathListSeparator)+os.Getenv("PATH"), "TMPDIR="+dir)
-			out, err := cmd.CombinedOutput()
-			if err != nil {
-				t.Fatalf("%s could not run the wrapper: %v\n%s", shell, err, out)
-			}
-			if !strings.Contains(string(out), "ran=1") {
+			out, _ := runShell(t, bin, dir, program)
+			if !strings.Contains(out, "ran=1") {
 				t.Errorf("the wrapper never sourced the eval file:\n%s", out)
 			}
-			if !strings.Contains(string(out), "leftover=0") {
+			if !strings.Contains(out, "leftover=0") {
 				t.Errorf("the eval file was left behind, so cleanup did not run:\n%s", out)
 			}
 			// The guard against this test quietly ceasing to test anything: without
 			// an active alias, the run proves only that the wrapper works, not that
 			// it is immune to one.
-			if !strings.Contains(string(out), "aliases-active=yes") {
+			if !strings.Contains(out, "aliases-active=yes") {
 				t.Errorf("%s expanded no alias into the probe, so this run proves nothing about the wrapper:\n%s", shell, out)
 			}
-			if !strings.Contains(string(out), "wrapper-rewritten=no") {
+			if !strings.Contains(out, "wrapper-rewritten=no") {
 				t.Errorf("the rm alias was baked into the wrapper body:\n%s", out)
 			}
 		})
@@ -341,21 +331,21 @@ func TestWrapperSurvivesAnEmptyTMPDIR(t *testing.T) {
 			if err := os.WriteFile(shim, []byte(script), 0o644); err != nil {
 				t.Fatalf("write shim: %v", err)
 			}
-			// A stub treewright that reports whether the eval file was wired up,
-			// which is the wrapper having survived far enough to run it.
+			// A stub treewright that reports the eval file it was handed, which is
+			// the wrapper having survived far enough to run it.
 			stub := filepath.Join(dir, "treewright")
-			if err := os.WriteFile(stub, []byte("#!/bin/sh\necho \"evalfile=${TREEWRIGHT_EVAL_FILE:+set}\"\n"), 0o755); err != nil {
+			if err := os.WriteFile(stub, []byte("#!/bin/sh\necho \"evalfile=$TREEWRIGHT_EVAL_FILE\"\n"), 0o755); err != nil {
 				t.Fatalf("write stub: %v", err)
 			}
 
-			cmd := exec.Command(bin, "-c", "source "+shim+"\ntreewright ls\n")
-			cmd.Env = append(os.Environ(), "PATH="+dir+string(os.PathListSeparator)+os.Getenv("PATH"), "TMPDIR=")
-			out, err := cmd.CombinedOutput()
-			if err != nil {
-				t.Fatalf("%s failed with an empty TMPDIR: %v\n%s", shell, err, out)
-			}
-			if !strings.Contains(string(out), "evalfile=set") {
-				t.Errorf("the binary never ran with an eval file wired up:\n%s", out)
+			// Empty, not absent: set last, over the TMPDIR runShell gives every
+			// other test.
+			out, _ := runShell(t, bin, dir, "source "+shim+"\ntreewright ls\n", "TMPDIR=")
+			// /tmp is where an empty TMPDIR has to fall back to, so this is also the
+			// check that the shell was handed an empty one. An eval file anywhere
+			// else is a run of the ordinary case under this test's name.
+			if !strings.Contains(out, "evalfile=/tmp/treewright-eval.") {
+				t.Errorf("the binary never ran with an eval file made under /tmp:\n%s", out)
 			}
 		})
 	}

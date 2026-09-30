@@ -815,6 +815,15 @@ The shims are checked by the shells themselves (`TestScriptsParse`), and the tmu
 snippet is loaded into a real server and read back — a snippet that does not
 parse would break the startup of whatever loads it.
 
+**A test that runs a program in zsh, bash or fish hands the shell
+`testenv.ShellEnv`, never `os.Environ()`.** zsh reads `.zshenv` and fish its
+`config.fish` even under `-c`, so an inherited environment runs the developer's
+startup files ahead of the test, and a suite started from a `tw` window carries
+what that window's wrapper exported. `internal/shellinit`'s `TestMain` runs the
+package with each of those variables set to a sentinel or to a startup file that
+ends the shell, so a test that inherits fails in CI too, not only on the machine
+of whoever wrote it. `runShell` there is how its tests start a shell.
+
 ## Environment variables
 
 | Variable | Meaning |
