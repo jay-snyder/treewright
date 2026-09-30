@@ -89,4 +89,11 @@ _treewright() {
 # "command treewright", which erases the name the user typed from argv[0] — so
 # tw reports it in TREEWRIGHT_ARGV0 instead, and help and hints answer as "tw".
 tw() { local -x TREEWRIGHT_ARGV0=tw; treewright "$@" }
-(( $+functions[compdef] )) && compdef _treewright treewright tw
+# A compdef can exist where compinit never ran: autoloaded by hand, or copied into
+# a snapshot of a shell's functions. Calling it there fails with an error about
+# zsh's internals. Asking whether compinit ran instead ($+_comps) would skip
+# that, and would also skip the compdef that znap and zcomet define to queue
+# registrations until they run compinit themselves — znap only at the first
+# prompt, after every line of .zshrc. Nothing short of the call tells those
+# apart, so the call is made and its complaint dropped.
+(( $+functions[compdef] )) && compdef _treewright treewright tw 2>/dev/null

@@ -147,6 +147,60 @@ func TestScriptsParse(t *testing.T) {
 	}
 }
 
+// TestTheZshShimLoadsSilentlyWhateverStateCompletionIsIn is the runtime half of
+// TestScriptsParse, for the one line of any shim whose effect depends on the
+// shell it lands in: zsh's compdef. A compdef can exist where compinit never
+// ran, and calling it there prints an error from zsh's internals into a shell
+// that did nothing wrong. The shim still loads, so the exit status is the same
+// either way and only stderr tells.
+//
+// That was close to unreachable while the shim was sourced only from a startup
+// file, where anyone with working completion had already run compinit. `tw
+// refresh` sources it mid-session, into whatever state that shell is in, and
+// an agent's shell is often a snapshot of the user's functions, compdef
+// among them, without the compinit state behind it.
+//
+// Where the registration went is checked too, because the obvious fix, asking
+// whether compinit ran, loses it silently under the plugin managers that queue
+// compdef calls until they run compinit themselves.
+func TestTheZshShimLoadsSilentlyWhateverStateCompletionIsIn(t *testing.T) {
+	const unregistered = "treewright= tw= queued="
+	cases := []struct {
+		name, setup, want string
+	}{
+		{"with no completion system", ":", unregistered},
+		{"with compdef autoloaded and compinit never run", "autoload -Uz compdef", unregistered},
+		// What a snapshot of a shell's functions holds: compinit's own compdef,
+		// and none of the arrays compinit made for it to write to.
+		{"with compinit's compdef and none of its state", "autoload -Uz compinit && compinit -u -D && unset _comps", unregistered},
+		{"after compinit", "autoload -Uz compinit && compinit -u -D", "treewright=_treewright tw=_treewright queued="},
+		// The shape znap and zcomet each define, replaying the queue once they
+		// have run compinit, which znap does only at the first prompt.
+		{"under a plugin manager that queues compdef calls", `compdef() { queued+=("$*") }`, unregistered + "_treewright treewright tw"},
+	}
+	bin := requireShell(t, "zsh")
+	script, err := Script("zsh")
+	if err != nil {
+		t.Fatalf("Script: %v", err)
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			shim := writeFile(t, dir, "shim", script, 0o644)
+			program := tc.setup + "\n" +
+				"source " + shim + "\n" +
+				`print -r -- "treewright=${_comps[treewright]-} tw=${_comps[tw]-} queued=${queued-}"` + "\n"
+			stdout, stderr := runShell(t, bin, dir, program)
+			if stderr != "" {
+				t.Errorf("zsh %s printed while loading the shim:\n%s", tc.name, stderr)
+			}
+			if got := strings.TrimSuffix(stdout, "\n"); got != tc.want {
+				t.Errorf("zsh %s registered completion as %q, want %q", tc.name, got, tc.want)
+			}
+		})
+	}
+}
+
 // TestExternalCommandsResistAliases guards a hazard specific to shipping shell
 // code into someone else's shell: zsh and bash expand aliases in a function body
 // at definition time, so an alias in the user's startup file rewrites the words
