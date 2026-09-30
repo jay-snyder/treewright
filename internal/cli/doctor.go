@@ -15,7 +15,6 @@ import (
 	"github.com/jay-snyder/treewright/internal/git"
 	"github.com/jay-snyder/treewright/internal/shellinit"
 	"github.com/jay-snyder/treewright/internal/tmux"
-	"github.com/jay-snyder/treewright/internal/tmuxinit"
 	"github.com/jay-snyder/treewright/internal/ui"
 )
 
@@ -259,7 +258,7 @@ func checkTmuxIntegration(env *Env, r *report) {
 	case err != nil:
 		// The server stopped between the two questions. Nothing worth saying.
 		return
-	case bound && tmux.ServerOption(tmuxinit.VersionOption) == tmuxinit.Version():
+	case bound && tmuxSnippetCurrent():
 		r.addf(levelOK, "tmux integration", "loaded")
 	case bound:
 		// A binding mentioning treewright and a binding this treewright wrote are

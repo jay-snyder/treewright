@@ -1260,6 +1260,29 @@ on the keys they are already on, since which keys a server binds is a decision
 made in a file the user owns. This is the command people will run without
 reading it, and `agent-init` and `tmux-init` are where that decision belongs.
 
+**A server already holding this treewright's bindings is left alone.** `refresh`
+used to go from "some treewright's bindings are loaded" straight to sourcing the
+snippet and a three-line report naming the keys, on every run, while `doctor`
+read the stamp and called the same server `ok`. So `refresh` now asks `doctor`'s
+question, through the one function both call, and a matching stamp gets one
+line saying the bindings are current, the way a current plugin gets "already up
+to date". An unstamped server is out of date, as it is to `doctor`: it was loaded
+before the stamp existed. The keys play no part in the answer, because they play
+none in the fingerprint.
+
+The alternative was to source it anyway and word the report more quietly, and
+it loses on three counts. It is not a no-op: the snippet sets the title format,
+and a `tmux.conf` line below the treewright one that sets its own wins at server
+start and loses to every mid-session reload. A reload of a changed snippet pays
+that until the next start, which is the price of delivering the change; paying
+it on every run delivers nothing. What it would buy instead is a repair: a
+matching stamp says nothing about whether a binding was edited by hand since, and
+sourcing again would put the snippet's command back on a key that still runs
+treewright. Undoing a hand edit is the same act as restoring a key somebody
+omitted, which `refresh` already refuses. And the report matters on one run, the
+one after an upgrade, which is the run a reader skims past if the same three
+lines print every other time.
+
 **The shell it was run from is reloaded; every other one is told the line.** No
 process can define a function in its parent, and that used to be the end of it:
 `refresh` reported a stale wrapper and said to open a new terminal. But

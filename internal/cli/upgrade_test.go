@@ -382,6 +382,106 @@ func TestRefreshReloadsTheBindingsOnTheKeysTheyAreOn(t *testing.T) {
 	}
 }
 
+// TestRefreshLeavesAServerHoldingThisTreewrightsBindingsAlone is the ordinary
+// run, the one with nothing to do. It used to re-source the snippet and print
+// the same three-line reload report every time, while doctor called the same
+// server ok — and the reload was not free: the snippet sets the title format, so
+// it overwrote whatever the user's tmux.conf set below the treewright line. That
+// override is what proves nothing was sourced.
+func TestRefreshLeavesAServerHoldingThisTreewrightsBindingsAlone(t *testing.T) {
+	requireTmux(t)
+	f := newFixture(t, "command = 'sleep 300'\n")
+	startSession(t, "proj", "main", f.MainDir)
+
+	if r := f.exec("tmux-init", "--apply"); r.err != nil {
+		t.Fatalf("tmux-init --apply: %v\n%s", r.err, r.both())
+	}
+	// A tmux.conf line below the treewright one, as a user who sets their own
+	// titles writes it.
+	if out, err := tmuxctl(t, "set", "-g", "set-titles-string", "mine"); err != nil {
+		t.Fatalf("set a title format of the user's own: %v\n%s", err, out)
+	}
+
+	r := f.exec("refresh")
+	if r.err != nil {
+		t.Fatalf("refresh: %v\n%s", r.err, r.both())
+	}
+	if !strings.Contains(r.stderr, "the treewright key bindings are already up to date") {
+		t.Errorf("stderr = %q, want the bindings reported as current", r.stderr)
+	}
+	if strings.Contains(r.stderr, "reloaded the treewright key bindings") || strings.Contains(r.stderr, "switch worktree") {
+		t.Errorf("stderr reports a reload of bindings that were already current:\n%s", r.stderr)
+	}
+	if got, err := tmuxctl(t, "show-options", "-gv", "set-titles-string"); err != nil || got != "mine" {
+		t.Errorf("set-titles-string = %q (%v), want the user's own left in place — the snippet was sourced again", got, err)
+	}
+}
+
+// TestRefreshReloadsBindingsFromAnotherTreewright is the run the report exists
+// for, in both of the shapes it arrives in. A server holding an older snippet
+// carries a stamp that is not this build's; one loaded by a treewright from
+// before the stamp existed carries none, and doctor calls that out of date as
+// well — so refresh has to agree, or the command doctor names would answer that
+// there was nothing to do.
+//
+// The subtests are named in a word because the name is the tmux label, and a
+// label is the last component of a socket path macOS allows 104 bytes for.
+func TestRefreshReloadsBindingsFromAnotherTreewright(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		load func(t *testing.T, f *fixture)
+		keys string
+	}{
+		{
+			name: "older",
+			load: func(t *testing.T, f *fixture) {
+				t.Helper()
+				if r := f.exec("tmux-init", "--apply", "--resume-key", "G"); r.err != nil {
+					t.Fatalf("tmux-init --apply: %v\n%s", r.err, r.both())
+				}
+				if out, err := tmuxctl(t, "set", "-g", tmuxinit.VersionOption, "000000000000"); err != nil {
+					t.Fatalf("wind the stamp back: %v\n%s", err, out)
+				}
+			},
+			keys: "switch worktree G start one N",
+		},
+		{
+			name: "unstamped",
+			load: func(t *testing.T, _ *fixture) {
+				t.Helper()
+				if out, err := tmuxctl(t, "bind-key", "T", "run-shell", "-b", "treewright popup resume"); err != nil {
+					t.Fatalf("bind an older treewright's key: %v\n%s", err, out)
+				}
+			},
+			keys: "switch worktree T start one (not bound)",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			requireTmux(t)
+			f := newFixture(t, "command = 'sleep 300'\n")
+			startSession(t, "proj", "main", f.MainDir)
+			tc.load(t, f)
+
+			r := f.exec("refresh")
+			if r.err != nil {
+				t.Fatalf("refresh: %v\n%s", r.err, r.both())
+			}
+			if !strings.Contains(r.stderr, "reloaded the treewright key bindings") {
+				t.Errorf("stderr = %q, want the reload reported", r.stderr)
+			}
+			if !strings.Contains(flat(r.stderr), tc.keys) {
+				t.Errorf("stderr = %q, want the keys it reloaded named: %q", r.stderr, tc.keys)
+			}
+			if strings.Contains(r.stderr, "already up to date in the running tmux server") {
+				t.Errorf("stderr calls bindings this treewright did not write current:\n%s", r.stderr)
+			}
+			if got, err := tmuxctl(t, "show-options", "-gv", tmuxinit.VersionOption); err != nil || got != tmuxinit.Version() {
+				t.Errorf("stamp = %q (%v), want %q", got, err, tmuxinit.Version())
+			}
+		})
+	}
+}
+
 // TestRefreshLoadsNoBindingsIntoAServerHoldingNone: which keys a tmux server
 // binds is a decision made in a file the user owns, and an upgrade is not where
 // it gets made for them.
