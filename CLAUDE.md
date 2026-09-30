@@ -183,7 +183,7 @@ breaks `brew upgrade` for everyone.
 | `internal/cli/signal.go` | `signal`: the agent-state protocol's one verb, run by agent hooks. |
 | `internal/cli/guard.go` | `guard`: the PreToolUse decision, run by agent hooks — which tool calls may change another worktree, and the shell reader that answers it. |
 | `internal/cli/features.go` | `session-start`: the one verb every optional behavior runs behind, run by agent hooks — and what each of them does. |
-| `internal/cli/eval.go` | The eval-file protocol and shell quoting. |
+| `internal/cli/eval.go` | The eval-file protocol. |
 | `internal/cli/init.go` | `shell-init`, `tmux-init`, `agent-init`, `__complete`. |
 | `internal/cli/version.go` | What `version` reports: the ldflags stamp, else the build info — and `--check`. |
 | `internal/config` | TOML loading, defaults, and which config applies. |
@@ -192,7 +192,7 @@ breaks `brew upgrade` for everyone.
 | `internal/git` | Every git call, including merged/unpushed/dirty logic. |
 | `internal/tmux` | Every tmux call, window identity, popups. |
 | `internal/ui` | Picker, table, color. |
-| `internal/shellinit` | zsh/bash/fish shims, checked in under `scripts/` and embedded by named file. |
+| `internal/shellinit` | zsh/bash/fish shims, checked in under `scripts/` and embedded by named file, and `Quote`, the one shell-quoting rule. |
 | `internal/tmuxinit` | tmux key bindings and titles, as Go string constants. |
 | `internal/agentinit` | Facts about coding agents, one module per agent: launch/resume defaults, local-state carries, and the plugin `agent-init` installs — checked in under `plugins/<agent>/`, embedded file by named file. |
 | `internal/gittest` | Scratch-repo builder for tests (bare origin + checkout). |
@@ -658,6 +658,17 @@ variable is what `set -u` refuses, and `${VAR-}` is what fish cannot parse: see
 `shim.onlyIn` before simplifying one. Every other shell keeps its old wrapper,
 so the report names the startup line for the shell `TREEWRIGHT_SHELL_INIT_SHELL`
 (or, from older shims, `$SHELL`) says it is.
+
+**Every word quoted into a shell line goes through `shellinit.Quote`.** It
+writes a backslash outside the quotes, as it does a quote, because inside them
+fish reads `\\` and `\'` as escapes where zsh, bash and sh read every character
+as itself — the difference the guards above are built on. There is one rule
+rather than a copy per package because a copy is how it broke: `internal/cli`
+kept the POSIX-only form after the shims' was fixed, and a `cd` into a path
+holding `\'` became a line fish could not parse. The eval file is read by fish
+for certain, and a popup's or a window's command by tmux's `default-shell`,
+which starts out as the login shell. The POSIX shells read the form exactly as
+they read the old one, so nothing they already ran changed meaning.
 
 **The release check is explicit-only.** `doctor` and `version --check`, and
 nothing else — no cache file, no background check, no HTTP on `new` or `ls`. An

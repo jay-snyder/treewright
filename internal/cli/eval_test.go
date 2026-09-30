@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -8,45 +9,94 @@ import (
 	"testing"
 
 	"github.com/jay-snyder/treewright/internal/shellinit"
+	"github.com/jay-snyder/treewright/internal/testenv"
 )
 
-func TestShellQuoteSurvivesEveryShell(t *testing.T) {
-	// The quoted string is sourced by the user's shell, so a path containing a
-	// quote or a space must come back out byte-identical. Each case is checked
-	// against real shells rather than against an expected spelling.
-	paths := []string{
-		"/simple/path",
-		"/path with spaces/repo",
-		"/path/with'quote/repo",
-		"/path/with''double-quotes/repo",
-		`/path/with\backslash/repo`,
-		"/path/with$dollar/repo",
-		"/path/with`backtick/repo",
-		"/path/with;semicolon/repo",
-		"/path/with*glob/repo",
+// TestACdLineLandsEveryShellInTheDirectoryItNames holds the eval file's one rule
+// where the file is read. moveShell writes the line, and zsh, bash and fish each
+// source it as their wrapper does and say where they ended up. The directories
+// are real ones rather than a quoted word printed back, because what a misread
+// costs is the cd.
+//
+// The names are the ones the shells disagree about. Inside single quotes fish
+// takes \\ and \' as escapes, where zsh and bash take every character
+// literally. A lone backslash, a doubled one, one against a quote and one at
+// the very end are each a separate way for the two readings to part. The
+// POSIX-only quoting this replaced sent fish looking for a directory with one
+// backslash in its name on the second, and wrote it a line it could not parse
+// on the last two.
+func TestACdLineLandsEveryShellInTheDirectoryItNames(t *testing.T) {
+	names := []string{
+		"with spaces",
+		"with'quote",
+		`with\backslash`,
+		`with\\two`,
+		`with\'both`,
+		`ends\`,
+		"with$dollar and `tick`",
 	}
+	for _, shell := range []string{"zsh", "bash", "fish"} {
+		t.Run(shell, func(t *testing.T) {
+			bin, err := exec.LookPath(shell)
+			if err != nil {
+				testenv.Unavailablef(t, "%s is not installed", shell)
+			}
+			for _, name := range names {
+				// Resolved, so the directory the shell reports is the one made
+				// here rather than the same one through macOS's /var symlink.
+				root, err := filepath.EvalSymlinks(t.TempDir())
+				if err != nil {
+					t.Fatalf("resolve temp dir: %v", err)
+				}
+				dir := filepath.Join(root, name)
+				if err := os.Mkdir(dir, 0o755); err != nil {
+					t.Fatalf("mkdir %q: %v", name, err)
+				}
+				var stderr strings.Builder
+				evalFile := filepath.Join(root, "evalfile")
+				moveShell(&Env{EvalFile: evalFile, Stderr: &stderr}, dir, "your shell did not move")
+				if stderr.Len() != 0 {
+					t.Fatalf("moveShell reported instead of writing the line:\n%s", stderr.String())
+				}
 
-	shells := []string{"sh", "bash", "zsh"}
-	for _, shell := range shells {
-		bin, err := exec.LookPath(shell)
-		if err != nil {
-			t.Logf("skipping %s: not installed", shell)
+				cmd := exec.Command(bin, "-c", "source "+evalFile+"\npwd")
+				cmd.Env = shellEnv(root)
+				var out, errOut strings.Builder
+				cmd.Stdout, cmd.Stderr = &out, &errOut
+				// Stderr rather than the exit status alone, because a cd that
+				// fails is followed by a pwd that does not.
+				if err := cmd.Run(); err != nil {
+					fmt.Fprintln(&errOut, err)
+				}
+				if errOut.Len() != 0 {
+					line, _ := os.ReadFile(evalFile)
+					t.Errorf("%s could not follow %q:\n%s", shell, line, errOut.String())
+					continue
+				}
+				if got := strings.TrimSuffix(out.String(), "\n"); got != dir {
+					t.Errorf("%s ended up in %q, want %q", shell, got, dir)
+				}
+			}
+		})
+	}
+}
+
+// shellEnv is this process's environment for a shell that has to answer for
+// itself, with the parts removed that would let the developer's own setup
+// answer for it: a startup file (zsh reads .zshenv even for -c, and fish reads
+// config.fish for everything) and the variables a tw window exports.
+func shellEnv(home string) []string {
+	var env []string
+	for _, kv := range os.Environ() {
+		name, _, _ := strings.Cut(kv, "=")
+		switch {
+		case strings.HasPrefix(name, "TREEWRIGHT_"), name == "HOME",
+			name == "ZDOTDIR", name == "BASH_ENV", name == "ENV", name == "XDG_CONFIG_HOME":
 			continue
 		}
-		for _, path := range paths {
-			t.Run(shell+" "+path, func(t *testing.T) {
-				// printf %s of the quoted value must reproduce the input.
-				script := "printf %s " + shellQuote(path)
-				out, err := exec.Command(bin, "-c", script).Output()
-				if err != nil {
-					t.Fatalf("%s: %v", shell, err)
-				}
-				if string(out) != path {
-					t.Errorf("%s round-trip = %q, want %q", shell, out, path)
-				}
-			})
-		}
+		env = append(env, kv)
 	}
+	return append(env, "HOME="+home)
 }
 
 func TestAppendEvalAppends(t *testing.T) {
@@ -170,13 +220,5 @@ func TestInsideDir(t *testing.T) {
 		if got := insideDir(tc.path, tc.dir); got != tc.want {
 			t.Errorf("insideDir(%q, %q) = %v, want %v", tc.path, tc.dir, got, tc.want)
 		}
-	}
-}
-
-func TestShellQuoteIsSingleQuoted(t *testing.T) {
-	// A sanity check on the shape, independent of any shell being installed.
-	got := shellQuote("/plain")
-	if !strings.HasPrefix(got, "'") || !strings.HasSuffix(got, "'") {
-		t.Errorf("shellQuote(%q) = %q, want it wrapped in single quotes", "/plain", got)
 	}
 }

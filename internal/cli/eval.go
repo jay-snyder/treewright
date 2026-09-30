@@ -49,7 +49,7 @@ func appendEval(path, command string) error {
 // failure with no report path, which nothing here is allowed to have.
 func moveShell(env *Env, dir, reason string) {
 	if env.EvalFile != "" {
-		err := appendEval(env.EvalFile, "cd "+shellQuote(dir))
+		err := appendEval(env.EvalFile, "cd "+shellinit.Quote(dir))
 		if err == nil {
 			return
 		}
@@ -99,13 +99,6 @@ func reloadByHand(env *Env) string {
 		}
 	}
 	return "the line " + env.copyable(env.Argv0+" help shell-init") + " gives for your shell"
-}
-
-// shellQuote wraps s in single quotes so a shell reads it as one literal word.
-// An embedded quote is replaced by a sequence that closes the quoted run, emits
-// a backslash-escaped quote, and reopens it.
-func shellQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 // insideDir reports whether path is dir itself or somewhere beneath it. Used to

@@ -8,6 +8,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/jay-snyder/treewright/internal/git"
+	"github.com/jay-snyder/treewright/internal/shellinit"
 	"github.com/jay-snyder/treewright/internal/tmux"
 	"github.com/jay-snyder/treewright/internal/ui"
 )
@@ -109,10 +110,10 @@ func cmdPopup(env *Env, args []string) error {
 	// says nothing — must print them the same width. Through env rather than a
 	// VAR=value prefix, because the popup's command runs under tmux's
 	// default-shell, and fish does not read that prefix as an assignment.
-	inner = append(inner, "/usr/bin/env", "TREEWRIGHT_ARGV0="+shellQuote(env.Argv0))
-	inner = append(inner, shellQuote(self))
+	inner = append(inner, "/usr/bin/env", "TREEWRIGHT_ARGV0="+shellinit.Quote(env.Argv0))
+	inner = append(inner, shellinit.Quote(self))
 	for _, a := range positional {
-		inner = append(inner, shellQuote(a))
+		inner = append(inner, shellinit.Quote(a))
 	}
 
 	// Read back rather than reusing the flag, so the popup opens on the directory

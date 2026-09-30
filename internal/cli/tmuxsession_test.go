@@ -12,6 +12,7 @@ import (
 
 	"github.com/jay-snyder/treewright/internal/config"
 	"github.com/jay-snyder/treewright/internal/gittest"
+	"github.com/jay-snyder/treewright/internal/shellinit"
 	"github.com/jay-snyder/treewright/internal/testenv"
 )
 
@@ -726,7 +727,7 @@ func wantStatus(command string) int {
 func TestAHeldWindowNamesItsCommandWithoutRepeatingIt(t *testing.T) {
 	// Built the way `new` builds it: the prompt is quoted into the command
 	// before the wrapper ever sees it, which is the first of the two quotings.
-	command := "claude " + shellQuote(strings.Repeat("it's a long brief. ", 500))
+	command := "claude " + shellinit.Quote(strings.Repeat("it's a long brief. ", 500))
 
 	wrapped := heldOpenOnFailure(command)
 	// The copy that runs stays byte-exact — it is the pane's foreground process.
@@ -741,7 +742,7 @@ func TestAHeldWindowNamesItsCommandWithoutRepeatingIt(t *testing.T) {
 	// A command short enough to read is still named whole, since the point of
 	// the line is telling the reader which command produced the output above it.
 	const short = "echo no such model >&2; exit 12"
-	if got := heldOpenOnFailure(short); !strings.Contains(got, shellQuote(short)) {
+	if got := heldOpenOnFailure(short); !strings.Contains(got, shellinit.Quote(short)) {
 		t.Errorf("wrapper = %q, want the short command named in full", got)
 	}
 }

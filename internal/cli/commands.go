@@ -14,6 +14,7 @@ import (
 	"github.com/jay-snyder/treewright/internal/config"
 	"github.com/jay-snyder/treewright/internal/git"
 	"github.com/jay-snyder/treewright/internal/refname"
+	"github.com/jay-snyder/treewright/internal/shellinit"
 	"github.com/jay-snyder/treewright/internal/tmux"
 	"github.com/jay-snyder/treewright/internal/ui"
 )
@@ -481,9 +482,9 @@ func warnIfSetupFailed(env *Env, cfg *config.Config, slug string) {
 func postCreateScript(commands []string, failedPath string) string {
 	var b strings.Builder
 	for _, c := range commands {
-		fmt.Fprintf(&b, "printf '\\n$ %%s\\n' %s\n", shellQuote(c))
+		fmt.Fprintf(&b, "printf '\\n$ %%s\\n' %s\n", shellinit.Quote(c))
 		fmt.Fprintf(&b, "( %s\n) || { tw_status=$?; printf '\\npost_create stopped: %%s failed\\n' %s; printf '%%s\\n' %s > %s; exit $tw_status; }\n",
-			c, shellQuote(c), shellQuote(c), shellQuote(failedPath))
+			c, shellinit.Quote(c), shellinit.Quote(c), shellinit.Quote(failedPath))
 	}
 	return b.String()
 }
@@ -1069,7 +1070,7 @@ func resumeWindow(cfg *config.Config, prompt string, fresh bool, name string) (w
 	// The id goes in before the prompt, so that a prompt which happens to
 	// contain the placeholder's spelling is never taken for it. The id cannot
 	// contain the prompt's — validSessionID admits no braces.
-	template := strings.ReplaceAll(cfg.SessionResumeCommand(), sessionPlaceholder, shellQuote(id))
+	template := strings.ReplaceAll(cfg.SessionResumeCommand(), sessionPlaceholder, shellinit.Quote(id))
 	return resumeWith(cfg, template, sessionResumeKey, sessionResumePair, prompt)
 }
 

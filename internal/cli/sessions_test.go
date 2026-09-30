@@ -7,6 +7,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/jay-snyder/treewright/internal/shellinit"
 )
 
 // The record of which conversation each agent standing in the base checkout is
@@ -33,7 +35,7 @@ func agentStub(t *testing.T, resumeFails bool) (log string) {
 	t.Helper()
 	dir := t.TempDir()
 	log = filepath.Join(dir, "starts")
-	script := "#!/bin/sh\nprintf 'start:%s\\n' \"$*\" >> " + shellQuote(log) + "\n"
+	script := "#!/bin/sh\nprintf 'start:%s\\n' \"$*\" >> " + shellinit.Quote(log) + "\n"
 	if resumeFails {
 		script += "if [ \"$1\" = --resume ]; then echo \"No conversation found with session ID: $2\" >&2; exit 1; fi\n"
 	}

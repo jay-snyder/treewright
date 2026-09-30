@@ -792,6 +792,37 @@ func TestAFailedPostCreateIsReportedLater(t *testing.T) {
 	}
 }
 
+// TestAFailingPostCreateStepIsNamedAsWritten: a step's text goes into the sh
+// script it runs in three more times, quoted, to announce it, to report it
+// stopping and to record it for the report `ls` makes later. The quoting
+// writes a backslash outside the quotes, where sh reads it as one. The step
+// fails on purpose, so that every copy is read back. Its backslashes sit in a
+// comment so that the step itself cannot care what they are.
+func TestAFailingPostCreateStepIsNamedAsWritten(t *testing.T) {
+	const step = `exit 3 # C:\new\'s \\ share`
+	f := newFixture(t, "post_create = '''"+step+"'''\n")
+
+	f.mustRun("new", "broken")
+	logPath, failed := postCreatePaths(&config.Config{MainDir: f.MainDir}, "broken")
+	waitForContent(t, failed, step, "post_create")
+
+	if body, _ := os.ReadFile(failed); string(body) != step+"\n" {
+		t.Errorf("the failed step was recorded as %q, want %q", body, step+"\n")
+	}
+	log, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read the log: %v", err)
+	}
+	for _, line := range []string{"$ " + step, "post_create stopped: " + step + " failed"} {
+		if !strings.Contains(string(log), "\n"+line+"\n") {
+			t.Errorf("log = %q, want the line %q", log, line)
+		}
+	}
+	if got := flat(f.exec("ls").stderr); !strings.Contains(got, "failed step "+step+" log") {
+		t.Errorf("ls stderr = %q, want the step named as it was written", got)
+	}
+}
+
 // ---- rm --------------------------------------------------------------------
 
 func TestRmGuards(t *testing.T) {
