@@ -647,6 +647,12 @@ the plugin, reloads tmux bindings only into a server already holding some, and
 puts them back on the keys they are already on. `agent-init` and `tmux-init` are
 where a user decides what treewright touches; `refresh` is the command people run
 without reading it, and it must never be how that decision gets made for them.
+**A server whose stamp is this build's is not reloaded at all**, and says so in
+one line: `tmuxSnippetCurrent` is the question `doctor` calls `ok` on, and
+sourcing a current snippet again is not the no-op it looks like. It puts
+treewright's title format back over a `tmux.conf` line that set its own, and it
+undoes a hand edit to a binding, which is the act the empty-key rule refuses.
+An unstamped server counts as stale, as it does to `doctor`.
 The shell wrapper is reloaded through the eval file, and only when that file is
 set: `TREEWRIGHT_EVAL_FILE` is the one fact that says a wrapper is calling,
 while the exported fingerprint is inherited by shells that never loaded one.

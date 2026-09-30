@@ -179,6 +179,17 @@ func pluginCheckouts(env *Env, cfg *config.Config, module agentinit.Agent) []che
 // Nothing is loaded into a server holding no treewright bindings at all. That is
 // not a refresh, it is an install, and which keys a tmux server binds is a
 // decision made in a file the user owns.
+//
+// Nor into one whose bindings this treewright already wrote, which is most runs.
+// Sourcing the same snippet again changes nothing it was meant to change, and it
+// is not quite a no-op either: the snippet sets the title format, so a reload
+// puts treewright's back over whatever a tmux.conf line below the treewright one
+// set instead. What re-sourcing anyway would buy is a repair — a binding somebody
+// edited by hand, on a key that still runs treewright, put back to the snippet's
+// — and undoing a hand edit is the act the empty-key rule below refuses. So a
+// current server gets one line saying so, as a current plugin does, and the keys
+// are named only on a run that reloaded something: that is the run after an
+// upgrade, and a block printed on every run is a block nobody reads on that one.
 func refreshTmuxBindings(env *Env) {
 	if !tmux.Available() {
 		return // checkTmux's business, and doctor is where it gets reported
@@ -196,6 +207,10 @@ func refreshTmuxBindings(env *Env) {
 			"add to tmux.conf:  %s", env.copyable("run-shell 'treewright tmux-init --apply'"))
 		return
 	}
+	if tmuxSnippetCurrent() {
+		env.progressf("the treewright key bindings are already up to date in the running tmux server")
+		return
+	}
 
 	// Both keys as the server holds them, empty included: an empty one is a
 	// binding somebody omitted with --new-key "", and putting it back would be
@@ -209,6 +224,22 @@ func refreshTmuxBindings(env *Env) {
 	env.progressf("reloaded the treewright key bindings into the running tmux server%s", asFields(
 		field("keys", describeKeys(keys)),
 	))
+}
+
+// tmuxSnippetCurrent reports whether the running server was loaded by this
+// treewright's snippet, going by the stamp the snippet ends on. An unstamped
+// server answers no: it was loaded by a treewright from before the stamp
+// existed, which is as out of date as a server can be.
+//
+// doctor and refresh both ask it, so the command doctor sends a stale server to
+// cannot disagree with doctor about whether it was needed — which is how refresh
+// came to announce a reload on every run while doctor called the same server ok.
+// The keys are not part of the answer, because they are not part of the
+// fingerprint: see tmuxinit.Version.
+//
+// Only ask once a server is known to be running, for tmux.ServerOption's reason.
+func tmuxSnippetCurrent() bool {
+	return tmux.ServerOption(tmuxinit.VersionOption) == tmuxinit.Version()
 }
 
 // describeKeys names the keys the bindings went back on, so the report says what
