@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/jay-snyder/treewright/internal/config"
+	"github.com/jay-snyder/treewright/internal/shellinit"
 	"github.com/jay-snyder/treewright/internal/tmux"
 )
 
@@ -273,7 +274,7 @@ func heldOpenOnFailure(command string) string {
 // can hold two commands and the line that reports a failure has to name
 // whichever of them failed. A variable is how the shell knows which that was.
 func runStep(command string) string {
-	return "tw_command=" + shellQuote(abbreviated(command)) + "\n" +
+	return "tw_command=" + shellinit.Quote(abbreviated(command)) + "\n" +
 		"( " + command + "\n)\n" +
 		"tw_status=$?\n"
 }
@@ -301,7 +302,7 @@ func heldOpenTail() string {
 		`if [ -n "$TMUX_PANE" ]; then` + "\n" +
 		`  tmux set-window-option -q -u -t "$TMUX_PANE" ` + tmux.AgentStateOption + " 2>/dev/null || true\n" +
 		`  tw_name=$(tmux display-message -p -t "$TMUX_PANE" '#{window_name}' 2>/dev/null) || tw_name=''` + "\n" +
-		`  case "$tw_name" in ` + shellQuote(tmux.WaitingMarker) + `*) tmux rename-window -t "$TMUX_PANE" "${tw_name#?}" 2>/dev/null || true ;; esac` + "\n" +
+		`  case "$tw_name" in ` + shellinit.Quote(tmux.WaitingMarker) + `*) tmux rename-window -t "$TMUX_PANE" "${tw_name#?}" 2>/dev/null || true ;; esac` + "\n" +
 		"fi\n" +
 		`printf '\n"%s" exited %s — this window is kept so the output above stays readable\n' "$tw_command" "$tw_status"` + "\n" +
 		"printf '" + heldOpenNotice + "\\n'\n" +

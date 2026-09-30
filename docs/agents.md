@@ -651,8 +651,8 @@ what keeps treewright out of guessing.
 Three rules, each load-bearing:
 
 - **With a prompt, the placeholder becomes the shell-quoted text**: one
-  literal argument however many spaces and quotes the prompt holds, through
-  the same `shellQuote` the eval file trusts.
+  literal argument however many spaces, quotes and backslashes the prompt
+  holds, through the same `shellinit.Quote` the eval file trusts.
 - **Without one, the placeholder is removed entirely — never substituted as
   `''`.** An empty argument is not the absence of an argument: to most agents
   it is an instruction, an empty one, and `claude ''` opening every window

@@ -146,26 +146,41 @@ func Reload() string {
 	lines := make([]string, 0, len(shims))
 	for _, shell := range Shells() {
 		s := shims[shell]
-		lines = append(lines, s.onlyIn+" && eval "+quote(render(s.script)))
+		lines = append(lines, s.onlyIn+" && eval "+Quote(render(s.script)))
 	}
 	return strings.Join(lines, "\n")
 }
 
-// quote wraps s in single quotes so that zsh, bash and fish all read it back as
-// exactly s.
+// Quote wraps s in single quotes so that zsh, bash, fish and POSIX sh all read
+// it back as exactly s.
 //
 // The POSIX rule does most of it: close the quote, write an escaped quote,
 // reopen. fish reads that the same way. A backslash is where they part, because
 // fish takes \\ and \' inside single quotes as escapes while the POSIX shells
 // take every character there literally. So a backslash is handled the way a
-// quote is, written outside the quotes and escaped, where all three agree. No
-// shim holds a backslash today. That is a fact about today's text, and a
-// quoting rule should not depend on it.
-func quote(s string) string {
+// quote is, written outside the quotes and escaped, where all of them agree.
+// That costs four bytes where there was one, as a quote always has.
+//
+// It is the only quoting rule treewright has, which is why it is exported. The
+// eval file is where fish is certain to be the reader, and it is not the only
+// place fish can be: tmux runs a popup's command, and a window's, through its
+// default-shell, which starts out as the user's login shell. A rule that is
+// right in every shell is simpler to own than two rules and a judgement about
+// which one a line needs. There were two once. internal/cli kept the POSIX-only
+// form after this one was fixed, and a `cd` into a directory holding \' became
+// a line fish could not parse. TestQuotingReadsTheSameInEveryShell holds all
+// four shells to it.
+//
+// internal/tmuxinit keeps its own copy of fingerprint, below, because sharing
+// it would take a package that exists to hold four lines. Sharing this takes
+// nothing, since internal/cli imports this package already. And those are two
+// digests of two different files that happen to be spelled alike, where this
+// is one rule about one thing.
+func Quote(s string) string {
 	return "'" + quoter.Replace(s) + "'"
 }
 
-// quoter is quote's substitution, done in one pass. Done as two, the quotes the
+// quoter is Quote's substitution, done in one pass. Done as two, the quotes the
 // first pass writes around each backslash would be escaped again by the second.
 var quoter = strings.NewReplacer(`\`, `'\\'`, `'`, `'\''`)
 

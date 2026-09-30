@@ -154,12 +154,17 @@ func TestAReloadReplacesTheWrapperThatSourcesIt(t *testing.T) {
 // to tokenize the same in all of them, and each has to get its own back byte
 // for byte. The string is built from what the three disagree about, not from
 // what today's shims contain.
+//
+// sh is the fourth reader because Quote is internal/cli's rule too, and the
+// post_create script it builds runs under sh. Written outside the quotes, a
+// backslash is an escaped backslash to sh as well: to dash on the Ubuntu
+// runner, and to the bash that macOS installs as sh.
 func TestQuotingReadsTheSameInEveryShell(t *testing.T) {
 	const tricky = `plain 'single' "double" \ \\ \' \\' $HOME ${HOME-} ` + "`tick` * ? {a,b} ! #\nsecond line\n"
-	for _, shell := range []string{"zsh", "bash", "fish"} {
+	for _, shell := range []string{"zsh", "bash", "fish", "sh"} {
 		t.Run(shell, func(t *testing.T) {
 			bin := requireShell(t, shell)
-			stdout, stderr := runShell(t, bin, t.TempDir(), "printf '%s' "+quote(tricky))
+			stdout, stderr := runShell(t, bin, t.TempDir(), "printf '%s' "+Quote(tricky))
 			if stdout != tricky || stderr != "" {
 				t.Errorf("%s read the quoted text back as %q (stderr %q), want %q", shell, stdout, stderr, tricky)
 			}
@@ -179,7 +184,7 @@ func TestEveryShimIsInTheReloadBehindItsOwnGuard(t *testing.T) {
 			t.Errorf("%s has no onlyIn test, so Reload cannot keep its shim out of the other shells", shell)
 			continue
 		}
-		if !strings.Contains(reload, s.onlyIn+" && eval "+quote(render(s.script))) {
+		if !strings.Contains(reload, s.onlyIn+" && eval "+Quote(render(s.script))) {
 			t.Errorf("the reload does not carry the %s shim behind its guard", shell)
 		}
 	}

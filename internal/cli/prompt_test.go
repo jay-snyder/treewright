@@ -30,6 +30,43 @@ func TestNewDeliversThePromptShellQuoted(t *testing.T) {
 	waitForContent(t, marker, prompt, "the window's command")
 }
 
+// TestAPromptHoldingBackslashesArrivesAsTyped: the quoting writes a backslash
+// outside the quotes, as '\\', because fish reads one inside them differently
+// from the POSIX shells. Outside them it is one backslash to sh too, and this
+// holds that for both of the shells a prompt can meet. One is the shell tmux
+// runs a window's command with, and the other is the sh the command runs under
+// here when there is no tmux. The text puts a backslash everywhere the reading
+// of one can change: before a letter, before a quote, before another
+// backslash, and at the end.
+func TestAPromptHoldingBackslashesArrivesAsTyped(t *testing.T) {
+	const prompt = `C:\new\'s \\ share\`
+	for _, tc := range []struct {
+		name  string
+		start func(t *testing.T, f *fixture) result
+	}{
+		{"in a window", func(t *testing.T, f *fixture) result {
+			requireTmux(t)
+			return f.exec("new", "alpha", "--prompt", prompt)
+		}},
+		{"without tmux", func(t *testing.T, f *fixture) result {
+			hideTmux(t)
+			return f.exec("scratch", "ask", "--prompt", prompt)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			marker := filepath.Join(t.TempDir(), "prompt")
+			f := newFixture(t, "command = \"printf %s {prompt} > "+marker+"\"\n")
+			if r := tc.start(t, f); r.err != nil {
+				t.Fatalf("%v\n%s", r.err, r.both())
+			}
+			waitForContent(t, marker, prompt, "the command")
+			if body, _ := os.ReadFile(marker); string(body) != prompt {
+				t.Errorf("the command was handed %q, want %q", body, prompt)
+			}
+		})
+	}
+}
+
 // TestThePlaceholderVanishesRatherThanEmptying pins the difference between
 // removing {prompt} and substituting ”: the window's command counts its own
 // arguments. An empty argument would be an instruction — a blank prompt for

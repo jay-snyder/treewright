@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/jay-snyder/treewright/internal/shellinit"
 )
 
 // The kickoff prompt: `new` and `resume` take --prompt, and the text lands
@@ -133,8 +135,13 @@ func fillPrompt(command, key, prompt string) (string, error) {
 // deliberate:
 //
 // With a prompt, the placeholder becomes the shell-quoted text: one literal
-// argument however many spaces and quotes the prompt holds, through the same
-// shellQuote the eval file trusts.
+// argument however many spaces, quotes and backslashes the prompt holds,
+// through the shellinit.Quote the eval file trusts. Each quote and each
+// backslash is written in four bytes, so a prompt full of either is larger in
+// the window's command than it was typed. That spends tmux.MaxCommandLength
+// faster, and it takes thousands of them to matter. What checkCommandFits
+// measures is the quoted text, so a prompt pushed over the limit by its own
+// quoting is refused before anything is created, like any other long prompt.
 //
 // Without one, the placeholder is removed entirely — never substituted as ”.
 // An empty argument is not the absence of an argument: to most agents it is an
@@ -172,5 +179,5 @@ func fillTemplate(command, key, prompt string) (string, error) {
 		command = strings.ReplaceAll(command, promptPlaceholder, "")
 		return strings.TrimSpace(command), nil
 	}
-	return strings.ReplaceAll(command, promptPlaceholder, shellQuote(prompt)), nil
+	return strings.ReplaceAll(command, promptPlaceholder, shellinit.Quote(prompt)), nil
 }

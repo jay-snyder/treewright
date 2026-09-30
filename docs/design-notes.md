@@ -1291,6 +1291,24 @@ and bash ever evaluate. The same difference is why the shims are quoted with
 backslashes written outside the quotes. None contains one today, but a quoting
 rule that holds only for today's text would stop holding at somebody's next edit.
 
+That quoting, `shellinit.Quote`, is now the only quoting treewright has.
+`internal/cli` kept its own copy of the POSIX form after this one was fixed,
+and the copy wrote the eval file's `cd` line. A repository whose path held `\'`
+sent fish a line it could not parse, and one holding `\\` sent it looking for a
+directory with one backslash in its name. Everything treewright quotes into a
+shell line now goes through the one function: the `cd`, a `--prompt`, a
+post_create step's name in its log, a popup's command. The eval file is read
+by fish for certain, and a popup or a window by tmux's `default-shell`, which
+starts out as the login shell and so can be fish as well. A backslash outside
+the quotes is one backslash to `sh`, zsh and bash too, so moving every call site
+onto the stricter rule changed nothing that already worked in them.
+One rule that is right in every shell is simpler to own than two rules and a
+judgement, at each call site, about which one a line needs. The cost is four
+bytes per backslash where there was one, which is what an apostrophe already
+cost. That spends a `--prompt`'s share of `tmux.MaxCommandLength` faster. It
+takes thousands of backslashes to matter, and a prompt pushed over by its own
+quoting is refused before anything is created, like any prompt too long to run.
+
 Reloading made one latent problem live: fish keeps every completion it is
 given, so a second `source` doubled each one. The fish shim now erases its
 completions before adding them. Re-running the startup line by hand did the
