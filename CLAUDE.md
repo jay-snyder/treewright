@@ -237,7 +237,8 @@ tmux.conf lines, shell startup evals, help prose — spells out `treewright`.
 **Everything works without the shell integration.** A shell command may never
 run — no integration loaded, or an eval file that cannot be written — so the
 by-hand line and the failure report belong beside the emit, which is what
-`moveShell` in `eval.go` owns. Don't call `appendEval` directly from a command.
+`moveShell` and `reloadShell` in `eval.go` own. Don't call `appendEval`
+directly from a command.
 
 **A repository is named by `--repo`, never by qualifying a slug.** Every command
 that resolves a config accepts it, and the seven whose only argument is a
@@ -646,8 +647,17 @@ the plugin, reloads tmux bindings only into a server already holding some, and
 puts them back on the keys they are already on. `agent-init` and `tmux-init` are
 where a user decides what treewright touches; `refresh` is the command people run
 without reading it, and it must never be how that decision gets made for them.
-The shell wrapper is the one thing it reports rather than fixes — no process can
-define a function in its parent.
+The shell wrapper is reloaded through the eval file, and only when that file is
+set: `TREEWRIGHT_EVAL_FILE` is the one fact that says a wrapper is calling,
+while the exported fingerprint is inherited by shells that never loaded one.
+What it appends is `shellinit.Reload` — all three shims, each behind a test
+only its own shell passes — so **nothing guesses which shell is sourcing it**.
+`$SHELL` is the login shell, and a guessed shim sourced into the wrong shell is
+worse than none. The guards are quoting rather than variables because a
+variable is what `set -u` refuses, and `${VAR-}` is what fish cannot parse: see
+`shim.onlyIn` before simplifying one. Every other shell keeps its old wrapper,
+so the report names the startup line for the shell `TREEWRIGHT_SHELL_INIT_SHELL`
+(or, from older shims, `$SHELL`) says it is.
 
 **The release check is explicit-only.** `doctor` and `version --check`, and
 nothing else — no cache file, no background check, no HTTP on `new` or `ls`. An
@@ -801,6 +811,7 @@ parse would break the startup of whatever loads it.
 | `TREEWRIGHT_CONFIG_DIR` | Registry directory; overrides `$XDG_CONFIG_HOME/treewright/repos`. |
 | `TREEWRIGHT_EVAL_FILE` | Set by the shell wrapper; commands append shell lines for it to source. |
 | `TREEWRIGHT_SHELL_INIT_VERSION` | Exported by the shell wrapper: the fingerprint of the shim that defined it, which is how `doctor` tells a wrapper this binary emitted from one an older build did. |
+| `TREEWRIGHT_SHELL_INIT_SHELL` | Exported by the shell wrapper beside the fingerprint: the shell its shim was written for, which a stale fingerprint cannot say. `refresh` reads it to name the line that reloads the shells it cannot reach. |
 | `TREEWRIGHT_ARGV0` | The name the user typed (`tw`), since the wrapper erases it from argv[0]. |
 | `TREEWRIGHT_TMUX_LABEL` | Drive a non-default tmux server (`tmux -L <label>`). |
 | `TREEWRIGHT_POPUP` | Set inside a popup, so exit paths can say "press Esc to close". |

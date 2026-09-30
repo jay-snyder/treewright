@@ -31,8 +31,8 @@ import (
 
 // Shells lists the supported shell names.
 func Shells() []string {
-	names := make([]string, 0, len(scripts))
-	for name := range scripts {
+	names := make([]string, 0, len(shims))
+	for name := range shims {
 		names = append(names, name)
 	}
 	sort.Strings(names)
@@ -46,11 +46,17 @@ const versionPlaceholder = "{{version}}"
 
 // Script returns the integration snippet for a shell.
 func Script(shell string) (string, error) {
-	s, ok := scripts[shell]
+	s, ok := shims[shell]
 	if !ok {
 		return "", fmt.Errorf("unsupported shell %q (supported: %s)", shell, strings.Join(Shells(), ", "))
 	}
-	return strings.ReplaceAll(s, versionPlaceholder, fingerprint(s)), nil
+	return render(s.script), nil
+}
+
+// render fills a script's fingerprint in, which is all that separates the
+// checked-in file from what a shell is handed.
+func render(script string) string {
+	return strings.ReplaceAll(script, versionPlaceholder, fingerprint(script))
 }
 
 // VersionVar is the variable each shim exports, holding the fingerprint of the
@@ -72,11 +78,11 @@ const VersionVar = "TREEWRIGHT_SHELL_INIT_VERSION"
 
 // Version is the fingerprint the shim for shell exports.
 func Version(shell string) (string, error) {
-	s, ok := scripts[shell]
+	s, ok := shims[shell]
 	if !ok {
 		return "", fmt.Errorf("unsupported shell %q (supported: %s)", shell, strings.Join(Shells(), ", "))
 	}
-	return fingerprint(s), nil
+	return fingerprint(s.script), nil
 }
 
 // Current reports whether v is the fingerprint of a shim this binary emits.
@@ -90,13 +96,78 @@ func Current(v string) bool {
 	if v == "" {
 		return false
 	}
-	for _, s := range scripts {
-		if fingerprint(s) == v {
+	for _, s := range shims {
+		if fingerprint(s.script) == v {
 			return true
 		}
 	}
 	return false
 }
+
+// ShellVar is the variable each shim exports beside VersionVar, naming the shell
+// it was written for.
+//
+// VersionVar cannot say that once it is stale. A fingerprint names one script,
+// and a stale one names a script this binary does not carry, which is what
+// makes it stale in the first place. So a shell that refresh cannot reach
+// could only be told which line reloads it by guessing from $SHELL, which is
+// the login shell rather than the running one: a fish started from a bash
+// login would be handed bash's line. Shims emitted before this variable
+// existed do not export it, and for those $SHELL is still the guess.
+const ShellVar = "TREEWRIGHT_SHELL_INIT_SHELL"
+
+// LoadLine is the line a shell's startup file loads its shim with. It is also
+// how a shell holding an older shim is brought up to date by hand, since it
+// asks the binary on PATH for its own text.
+func LoadLine(shell string) (string, bool) {
+	s, ok := shims[shell]
+	return s.load, ok
+}
+
+// Reload is the text that, sourced by zsh, bash or fish, re-evaluates this
+// binary's shim for that shell, and does nothing at all in the other two.
+//
+// It is how refresh replaces the wrapper in the shell it was run from. That
+// wrapper sources the eval file after the binary exits, so a shim appended there
+// redefines treewright and tw in the live shell, and the call doing the sourcing
+// finishes on the body it started with. Every shell holds on to a running
+// function's body when the function is redefined, and
+// TestAReloadReplacesTheWrapperThatSourcesIt holds all three to that.
+//
+// All three shims go in, because which shell is on the other end of the eval
+// file is a question the binary cannot answer. $SHELL is the login shell rather
+// than the running one, ShellVar exists only in shims newer than the ones that
+// need replacing, and a stale fingerprint names none of this binary's scripts.
+// Each shim is guarded by a test only its own shell passes, so no guess is
+// needed. That also keeps the eval-file protocol's one rule, that every line
+// is one all three shells parse the same way: each shim is a quoted string to
+// the two shells it is not for.
+func Reload() string {
+	lines := make([]string, 0, len(shims))
+	for _, shell := range Shells() {
+		s := shims[shell]
+		lines = append(lines, s.onlyIn+" && eval "+quote(render(s.script)))
+	}
+	return strings.Join(lines, "\n")
+}
+
+// quote wraps s in single quotes so that zsh, bash and fish all read it back as
+// exactly s.
+//
+// The POSIX rule does most of it: close the quote, write an escaped quote,
+// reopen. fish reads that the same way. A backslash is where they part, because
+// fish takes \\ and \' inside single quotes as escapes while the POSIX shells
+// take every character there literally. So a backslash is handled the way a
+// quote is, written outside the quotes and escaped, where all three agree. No
+// shim holds a backslash today. That is a fact about today's text, and a
+// quoting rule should not depend on it.
+func quote(s string) string {
+	return "'" + quoter.Replace(s) + "'"
+}
+
+// quoter is quote's substitution, done in one pass. Done as two, the quotes the
+// first pass writes around each backslash would be escaped again by the second.
+var quoter = strings.NewReplacer(`\`, `'\\'`, `'`, `'\''`)
 
 // fingerprint digests a script's checked-in bytes, placeholder and all, which is
 // what makes it stable: the value names the file rather than the rendering.
@@ -110,16 +181,59 @@ func fingerprint(script string) string {
 	return hex.EncodeToString(sum[:])[:12]
 }
 
-var scripts = map[string]string{
-	"zsh":  zshScript,
-	"bash": bashScript,
-	"fish": fishScript,
+// shim is what this package knows about one shell's integration.
+type shim struct {
+	// script is the checked-in text, fingerprint placeholder and all.
+	script string
+
+	// load is the line a startup file loads the script with.
+	load string
+
+	// onlyIn is a test that is true in this shell and in neither of the other
+	// two, written so that all three can parse it. Each shell reads every line
+	// of a reload, and fish parses the whole file before it runs any of it, so
+	// a line that one of them cannot parse breaks the reload for everybody.
+	//
+	// The obvious test is the variable each shell sets for itself, and it is
+	// the one that cannot be used as it stands. Under `set -u` a POSIX shell
+	// refuses to expand an unset variable, and bash abandons the whole file at
+	// the first one, taking the wrapper's own cleanup with it. `${ZSH_VERSION-}`
+	// is safe there, but fish cannot parse it even on a line it never runs.
+	//
+	// So fish is told apart from the other two by quoting, which needs no
+	// variable. Inside single quotes fish reads a pair of backslashes as one,
+	// where zsh and bash read it as two, and all three read the double-quoted
+	// pair as one. The variable test is then safe to write, inside a quoted
+	// eval that only zsh and bash ever evaluate.
+	onlyIn string
+}
+
+// notFish is true in zsh and bash, and false in fish. See shim.onlyIn.
+const notFish = `test '\\' != "\\"`
+
+var shims = map[string]shim{
+	"zsh": {
+		script: zshScript,
+		load:   `eval "$(treewright shell-init zsh)"`,
+		onlyIn: notFish + ` && eval 'test -n "${ZSH_VERSION-}"'`,
+	},
+	"bash": {
+		script: bashScript,
+		load:   `eval "$(treewright shell-init bash)"`,
+		onlyIn: notFish + ` && eval 'test -n "${BASH_VERSION-}"'`,
+	},
+	"fish": {
+		script: fishScript,
+		load:   "treewright shell-init fish | source",
+		onlyIn: `test '\\' = "\\"`,
+	},
 }
 
 // The wrapper in each shell follows the same three steps: make a temp file,
 // hand its path to the binary as $TREEWRIGHT_EVAL_FILE, then source it if the
-// binary wrote anything. Two commands write to it: `treewright cd`, and `treewright rm`
-// when the shell is standing in the directory being deleted.
+// binary wrote anything. Three commands write to it: `treewright cd`, `treewright rm`
+// when the shell is standing in the directory being deleted, and `treewright
+// refresh` when the wrapper doing the sourcing is an older one (see Reload).
 //
 // Every external program the wrappers call is invoked through `command`, for the
 // same reason the binary itself is: zsh and bash expand aliases in a function

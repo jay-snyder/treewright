@@ -1230,6 +1230,12 @@ Each of the three answers differently, and the differences are forced:
   mean trusting `$SHELL`, which names the login shell rather than the running
   one.
 
+  Beside it the shim exports `TREEWRIGHT_SHELL_INIT_SHELL`, the shell it was
+  written for, which is the one thing a stale fingerprint cannot say: it
+  matches none of this binary's scripts, which is what makes it stale. `refresh`
+  reads it to name the line for the shells it cannot reach (below), and falls
+  back to `$SHELL` for the shims already out there, which predate it.
+
 Both fingerprints are digests of the checked-in text rather than the release
 number, for the same reason: a shim or a snippet built from an unstamped tree
 still has to be distinguishable from an older one, and a `dev` build compared
@@ -1239,11 +1245,11 @@ against a `dev` build would be no comparison at all.
 
 `refresh` is the one command to run after an upgrade. It rewrites the plugin
 wherever it is installed — the user-level copy, the main checkout's, and every
-worktree's — reloads the tmux bindings, and reports what moved in each place,
-naming the files the way `agent-init` does, because
-the interesting run is the second one and "wrote `hooks/hooks.json` in eng-1"
-says which part of the wiring had gone stale where "updated 6 checkouts" says
-only that something did.
+worktree's — reloads the tmux bindings and the wrapper in the shell it was run
+from, and reports what moved in each place, naming the files the way
+`agent-init` does, because the interesting run is the second one and "wrote
+`hooks/hooks.json` in eng-1" says which part of the wiring had gone stale where
+"updated 6 checkouts" says only that something did.
 
 **It refreshes what is installed and installs nothing new.** A checkout with no
 plugin is left alone unless the config carries one — a worktree with nothing in
@@ -1254,9 +1260,53 @@ on the keys they are already on, since which keys a server binds is a decision
 made in a file the user owns. This is the command people will run without
 reading it, and `agent-init` and `tmux-init` are where that decision belongs.
 
-**The shell is said rather than done.** No process can define a function in its
-parent, so `refresh` reports a stale wrapper and names the fix — a new terminal
-— which is the whole of what is available to it.
+**The shell it was run from is reloaded; every other one is told the line.** No
+process can define a function in its parent, and that used to be the end of it:
+`refresh` reported a stale wrapper and said to open a new terminal. But
+`refresh` is not a bare child process when the wrapper runs it. The wrapper
+sources the eval file after the binary exits — the channel `cd` moves the shell
+through — so a shim appended there redefines `treewright`, `tw` and the
+completion in the live shell, and exports the new fingerprint with them.
+The call doing the sourcing finishes on the body it started with and the
+next call gets the new one. A function redefining itself mid-call sounds like the
+thing that would break, which is why the shells are held to it by a test rather
+than by this paragraph.
+
+What goes in the eval file is all three shims, each behind a test only its own
+shell passes. The obvious design writes one shim, for the shell `$SHELL` names,
+and `$SHELL` is the login shell: somebody running fish from a bash login would
+have bash's shim sourced into fish. The shell-name variable above arrives only
+with the shims that will need replacing *next* time. With every shim behind its
+own guard, nobody has to know which shell is on the other end — and the
+eval-file rule that every line parses the same in all three shells still holds,
+since to the two shells a shim is not for, it is a quoted string.
+
+The guards are the part that looks overbuilt, and each piece is load-bearing.
+The natural test, `test -n "$ZSH_VERSION"`, fails under `set -u`: bash abandons
+the whole file at the first unset variable, taking the wrapper's cleanup with
+it. `${ZSH_VERSION-}` is safe there, and fish cannot parse it, even on a line it
+never runs. So fish is told apart first by quoting alone: fish reads `'\\'` as
+one backslash where zsh and bash read two, and all three read `"\\"` as one. The variable test then sits inside a quoted `eval` that only zsh
+and bash ever evaluate. The same difference is why the shims are quoted with
+backslashes written outside the quotes. None contains one today, but a quoting
+rule that holds only for today's text would stop holding at somebody's next edit.
+
+Reloading made one latent problem live: fish keeps every completion it is
+given, so a second `source` doubled each one. The fish shim now erases its
+completions before adding them. Re-running the startup line by hand did the
+same thing before any of this.
+
+Every shell but that one keeps the wrapper it started with, so the report ends
+with the line that reloads one, which is the line in the startup file, spelled
+for the shell the shim says it is. Without an eval file it says nothing,
+exactly as before. The fingerprint alone is inherited by every process below a
+shell that loaded it, including a shell that never did, so it says nothing about
+the shell `refresh` is running in. The eval file is the one fact that does.
+Loading the integration into a shell that never had it would be an install,
+and that is `shell-init`'s decision. It is also why `doctor`'s finding for a
+stale wrapper names `tw refresh` rather than a new terminal: doctor makes that
+finding only where the wrapper is calling, which is exactly where refresh can
+reach.
 
 ### What the cask says after an upgrade
 
@@ -1270,9 +1320,9 @@ just replaced, and nothing has said so.
 
 The caveats cannot put any of that right. They are text, and the one thing text
 can do is name the command, so the cask asks which of the two is happening and
-says the other thing on an upgrade: `tw refresh`, what it rewrites and reloads, a
-new terminal because only a shell can replace its own functions, and `tw doctor`
-for whatever is still behind. It is the same advice `refresh` itself would give,
+says the other thing on an upgrade: `tw refresh`, what it rewrites and reloads —
+the shell it is typed into among them — a new terminal for every other shell,
+and `tw doctor` for whatever is still behind. It is the same advice `refresh` itself would give,
 arriving at the one moment somebody is looking at treewright's output without
 having asked it anything.
 
@@ -1756,20 +1806,27 @@ place the prose has to be complete.
 treewright is a compiled binary, so it runs in its own process and cannot change
 the calling shell's working directory. The wrapper function closes that gap: it
 makes a temp file, passes its path in `$TREEWRIGHT_EVAL_FILE`, and sources it
-after treewright exits. Two commands write to it — `cd`, and `rm` when your shell
-is standing in the directory being deleted. Everything must still behave
+after treewright exits. Three commands write to it — `cd`, `rm` when your shell
+is standing in the directory being deleted, and `refresh` when the wrapper doing
+the sourcing came from an older treewright. Everything must still behave
 correctly when the file is never sourced, which is why those commands also print
-the `cd` to run. An eval file that exists and cannot be written — a swept
+the line to run. An eval file that exists and cannot be written — a swept
 tmpdir, a full disk — is the same failure with a cause worth naming, so it is
 reported as a warning with the same by-hand line under it; both halves live in
-one helper, `moveShell`, so a new caller cannot keep the emit and forget the
-fallback.
+one helper — `moveShell` for a `cd`, `reloadShell` for a reload — so a new
+caller cannot keep the emit and forget the fallback.
 
 The shims are emitted by the binary rather than installed as files, so they can
 never drift out of sync with it — the same approach fzf, zoxide, direnv, and
 starship take, and for the same reason. The commands written to the eval file are
 restricted to what zsh, bash, and fish all parse identically, so one writer serves
 every shell.
+
+The fish shim needs fish 3.1 or later, because that is where `complete -F`
+arrived. The reload `refresh` writes needs only 3.0, for `&&`, so it adds no
+requirement of its own. Both were checked by running the suite against real 3.0,
+3.1 and 3.7 builds rather than read off changelogs. On 3.0 the shim fails to
+load at the `-F`.
 
 They are *stored* as files even so: `internal/shellinit/scripts/init.zsh` and
 its two siblings, embedded into the binary by name. Emitting from the binary was
@@ -1802,13 +1859,15 @@ either integration is added. A dotfiles repo shared across machines, some withou
 treewright on them, is the case where the guard earns its keep — but that is a
 choice about absent installs, not the instruction to hand someone installing it.
 
-**The shim says which treewright emitted it.** Each one exports
-`TREEWRIGHT_SHELL_INIT_VERSION`, a fingerprint of its own checked-in text, and
-that is the only way the question can be asked at all: a shell keeps whatever it
-loaded at start, and a binary cannot read its parent's function table. Exported
-rather than merely set, because the only thing that reads it is a child process —
-`doctor`, which compares it against the shims this binary emits and says when the
-wrapper in the shell is somebody else's. See "Upgrading treewright itself".
+**The shim says which treewright emitted it, and for which shell.** Each one
+exports `TREEWRIGHT_SHELL_INIT_VERSION`, a fingerprint of its own checked-in
+text, and `TREEWRIGHT_SHELL_INIT_SHELL`, and that is the only way either question
+can be asked at all: a shell keeps whatever it loaded at start, and a binary
+cannot read its parent's function table. Exported rather than merely set,
+because what reads them is a child process — `doctor`, which compares the
+fingerprint against the shims this binary emits and says when the wrapper in the
+shell is somebody else's, and `refresh`, which reloads it. See "Upgrading
+treewright itself".
 
 **`tw` and `TREEWRIGHT_ARGV0`.** `tw` calls the `treewright` *function*, resolved
 at call time, so the eval-file protocol works identically under either name. That

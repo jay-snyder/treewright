@@ -14,6 +14,7 @@ import (
 
 	"github.com/jay-snyder/treewright/internal/config"
 	"github.com/jay-snyder/treewright/internal/gittest"
+	"github.com/jay-snyder/treewright/internal/shellinit"
 	"github.com/jay-snyder/treewright/internal/testenv"
 )
 
@@ -53,10 +54,15 @@ func newFixture(t *testing.T, extraConfig string) *fixture {
 
 	t.Setenv("TREEWRIGHT_CONFIG_DIR", f.registry)
 	// Unset so every command runs as it does from a plain shell — no client to
-	// switch, no inherited eval file to write to.
+	// switch, no inherited eval file to write to, and no wrapper for refresh to
+	// weigh. The last two are exported into every tw window, which is where
+	// this suite is usually run from, and a test that means to have a wrapper
+	// sets them itself.
 	t.Setenv("TMUX", "")
 	t.Setenv("TMUX_PANE", "")
 	t.Setenv("TREEWRIGHT_EVAL_FILE", "")
+	t.Setenv(shellinit.VersionVar, "")
+	t.Setenv(shellinit.ShellVar, "")
 	// Windows are still opened without a client, so every tmux command is aimed at
 	// a server private to this test. Nothing here can then open a window on, or
 	// kill a window in, the developer's own tmux — and a test that wants to assert

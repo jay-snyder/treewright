@@ -341,11 +341,13 @@ func checkShellIntegration(env *Env, r *report) {
 		default:
 			// An empty variable and a stale one are one finding: both mean the
 			// function in this shell came from a binary that is no longer the one
-			// running, and the fix — a shell that evaluates the line again — is the
-			// same. treewright cannot do it from here, a process having no way to
-			// define a function in its parent.
+			// running, and the fix is the same. It is refresh, as it is for the tmux
+			// bindings above, and for the same reason: this finding is only ever
+			// made where the wrapper is calling, which is exactly where refresh can
+			// reload it. Every other shell is refresh's to name.
 			r.addf(levelWarn, "shell integration", "loaded, but not by this treewright\n"+
-				"the wrapper in this shell is the one it started with\n"+staleShellAdvice)
+				"the wrapper in this shell is the one it started with\n"+
+				"reload it:  %s refresh", env.Argv0)
 		}
 		return
 	}
@@ -354,13 +356,14 @@ func checkShellIntegration(env *Env, r *report) {
 	const notLoaded = "not loaded\ncd and rm cannot move your shell\n"
 
 	shell := filepath.Base(os.Getenv("SHELL"))
-	switch shell {
-	case "zsh", "bash":
-		r.addf(levelWarn, "shell integration", notLoaded+"add to your startup file:  eval \"$(treewright shell-init %s)\"", shell)
-	case "fish":
-		r.addf(levelWarn, "shell integration", notLoaded+"add to your config:  treewright shell-init fish | source")
-	default:
+	line, known := shellinit.LoadLine(shell)
+	switch {
+	case !known:
 		r.addf(levelWarn, "shell integration", notLoaded+"see \"%s help shell-init\" for the line your shell wants", env.Argv0)
+	case shell == "fish":
+		r.addf(levelWarn, "shell integration", notLoaded+"add to your config:  %s", line)
+	default:
+		r.addf(levelWarn, "shell integration", notLoaded+"add to your startup file:  %s", line)
 	}
 }
 

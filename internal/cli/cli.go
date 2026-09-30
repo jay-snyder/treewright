@@ -907,9 +907,10 @@ plugin in it is left alone, with "treewright agent-init" named; the tmux
 bindings are reloaded only if the server already holds some, on the keys they
 are already on, so keys moved with --resume-key stay where you put them.
 
-The one thing it cannot reach is your shell: a wrapper function lives in the
-shell that loaded it, and no process can replace its parent's. Where the loaded
-one is out of date it says so, and opening a new terminal is the fix.
+It reloads the shell wrapper too, when the one in your shell came from an
+older treewright, but only in the shell you run it from: every other shell
+keeps the wrapper it loaded at start. It names the line that reloads one by
+hand, which is the line in your startup file.
 
 "treewright doctor" is what says whether any of this is needed.`,
 			flags: []flagDoc{repoFlagDoc},

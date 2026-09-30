@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/jay-snyder/treewright/internal/shellinit"
 )
 
 // A compiled treewright runs as its own process, so it cannot change the working
@@ -19,7 +21,8 @@ import (
 // appendEval appends a shell command to the eval file for the calling shell to
 // run. The caller owns the fallback: without the integration, and when the file
 // cannot be written, the command never runs and something still has to say what
-// to type — which is why the callers go through moveShell rather than here.
+// to type — which is why the callers go through moveShell or reloadShell rather
+// than here.
 func appendEval(path, command string) error {
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
@@ -55,6 +58,47 @@ func moveShell(env *Env, dir, reason string) {
 		return
 	}
 	env.progressf("%s%s", reason, asFields(field("run", env.copyable("cd "+dir))))
+}
+
+// reloadShell asks the calling shell to re-evaluate the wrapper this binary
+// emits, and says what to type wherever that will not happen. It has
+// moveShell's three branches for moveShell's reason.
+//
+// Success is reported here where moveShell's is silent. A cd shows itself in
+// the prompt and a reload shows nothing at all, and a reload that worked still
+// leaves every other shell as it was, which is the one thing left to type.
+func reloadShell(env *Env) {
+	byHand := reloadByHand(env)
+	if env.EvalFile != "" {
+		err := appendEval(env.EvalFile, shellinit.Reload())
+		if err == nil {
+			env.progressf("reloaded the shell wrapper in this shell\n"+
+				"every other shell keeps the one it started with%s", asFields(field("in each, run", byHand)))
+			return
+		}
+		env.warnf("the shell integration is loaded, but its eval file could not be written\n%v\n"+
+			"your shell keeps the wrapper it started with%s", err, asFields(field("run", byHand)))
+		return
+	}
+	env.progressf("the shell wrapper was not reloaded\n"+
+		"this treewright was not run through it, so nothing here reaches your shell%s",
+		asFields(field("run", byHand)))
+}
+
+// reloadByHand is the line that reloads a shell's wrapper where treewright
+// cannot: the one its startup file loads it with.
+//
+// Which shell that is comes from the shim, when the shim is new enough to say.
+// Older ones do not, and for them $SHELL is the guess, as it is for doctor. It
+// names the login shell rather than the running one, which is why it comes
+// second.
+func reloadByHand(env *Env) string {
+	for _, shell := range []string{os.Getenv(shellinit.ShellVar), filepath.Base(os.Getenv("SHELL"))} {
+		if line, ok := shellinit.LoadLine(shell); ok {
+			return env.copyable(line)
+		}
+	}
+	return "the line " + env.copyable(env.Argv0+" help shell-init") + " gives for your shell"
 }
 
 // shellQuote wraps s in single quotes so a shell reads it as one literal word.
