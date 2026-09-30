@@ -106,7 +106,7 @@ One line in your shell's startup file defines `tw`, turns on tab completion, and
 lets `tw cd` actually move your shell:
 
 ```sh
-# in ~/.zshrc
+# in ~/.zshrc, below compinit or the plugin manager that runs it
 eval "$(treewright shell-init zsh)"
 
 # in ~/.bashrc
@@ -116,7 +116,8 @@ eval "$(treewright shell-init bash)"
 treewright shell-init fish | source
 ```
 
-Open a new terminal, or re-source the file, and `tw` is there.
+Open a new terminal, or re-source the file, and `tw` is there. If `tw` works
+in zsh but Tab doesn't complete it, the line is above `compinit`.
 
 ### Set up tmux
 

@@ -1314,6 +1314,24 @@ given, so a second `source` doubled each one. The fish shim now erases its
 completions before adding them. Re-running the startup line by hand did the
 same thing before any of this.
 
+It made a second one live in zsh. The shim registers its completion only where
+a `compdef` exists, and a `compdef` can exist where `compinit` never ran. It
+may have been autoloaded by hand, or copied into a snapshot of an interactive
+shell's functions, which is how some agents start the shell they run commands
+in. Calling it there prints an error from zsh's internals. A startup file
+rarely ran in that state, and a mid-session reload easily can. The narrower test,
+whether `compinit` ran (`$+_comps`), skips that call. It also skips the
+`compdef` that znap and zcomet define, which queues registrations until the
+manager runs `compinit` itself. znap does that at the first prompt, after every
+line of `.zshrc`, so no placement of the treewright line would come after it.
+Nothing short of calling `compdef` tells those states apart, so the shim calls
+whatever `compdef` it finds and discards what it prints. A `.zshrc` that runs
+`compinit` below the line gets no completion and no message, as it always did,
+since `compinit` is what defines `compdef`. That is why the README says where
+the line goes. `doctor` does not check the order. It is a child process and
+cannot see its shell's completion state, and the finding would be about the
+user's `.zshrc` rather than about treewright's installation.
+
 Every shell but that one keeps the wrapper it started with, so the report ends
 with the line that reloads one, which is the line in the startup file, spelled
 for the shell the shim says it is. Without an eval file it says nothing,
