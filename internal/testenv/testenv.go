@@ -89,3 +89,38 @@ func PrivateTmuxServer(t *testing.T) (label string) {
 	})
 	return label
 }
+
+// ShellEnv is the environment for a shell a test starts: this process's, less
+// everything treewright's shell wrapper exports and everything that points a
+// shell at somebody's startup files, with home as its HOME.
+//
+// Both halves are what a test inherits by accident. zsh reads .zshenv even for
+// -c, and fish reads config.fish and every vendor_conf.d it can find, so a
+// shell handed os.Environ() runs the developer's startup files ahead of the
+// test's program — their aliases, their PATH, treewright's own wrapper if they
+// load it — and the test is no longer running what it thinks it is. And a
+// suite started from inside a tw window carries the variables that window's
+// wrapper exported, which a test of the wrapper cannot tell from the leak it
+// is checking for. The HOME is the caller's to name, because once the
+// variables are gone it is where each of these shells looks next.
+//
+// A caller appends what it sets itself. exec keeps the last value of a name
+// given twice, so an append overrides anything here, including with an empty
+// value.
+//
+// It lives here for PrivateTmuxServer's reason: more than one package runs
+// shells, and a list of what to take away is only worth having as one list.
+func ShellEnv(home string) []string {
+	var env []string
+	for _, kv := range os.Environ() {
+		name, _, _ := strings.Cut(kv, "=")
+		switch {
+		case strings.HasPrefix(name, "TREEWRIGHT_"),
+			name == "HOME", name == "ZDOTDIR", name == "BASH_ENV", name == "ENV",
+			name == "XDG_CONFIG_HOME", name == "XDG_DATA_HOME":
+			continue
+		}
+		env = append(env, kv)
+	}
+	return append(env, "HOME="+home)
+}
