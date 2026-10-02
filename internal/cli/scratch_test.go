@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jay-snyder/treewright/internal/shellinit"
 	"github.com/jay-snyder/treewright/internal/tmux"
 )
 
@@ -391,6 +392,304 @@ func TestResumeOfANameNothingAnswersToNamesScratch(t *testing.T) {
 	f.mustRun("new", "eng-2")
 	if r := f.exec("resume", "eng"); r.err == nil || strings.Contains(r.err.Error(), "scratch") {
 		t.Errorf("resume of an ambiguous prefix = %v, want the candidates rather than the scratch hint", r.err)
+	}
+}
+
+// ---- reusing one -----------------------------------------------------------------
+
+// The three cases `scratch --reuse` takes on, which a caller wanting a named
+// agent it can come back to otherwise has to tell apart for itself — out of
+// `ls --json`, and three commands.
+//
+// Every command here has a {prompt} in it, even where the prompt is typed
+// rather than handed to the command: --reuse fills the template whichever case
+// it meets, so a prompt the repository's command could not take is refused on
+// every call rather than only on the ones that found no window open.
+
+// lingeringPrompted is lingering with a placeholder it ignores.
+const lingeringPrompted = "command = ': {prompt}; sleep 300'\n"
+
+// receivesTyping is receives with a placeholder it ignores, for a window whose
+// agent is typed at.
+func receivesTyping(t *testing.T) (config, marker string) {
+	t.Helper()
+	marker = filepath.Join(t.TempDir(), "received")
+	return "command = \": {prompt}; cat > " + marker + "\"\n", marker
+}
+
+// TestScratchReuseOpensANameNothingAnswersTo: with no session by that name,
+// --reuse is scratch, and says so — the only way to know which of the three
+// happened is to be told.
+func TestScratchReuseOpensANameNothingAnswersTo(t *testing.T) {
+	requireTmux(t)
+	marker := filepath.Join(t.TempDir(), "prompt")
+	f := newFixture(t, "command = \"printf %s {prompt} > "+marker+"\"\n")
+
+	const prompt = "/review-pr 42"
+	r := f.exec("scratch", "--reuse", "review-42", "--prompt", prompt)
+	if r.err != nil {
+		t.Fatalf("scratch --reuse: %v\n%s", r.err, r.both())
+	}
+	waitForContent(t, marker, prompt, "the new scratch window's command")
+	if !strings.Contains(r.stderr, "opened scratch session review-42 in proj") {
+		t.Errorf("stderr = %q, want it said that a new session was opened", r.stderr)
+	}
+	if r.stdout != "" {
+		t.Errorf("stdout = %q, want nothing — the answer is a window", r.stdout)
+	}
+}
+
+// TestScratchReuseTypesThePromptAtAnOpenWindow: an open session gets the prompt
+// the way `send` delivers one — the pane shown first, then the line typed — and
+// is brought forward the way `resume` brings one forward. Nothing is opened
+// beside it, and the window keeps the name it has: the title passed on this
+// call names a window this call opens, and this one it did not.
+func TestScratchReuseTypesThePromptAtAnOpenWindow(t *testing.T) {
+	requireTmux(t)
+	f := newFixture(t, lingering)
+	f.mustRun("base")
+	config, marker := receivesTyping(t)
+	f.setConfig("main_dir = '" + f.MainDir + "'\n" + config)
+	f.mustRun("scratch", "review-42")
+	f.mustRun("base")
+
+	const prompt = "/review-pr 42"
+	r := f.exec("scratch", "--reuse", "review-42", "review: 42", "--prompt", prompt)
+	if r.err != nil {
+		t.Fatalf("scratch --reuse: %v\n%s", r.err, r.both())
+	}
+	waitForContent(t, marker, prompt+"\n", "the open scratch window's agent")
+	shown := strings.Index(r.stderr, "review-42 in proj shows:")
+	sent := strings.Index(flat(r.stderr), "sent to review-42")
+	if shown < 0 || sent < 0 {
+		t.Errorf("stderr = %q, want the pane shown and the delivery reported, as send reports them", r.stderr)
+	}
+	if got := windowsIn(t, "proj"); !slices.Equal(got, []string{"main", "review-42"}) {
+		t.Errorf("windows = %v, want the open window reused and not renamed", got)
+	}
+	if got := activeWindowIn(t, "proj"); got != "review-42" {
+		t.Errorf("active window = %q, want the scratch window brought forward", got)
+	}
+	if r.stdout != "" {
+		t.Errorf("stdout = %q, want nothing", r.stdout)
+	}
+}
+
+// TestScratchReuseWithNoPromptSwitchesToAnOpenWindow: nothing to type, so it is
+// `resume` — and the line saying which case this was is the only sign that no
+// window was opened.
+func TestScratchReuseWithNoPromptSwitchesToAnOpenWindow(t *testing.T) {
+	requireTmux(t)
+	f := newFixture(t, lingering)
+	f.mustRun("base")
+	config, marker := receives(t)
+	f.setConfig("main_dir = '" + f.MainDir + "'\n" + config)
+	f.mustRun("scratch", "ask")
+	f.mustRun("base")
+
+	r := f.exec("scratch", "--reuse", "ask")
+	if r.err != nil {
+		t.Fatalf("scratch --reuse: %v\n%s", r.err, r.both())
+	}
+	if !strings.Contains(r.stderr, "scratch window ask is already open in proj") {
+		t.Errorf("stderr = %q, want it said that the window was already open", r.stderr)
+	}
+	if got := activeWindowIn(t, "proj"); got != "ask" {
+		t.Errorf("active window = %q, want the scratch window switched to", got)
+	}
+	if got := windowsIn(t, "proj"); !slices.Equal(got, []string{"main", "ask"}) {
+		t.Errorf("windows = %v, want nothing opened", got)
+	}
+	if body := readIfPresent(t, marker); body != "" {
+		t.Errorf("the window received %q with no prompt given", body)
+	}
+}
+
+// TestScratchReuseReopensARecordedSessionUnderThisCallsTitle: a restart took the
+// window and left the record, so the session comes back on its conversation, as
+// `resume` brings it back — with the prompt, and under the window name passed
+// this time, which `resume` has no way to be given.
+func TestScratchReuseReopensARecordedSessionUnderThisCallsTitle(t *testing.T) {
+	f, log := sessionFixture(t, "", false)
+	writeRecord(t, f, "review-42", "review-conversation")
+
+	r := f.exec("scratch", "--reuse", "review-42", "review: 42", "--prompt", "/review-pr 42")
+	if r.err != nil {
+		t.Fatalf("scratch --reuse: %v\n%s", r.err, r.both())
+	}
+	waitForContent(t, log, "start:--resume review-conversation /review-pr 42", "the reopened scratch window's agent")
+	if got := windowsIn(t, "proj"); !slices.Equal(got, []string{"review: 42"}) {
+		t.Errorf("windows = %v, want one window, under the name this call gave", got)
+	}
+	if got := windowStamp(t, "review: 42", "@treewright_scratch"); got != "review-42" {
+		t.Errorf("@treewright_scratch = %q, want the window reopened as the session it was", got)
+	}
+	if !strings.Contains(r.stderr, "reopened scratch session review-42 in proj") {
+		t.Errorf("stderr = %q, want it said that the session was reopened", r.stderr)
+	}
+}
+
+// TestScratchReuseNeverReachesAWorktreeByPrefix is the trap that sent the first
+// caller to `ls --json`: `send` and `resume` try a scratch name exactly, and with
+// none fall through to a worktree's prefix — so `resume --prompt … review-4`
+// hands the prompt to review-42. --reuse reaches a scratch session or opens one.
+func TestScratchReuseNeverReachesAWorktreeByPrefix(t *testing.T) {
+	requireTmux(t)
+	config, marker := receives(t)
+	f := newFixture(t, config)
+	f.mustRun("new", "review-42")
+	f.setConfig("main_dir = '" + f.MainDir + "'\n" + lingeringPrompted)
+
+	r := f.exec("scratch", "--reuse", "review-4", "--prompt", "/review-pr 4")
+	if r.err != nil {
+		t.Fatalf("scratch --reuse: %v\n%s", r.err, r.both())
+	}
+	if got := windowsIn(t, "proj"); !slices.Equal(got, []string{"review-42", "review-4"}) {
+		t.Errorf("windows = %v, want a scratch window of its own beside the worktree's", got)
+	}
+	if got := windowStamp(t, "review-4", "@treewright_scratch"); got != "review-4" {
+		t.Errorf("@treewright_scratch = %q, want a scratch window called review-4", got)
+	}
+	if body := readIfPresent(t, marker); body != "" {
+		t.Errorf("the worktree's agent received %q", body)
+	}
+}
+
+// TestScratchReuseStillRefusesWhatElseTheNameAnswersTo: --reuse reaches a
+// scratch session and nothing else. A worktree's slug and the base checkout's
+// names are refused as plain scratch refuses them, and nothing is typed or
+// opened.
+func TestScratchReuseStillRefusesWhatElseTheNameAnswersTo(t *testing.T) {
+	requireTmux(t)
+	f := newFixture(t, lingering)
+	f.mustRun("new", "eng-1")
+	before := windowsIn(t, "proj")
+
+	for name, want := range map[string]string{
+		"eng-1": "already a worktree",
+		"base":  "names the base checkout",
+		"main":  "names the base checkout",
+	} {
+		r := f.exec("scratch", "--reuse", name, "--prompt", "hello")
+		if r.err == nil || !strings.Contains(r.err.Error(), want) {
+			t.Errorf("scratch --reuse %s = %v, want it refused as %q", name, r.err, want)
+		}
+	}
+	if got := windowsIn(t, "proj"); !slices.Equal(got, before) {
+		t.Errorf("windows = %v, want nothing opened by a refused scratch (had %v)", got, before)
+	}
+}
+
+// TestScratchReuseRefusesALineBreakWhateverItFinds: only an open window has the
+// prompt typed at it, where Enter submits, but a --reuse caller does not know
+// which case it will meet. So the prompt is refused in every one of them, and
+// a plain scratch, which can only open a window, still takes it.
+func TestScratchReuseRefusesALineBreakWhateverItFinds(t *testing.T) {
+	requireTmux(t)
+	config, marker := receivesTyping(t)
+	f := newFixture(t, config)
+	f.mustRun("scratch", "ask")
+
+	for _, name := range []string{"ask", "fresh"} {
+		r := f.exec("scratch", "--reuse", name, "--prompt", "first line\nsecond line")
+		if r.err == nil {
+			t.Errorf("scratch --reuse %s with a line break succeeded\n%s", name, r.both())
+			continue
+		}
+		if !strings.Contains(r.err.Error(), "line break") || !strings.Contains(r.err.Error(), "--prompt-file") {
+			t.Errorf("scratch --reuse %s: error = %q, want the line break named and --prompt-file offered", name, r.err)
+		}
+	}
+	if got := windowsIn(t, "proj"); !slices.Equal(got, []string{"ask"}) {
+		t.Errorf("windows = %v, want nothing opened by a refused --reuse", got)
+	}
+	if body := readIfPresent(t, marker); body != "" {
+		t.Errorf("the open window received %q from a refused --reuse", body)
+	}
+
+	if r := f.exec("scratch", "fresh", "--prompt", "first line\nsecond line"); r.err != nil {
+		t.Errorf("plain scratch with a line break: %v\n%s", r.err, r.both())
+	}
+}
+
+// TestScratchReuseRefusesAWindowHeldOpen is send's refusal, reached through
+// send's own path: the command died, a shell blocked on `read` is what is
+// listening, and the Enter after the prompt would close the window and the
+// failure with it. With no prompt there is nothing to type, and going to the
+// window is how its output gets read.
+func TestScratchReuseRefusesAWindowHeldOpen(t *testing.T) {
+	requireTmux(t)
+	f := newFixture(t, "command = ': {prompt}; echo no such model >&2; exit 12'\n")
+	f.mustRun("scratch", "ask")
+	id := windowIDNamed(t, "proj", "ask")
+	waitForPane(t, id, heldOpenNotice)
+
+	r := f.exec("scratch", "--reuse", "ask", "--prompt", "carry on")
+	if r.err == nil {
+		t.Fatalf("scratch --reuse typed at a held-open window\n%s", r.both())
+	}
+	if msg := flat(r.err.Error()); !strings.Contains(msg, "no agent in it") ||
+		!strings.Contains(msg, "treewright close --repo proj ask") {
+		t.Errorf("error = %q, want the dead agent named and the way out", msg)
+	}
+	if pane, _ := tmuxctl(t, "capture-pane", "-p", "-t", id); !strings.Contains(pane, "no such model") {
+		t.Errorf("pane = %q, want the failure still readable", pane)
+	}
+
+	if r := f.exec("scratch", "--reuse", "ask"); r.err != nil {
+		t.Errorf("scratch --reuse with no prompt: %v\n%s", r.err, r.both())
+	}
+	if pane, _ := tmuxctl(t, "capture-pane", "-p", "-t", id); !strings.Contains(pane, "no such model") {
+		t.Errorf("pane = %q, want the window still held open", pane)
+	}
+}
+
+// TestScratchReuseRefusesTheCallersOwnWindow: an agent handing itself a prompt
+// puts it into this very session, ahead of whatever it was answering — send's
+// refusal, and the same code.
+func TestScratchReuseRefusesTheCallersOwnWindow(t *testing.T) {
+	requireTmux(t)
+	config, marker := receivesTyping(t)
+	f := newFixture(t, config)
+	f.mustRun("scratch", "ask")
+
+	insideSession(t, "proj")
+	t.Setenv("TMUX_PANE", paneIn(t, "proj", "ask"))
+
+	r := f.exec("scratch", "--reuse", "ask", "--prompt", "do the thing")
+	if r.err == nil {
+		t.Fatalf("scratch --reuse into the caller's own window succeeded\n%s", r.both())
+	}
+	if !strings.Contains(r.err.Error(), "running in") {
+		t.Errorf("error = %q, want it to say the window is the caller's own", r.err)
+	}
+	if body := readIfPresent(t, marker); body != "" {
+		t.Errorf("the window received %q from a refused --reuse", body)
+	}
+}
+
+// TestScratchReuseWithoutTmuxResumesTheRecordedConversationHere: scratch without
+// tmux runs its command in this terminal, so reusing a recorded session runs
+// that session's conversation here — not a fresh agent, which would leave the
+// conversation asked for behind.
+func TestScratchReuseWithoutTmuxResumesTheRecordedConversationHere(t *testing.T) {
+	f := newFixture(t, "agent = 'claude'\n")
+	dir := t.TempDir()
+	log := filepath.Join(dir, "starts")
+	stub := "#!/bin/sh\nprintf 'start:%s in %s\\n' \"$*\" \"$PWD\" >> " + shellinit.Quote(log) + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "claude"), []byte(stub), 0o755); err != nil {
+		t.Fatalf("write the claude stub: %v", err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	writeRecord(t, f, "ask", "ask-conversation")
+	t.Chdir(f.Root)
+	hideTmux(t)
+
+	if r := f.exec("scratch", "--reuse", "--repo", "proj", "ask", "--prompt", "carry on"); r.err != nil {
+		t.Fatalf("scratch --reuse without tmux: %v\n%s", r.err, r.both())
+	}
+	if got, want := startsOf(t, log), []string{"start:--resume ask-conversation carry on in " + f.MainDir}; !slices.Equal(got, want) {
+		t.Errorf("starts = %q, want %q — the recorded conversation, in the main checkout", got, want)
 	}
 }
 

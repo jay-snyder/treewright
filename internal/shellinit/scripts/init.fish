@@ -86,6 +86,7 @@ complete -c treewright -n '__fish_seen_subcommand_from tmux-init' -l resume-key 
 complete -c treewright -n '__fish_seen_subcommand_from tmux-init' -l new-key -r -d 'prefix key that starts a worktree'
 complete -c treewright -n '__fish_seen_subcommand_from new move scratch' -s p -l prompt -r -d 'text the agent starts working on'
 complete -c treewright -n '__fish_seen_subcommand_from move' -l keep -d 'leave the work in the main checkout as well'
+complete -c treewright -n '__fish_seen_subcommand_from scratch' -l reuse -d 'reach a scratch session already answering to the name'
 complete -c treewright -n '__fish_seen_subcommand_from resume' -s p -l prompt -r -d 'text for the resumed agent'
 complete -c treewright -n '__fish_seen_subcommand_from resume restore' -l fresh -d 'run command rather than resume_command'
 complete -c treewright -n '__fish_seen_subcommand_from restore' -s d -l detached -d 'leave the session running and stay out of it'

@@ -962,7 +962,7 @@ func cmdResume(env *Env, args []string) error {
 			return err
 		}
 		warnIfBaseIsElsewhere(env, cfg)
-		created, err := reopenScratchWindow(env, cfg, name, scratchRun, arrivalFor(cfg, repoName))
+		created, err := reopenScratchWindow(env, cfg, name, "", scratchRun, arrivalFor(cfg, repoName))
 		warnIfPromptUndelivered(env, prompt, created, err)
 		return err
 	}
@@ -1148,16 +1148,19 @@ func scratchChoice(cfg *config.Config, w tmux.Window) choice {
 
 // reopenScratchWindow opens a window for a recorded scratch session whose
 // window has gone, under the name that reaches it, running what the caller
-// settled — which for a resume and a restore is the recorded conversation, with
-// command behind it.
+// settled — which is the recorded conversation, with command behind it.
 //
-// The window is named as `scratch` names one given no override. An override is
-// a fact about the window rather than the session, so it went with the window,
-// as a worktree window's does when restore reopens it.
-func reopenScratchWindow(env *Env, cfg *config.Config, name string, run windowCommand, arrive arrival) (created bool, err error) {
+// The window is named as `scratch` names one, override and all — and resume and
+// restore have no override to give. An override is a fact about the window
+// rather than the session, so it went with the window, as a worktree window's
+// does when restore reopens it, and nothing remembers it for the next one.
+// `scratch --reuse` is the caller that has one: it is handed a window name on
+// every call, and the window it reopens is that call's window, so the name is
+// that call's too.
+func reopenScratchWindow(env *Env, cfg *config.Config, name, override string, run windowCommand, arrive arrival) (created bool, err error) {
 	return openWindow(env, cfg, tmux.Spec{
 		Dir:     cfg.MainDir,
-		Name:    cfg.WindowName(name, ""),
+		Name:    cfg.WindowName(name, override),
 		Scratch: name,
 	}, run, arrive)
 }

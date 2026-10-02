@@ -143,8 +143,9 @@ deletes something.
 **One namespace, and a collision is refused when the name is given out.** `send`,
 `close` and `resume` take a worktree's slug and a scratch window's name alike, so
 `tw scratch <name>` refuses a name that is a live worktree's slug or a scratch
-session's — open, or recorded and waiting to be reopened — and `new` and `move`
-refuse a slug that is a scratch session's name. The base checkout's own names
+session's — open, or recorded and waiting to be reopened, unless `--reuse` asks
+for that session — and `new` and `move` refuse a slug that is a scratch
+session's name. The base checkout's own names
 are refused as well: they win every lookup, so a scratch window called `base`
 could be opened and never reached. Checking once, where a name is handed out, is
 cheap; the alternative was a sigil marking scratch names (`:ask`), which is
@@ -161,11 +162,13 @@ whoever will address it: a generated `ask-1` you have to look up before you can
 `tw send` to it is worse than typing a word. What can be typed at `scratch` is
 what can be typed at `new`, so a name is checked by `refname.CheckSlug`.
 
-**It always opens a new window**, running `command` — never `resume_command`,
-since a window that did not exist a moment ago has nothing to resume — with
-`--prompt` and `--prompt-file` filled through `fillPrompt` exactly as `new` fills
-them. Without tmux it does what `base` does, running the command in the terminal
-you are in, rather than inventing a third answer.
+**It opens a new window**, running `command` — never `resume_command`, since a
+window that did not exist a moment ago has nothing to resume — with `--prompt`
+and `--prompt-file` filled through `fillPrompt` exactly as `new` fills them.
+Without tmux it does what `base` does, running the command in the terminal you
+are in, rather than inventing a third answer. This used to say *always*, and
+the one exception is asked for by name: `--reuse`, under "Coming back to a
+scratch session by its name".
 
 **`ls --json` flags a scratch row with `"scratch": true`**, beside the base row's
 `"base": true`, and lists scratch rows under the base row: a consumer deciding
@@ -262,8 +265,9 @@ scratch session somebody stopped caring about and never quit, which `restore`
 reopens once and `close` ends for good.
 
 **Its name stays taken while it is recorded.** `scratch` refuses a recorded
-name, naming `resume` to reopen the session and `close` to end it, and `new` and
-`move` refuse one as they refuse an open scratch window's. A second window under
+name, naming `resume` to reopen the session and `close` to end it — short of
+`--reuse`, which reopens it — and `new` and `move` refuse one as they refuse an
+open scratch window's. A second window under
 the name would be a second session answering to one word — and the first time
 its agent started, its record would overwrite the one it collided with.
 
@@ -293,6 +297,94 @@ session storage, which "When there is nothing to resume" in
 [`agents.md`](agents.md) turns down for being a layout treewright does not own:
 the id arrives in a documented hook payload, and `--resume` is a documented
 flag.
+
+### Coming back to a scratch session by its name
+
+**`scratch --reuse <name>` reaches the scratch session already answering to the
+name instead of refusing it.** An open window has the prompt typed at its agent
+and is brought forward. One whose window a restart took is reopened on its
+conversation. With no session by that name, one is opened as `scratch` opens
+one. The name becomes a handle a caller keeps, rather than one it is handed
+once.
+
+The caller that asked for it wanted one agent per pull request review —
+`review-42`, opened on `/review-pr 42` — with a re-requested review landing in
+the conversation that did the first. Outside treewright that took `ls --json`, a
+`jq` filter, and a branch to `scratch`, `resume --prompt`, or `send` and then
+`resume`: about a second in a repository with half a dozen worktrees, three
+invocations where one would do, and state free to change between them. Every
+caller wanting a named agent it can come back to would write the same branch,
+and getting it right takes a fact few of them will know. `send` and `resume`
+try a scratch name exactly, but fall through to a worktree's prefix when there
+is none, so a blind `resume --prompt … review-4` hands the prompt to the agent
+in `review-42`. The `ls --json` round trip was there only to avoid that.
+
+**On `scratch`, because that is where a scratch name is handed out**, and it is
+the one command that never matches a name by prefix. A new verb would have
+been a second command taking `scratch`'s arguments and restating its refusals.
+An exact-only mode on `send` and `resume` would have closed the prefix trap and
+left every caller writing the three-way branch, three calls and all.
+
+**A flag rather than the default**, because the refusal it gets past is a
+person's protection as well as a namespace rule. `scratch ask`, typed by
+someone who has forgotten an `ask` is open, is a new question. Typing it at the
+old conversation hands that agent a prompt meant for nobody there. The flag is
+the caller saying the name means the same agent every time.
+
+**It reaches a scratch session and nothing else.** The base checkout's names
+and a live worktree's slug are refused first, exactly as they are without the
+flag, and only then is an existing scratch session something to reuse. That
+order also covers a slug that collides with a scratch name because a worktree
+was made by hand, which the lookups would otherwise settle in the scratch
+session's favor.
+
+**An open window is typed at through `send`'s own path** (`deliver`, in
+`send.go`), not a copy of it. So all of `send`'s protections come along: the
+pane shown before anything is typed, the refusal of the caller's own window,
+and the refusal of a window held open after its agent died. A tmux popup has
+no `$TMUX_PANE`, so a caller running in one has no window of its own to be
+refused. With no prompt there is nothing to type, and reaching an open window is
+what `resume` does: switch to it, held-open or not, since going to a dead
+agent's window is how its output gets read.
+
+**What a call can be refused for does not depend on which case it meets.** A
+caller passes `--reuse` precisely because it does not know whether a window is
+open. A call that worked whenever none was, and failed the day one was, would
+be the dependence on unseen state the flag exists to remove. So a prompt with a
+line break in it is refused in all three cases, although only the open window
+types it, and Enter only submits there. `--prompt-file` is the way through,
+since what it builds is one line. `command` is filled in all three as well, so
+a prompt the repository's template has no `{prompt}` for, or one too long for
+tmux, is refused the same way whether or not the template would have run.
+
+**A reopened window takes the window name passed on this call.**
+`reopenScratchWindow` otherwise names a window without the override, on the
+argument that an override is a fact about the window rather than the session —
+so it went with the window, and `resume` and `restore`, which have no override
+to give, still name the window by its session. That argument holds here too.
+Nothing is stored, and the window `--reuse` reopens is this call's window, so
+the name is this call's. A `--reuse` caller passes the name on every call,
+which is what makes that the name the window should have. A window already open
+keeps the name it has: this call did not open it, and tmux names are a
+person's to change.
+
+**Without tmux, it is `scratch` without tmux, one step on.** No window can be
+open. A name with no session runs `command` in this terminal, as before. A
+recorded session runs its conversation here. That beats a fresh agent, which
+would leave the conversation that was asked for behind.
+
+**The client follows `scratch`'s rule**, `arrivalFor`: brought to the window,
+unless `--repo` names another repository. **stdout stays empty**, and under
+`--reuse` one line on stderr says which case it met — `opened scratch session`,
+`send`'s own pane and `sent to` report, `scratch window … is already open`, or
+`reopened scratch session … on its recorded conversation`. A plain `scratch`
+says nothing new, since it can only have done the first.
+
+What it does not fix is the hazard `send` already has. The pane is shown so the
+sender can see an agent sitting on a question before typing an answer into it,
+and a caller that discards stderr — the popup that asked for this does — never
+sees it. `waiting` is the state `send` exists to reach, so refusing it here
+would refuse the case the feature is most often for.
 
 ## Putting a session back after a restart
 
@@ -932,7 +1024,7 @@ stdout carries the answer and nothing else, so any command can be piped:
 | `send` | nothing — there is no answer, only something done; what the window was showing and what was typed go to stderr |
 | `close` | nothing — there is no answer, only a window that is gone; what it closed and what that cost go to stderr |
 | `restore` | nothing — there is no answer, only a session that is back; what it could not open, and the way in when it stayed out, go to stderr |
-| `scratch` | nothing — the answer is a window, and the name you gave it is how everything else reaches it; where it opened goes to stderr |
+| `scratch` | nothing — the answer is a window, and the name you gave it is how everything else reaches it; where it opened goes to stderr, and under `--reuse` so does which of its three cases it met |
 | `signal` | nothing — the answer is the stamp on the window, and out of scope it is silent on stderr too |
 | `guard` | nothing — the answer is the exit code, that being what a PreToolUse hook reads, and the refusal it carries goes to stderr for the agent |
 | `session-start` | what each optional feature did, one message per feature — the reader is the agent, whose SessionStart hook adds a hook's stdout to the session as context, and with nothing to report it prints nothing at all; recording which conversation the session is prints nothing ever |
