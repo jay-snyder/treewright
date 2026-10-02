@@ -46,7 +46,9 @@ import (
 
 func cmdScratch(env *Env, args []string) error {
 	var prompt, promptFile, repoName string
-	positional, err := parseArgs("scratch", args, nil, repoValues(&repoName, promptValues(&prompt, &promptFile)), 2)
+	var reuse bool
+	positional, err := parseArgs("scratch", args, map[string]*bool{reuseFlag: &reuse},
+		repoValues(&repoName, promptValues(&prompt, &promptFile)), 2)
 	if err != nil {
 		return err
 	}
@@ -65,38 +67,149 @@ func cmdScratch(env *Env, args []string) error {
 	if err != nil {
 		return err
 	}
+	// Whatever else the name answers to is refused with or without --reuse,
+	// which reaches a scratch session and nothing else: the worktree a blind
+	// `resume` would have found by prefix is the trap it exists to close.
 	if err := refuseScratchName(env, cfg, name); err != nil {
 		return err
 	}
-	window := cfg.WindowName(name, override)
-	warnIfWindowNameIsARepo(env, cfg, window)
-	// command, never resume_command: there is nothing to resume in a window that
-	// did not exist a moment ago. Filled here, before anything opens, so the
-	// placeholder and length refusals are the ones `new` gives.
+	session, known := scratchSessions(cfg)[name]
+	if known && !reuse {
+		return refuseScratchSession(env, cfg, name, session)
+	}
+	// command, never resume_command, for a window that did not exist a moment
+	// ago: there is nothing to resume in it. Filled here, before anything opens,
+	// so the placeholder and length refusals are the ones `new` gives — and filled
+	// under --reuse too, whichever case the name turns out to be, so that a
+	// prompt this repository's command could not take is refused every time
+	// rather than only on the days no window happened to be open.
 	prompt, err = resolvePrompt("scratch", prompt, promptFile)
 	if err != nil {
 		return err
+	}
+	if reuse {
+		if err := refuseALineBreakToReuse(env, prompt); err != nil {
+			return err
+		}
 	}
 	command, err := fillPrompt(cfg.Command, "command", prompt)
 	if err != nil {
 		return err
 	}
 	run := windowCommand{Command: command}
+	if known {
+		return reuseScratch(env, cfg, session, override, prompt, run, arrivalFor(cfg, repoName))
+	}
 
+	window := cfg.WindowName(name, override)
+	warnIfWindowNameIsARepo(env, cfg, window)
 	warnIfBaseIsElsewhere(env, cfg)
 	if !tmux.Available() {
 		_, err := runInTheBaseCheckout(env, cfg, run)
 		return err
 	}
-	_, err = openWindow(env, cfg, tmux.Spec{
+	if _, err := openWindow(env, cfg, tmux.Spec{
 		Dir:     cfg.MainDir,
 		Name:    window,
 		Scratch: name,
-	}, run, arrivalFor(cfg, repoName))
-	return err
+	}, run, arrivalFor(cfg, repoName)); err != nil {
+		return err
+	}
+	// Said only under --reuse, which is the one way to ask for a scratch window
+	// without knowing which of three things will happen. A plain scratch can
+	// only have done this.
+	if reuse {
+		env.progressf("opened scratch session %s in %s", name, cfg.Name)
+	}
+	return nil
 }
 
-// refuseScratchName refuses a name that something else already answers to.
+// reuseFlag is what makes `scratch` reach a scratch session already answering
+// to the name, rather than refuse it.
+const reuseFlag = "--reuse"
+
+// reuseScratch is `scratch --reuse` given a name a scratch session already
+// answers to: open, or recorded with its window gone. Either way the session is
+// the one the name was given to, and the request is the one `scratch` was
+// always making — this name's agent, and this prompt for it — so it is honored
+// rather than refused.
+//
+// Why a flag, and not what `scratch` does by default. The refusal it replaces
+// is a person's protection as well as a namespace rule: `scratch ask` typed by
+// someone who has forgotten an `ask` is open is a new question, and typing it
+// at the old conversation would hand that agent a prompt meant for nobody
+// there. A caller that passes the flag has said the name is a handle it keeps —
+// `review-42` for one pull request's review, whatever has happened since the
+// last one — and the three-way branch every such caller would otherwise write,
+// out of `ls --json` and three commands, is one decision taken here at once.
+// Written outside, it is also easy to get wrong in the way that matters: `send`
+// and `resume` try a scratch name exactly but fall through to a worktree's
+// prefix when there is none, so a blind `resume --prompt` reaches a worktree
+// whose slug merely starts with the name.
+//
+// An open window is typed at through deliver, the path `send` takes, so every
+// refusal of its comes along: the caller's own window, and a window held open
+// after its agent died. Then it is brought forward, as `resume` brings forward
+// an open window. With no prompt there is nothing to type, and this is resume.
+//
+// A recorded session is reopened on its conversation, as `resume` reopens one,
+// under the window name this call gave.
+func reuseScratch(env *Env, cfg *config.Config, session tmux.Window, override, prompt string, run windowCommand, arrive arrival) error {
+	name := session.Scratch
+	if session.ID != "" {
+		if prompt == "" {
+			env.progressf("scratch window %s is already open in %s", name, cfg.Name)
+		} else if err := deliver(env, cfg, scratchChoice(cfg, session), session, prompt, false); err != nil {
+			return err
+		}
+		arriveAt(env, cfg, session, run.Command, arrive)
+		return nil
+	}
+
+	resumed, err := resumeWindow(cfg, prompt, false, name)
+	if err != nil {
+		return err
+	}
+	warnIfWindowNameIsARepo(env, cfg, cfg.WindowName(name, override))
+	warnIfBaseIsElsewhere(env, cfg)
+	// Without tmux, `scratch` runs its command here, so reusing a recorded
+	// session runs its conversation here — the same answer one step on, rather
+	// than a fresh agent that would leave the conversation asked for behind.
+	if !tmux.Available() {
+		_, err := runInTheBaseCheckout(env, cfg, resumed)
+		return err
+	}
+	if _, err := reopenScratchWindow(env, cfg, name, override, resumed, arrive); err != nil {
+		return err
+	}
+	env.progressf("reopened scratch session %s in %s on its recorded conversation", name, cfg.Name)
+	return nil
+}
+
+// refuseALineBreakToReuse refuses a --reuse prompt that could not be typed.
+//
+// Only one of the three cases types the prompt — an open window, where Enter is
+// what submits — and the other two hand it to a command line, where a line
+// break is just text. It is refused in all three anyway, before any of them is
+// acted on, because which case a --reuse call meets is exactly what its caller
+// does not know: that is the reason for the flag. A prompt that worked whenever
+// no window happened to be open, and failed the day one was, is the dependence
+// on unseen state the flag exists to remove.
+//
+// --prompt-file is the way through, since what it builds is one line naming the
+// file.
+func refuseALineBreakToReuse(env *Env, prompt string) error {
+	if !strings.ContainsAny(prompt, "\n\r") {
+		return nil
+	}
+	return fmt.Errorf("the prompt has a line break in it, and --reuse may type it at an open window\n"+
+		"where Enter submits, everything after the first line would post as further turns\n"+
+		"put the text in a file and pass it with %s, which hands the agent one line naming it",
+		env.copyable(promptFileFlag))
+}
+
+// refuseScratchName refuses a name that something other than a scratch session
+// already answers to.
 //
 // send, close and resume take a worktree's slug and a scratch window's name
 // alike, so the two share one namespace, and a name that meant two things would
@@ -109,11 +222,8 @@ func cmdScratch(env *Env, args []string) error {
 // The base checkout's names are refused too. They win every lookup, so a scratch
 // window called "base" could be opened and never reached.
 //
-// So is the name of a recorded scratch session whose window is gone. It is still
-// that session's name — resume reopens it by that name, and restore will — so a
-// second window under it would be a second session answering to one word, and
-// the first time its agent started, its record would overwrite the one it
-// collided with.
+// A scratch session's own name is refuseScratchSession's, because --reuse is
+// the one way past it and there is no way past these.
 func refuseScratchName(env *Env, cfg *config.Config, name string) error {
 	if slices.Contains(baseNames(cfg, baseChoice(cfg)), name) {
 		return fmt.Errorf("%q already names the base checkout in %s\n"+
@@ -128,20 +238,29 @@ func refuseScratchName(env *Env, cfg *config.Config, name string) error {
 			"pick another name, or reach the worktree's agent with %s",
 			name, cfg.Name, hint(env, cfg, "resume", name))
 	}
-	if w, known := scratchSessions(cfg)[name]; known {
-		if w.ID != "" {
-			return fmt.Errorf("a scratch window called %s is already open in %s\n"+
-				"pick another name for a second one, or go to it with %s",
-				name, cfg.Name, hint(env, cfg, "resume", name))
-		}
-		return fmt.Errorf("a scratch session called %s is recorded in %s, waiting to be reopened\n"+
-			"its window went, but its conversation did not%s",
-			name, cfg.Name, asFields(
-				field("reopen it with", hint(env, cfg, "resume", name)),
-				field("or end it with", hint(env, cfg, "close", name)),
-			))
-	}
 	return nil
+}
+
+// refuseScratchSession refuses the name of a scratch session already answering
+// to it, when the caller did not pass --reuse: an open window, or a recorded
+// session whose window is gone.
+//
+// The recorded one is refused as the open one is. It is still that session's
+// name — resume reopens it by that name, and restore will — so a second window
+// under it would be a second session answering to one word, and the first time
+// its agent started, its record would overwrite the one it collided with.
+func refuseScratchSession(env *Env, cfg *config.Config, name string, w tmux.Window) error {
+	if w.ID != "" {
+		return fmt.Errorf("a scratch window called %s is already open in %s\n"+
+			"pick another name for a second one, or go to it with %s",
+			name, cfg.Name, hint(env, cfg, "resume", name))
+	}
+	return fmt.Errorf("a scratch session called %s is recorded in %s, waiting to be reopened\n"+
+		"its window went, but its conversation did not%s",
+		name, cfg.Name, asFields(
+			field("reopen it with", hint(env, cfg, "resume", name)),
+			field("or end it with", hint(env, cfg, "close", name)),
+		))
 }
 
 // refuseSlugOfAScratchWindow is refuseScratchName from the other side: a slug

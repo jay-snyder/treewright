@@ -95,6 +95,21 @@ func cmdSend(env *Env, args []string) error {
 		return fmt.Errorf("no window is open on %s in %s, so there is no agent to reach%s",
 			name, cfg.Name, asFields(field("open one with", hint(env, cfg, "resume", name))))
 	}
+	return deliver(env, cfg, target, window, message, dry)
+}
+
+// deliver types one line at the agent in a window already found open: the half
+// of `send` that comes after working out which window that is.
+//
+// It is a function of its own because `scratch --reuse` types at a window too,
+// and every check below exists for a reason that does not depend on who is
+// typing. Restated there, they would be rules kept in step by hand, and the
+// first one to drift would be the one nobody notices — each of them fails
+// silently and differently, which is why they are in a binary at all. The
+// line-break refusal stays with each caller, since it has to come before
+// anything is resolved and the way out of it is worded for the flags each takes.
+func deliver(env *Env, cfg *config.Config, target choice, window tmux.Window, message string, dry bool) error {
+	name := target.name()
 	// An agent typing at itself is a real footgun and a hard one to notice from
 	// the inside: the message arrives in this very session, ahead of whatever is
 	// being answered, and reads afterwards as an instruction from somewhere else.

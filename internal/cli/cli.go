@@ -407,7 +407,7 @@ this means.`,
 		},
 		{
 			name:    "scratch",
-			args:    "[-p <text>] " + argRepoFlag + " <name> [window-name]",
+			args:    "[-p <text>] [--reuse] " + argRepoFlag + " <name> [window-name]",
 			summary: "open another window on the main checkout, under a name of its own",
 			long: `Opens another agent window in the main checkout, for work that needs an
 agent and no branch — investigating, answering a question, reviewing a pull
@@ -418,13 +418,13 @@ You name it, and the name is how everything else reaches it: "treewright send
 <name>" types at its agent, "treewright close <name>" closes it, and "treewright
 resume <name>" switches to it. ls lists it under the base row, with the status
 "scratch". The name follows a slug's rules, and one already answering for
-something — a worktree, an open scratch window, the base checkout — is refused,
+something — a worktree, a scratch session, the base checkout — is refused,
 since those commands take any of them and could not tell two apart.
 
-Unlike "treewright base", this always opens a new window: the base window stays
-the one window "base" means, however many of these stand beside it. The window
-is named after a ticket key in the name, or after the name itself, as a
-worktree's window is, unless [window-name] overrides it.
+Unlike "treewright base", this opens a new window rather than finding one: the
+base window stays the one window "base" means, however many of these stand
+beside it. The window is named after a ticket key in the name, or after the
+name itself, as a worktree's window is, unless [window-name] overrides it.
 
 Its conversation outlives its window. Lost to a restart or a kill, it is
 listed with no window, "treewright resume <name>" reopens it on the same
@@ -433,15 +433,26 @@ its agent is quit, or when "treewright close <name>" closes it, window or no
 window — after which the name is free again. This needs an agent module that
 resumes by id, as "treewright help resume" says.
 
+--reuse makes the name a handle to come back to: a scratch session already
+answering to it is reached instead of refused. An open one has the prompt typed
+at its agent, as "treewright send" types it, and is switched to. One lost to a
+restart is reopened on its conversation, under the [window-name] given this
+time. With no session by that name, one is opened as usual. A worktree's slug
+and the base checkout's names are still refused, and nothing is matched by
+prefix. A prompt with a line break in it is refused whichever of these it
+meets, since it may be typed; --prompt-file's is one line.
+
 --prompt and --prompt-file hand the agent its first instruction, as they do on
 "new". --repo opens the window in another repository and leaves your tmux
 client where it is. Without tmux the command runs here instead, in the main
-checkout, as it does for "base".
+checkout, as it does for "base" — and under --reuse, a session lost to a
+restart has its conversation run here.
 
 Nothing is printed to stdout: the answer is a window, and the name you gave it.`,
 			flags: []flagDoc{
 				promptFlagDoc,
 				promptFileDoc,
+				{reuseFlag, "reach a scratch session already answering to the name, rather than refuse it"},
 				repoFlagDoc,
 			},
 			run: cmdScratch,

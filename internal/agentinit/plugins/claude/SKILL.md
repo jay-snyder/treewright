@@ -244,9 +244,26 @@ window is for; `ask2` tells them nothing. A name already answering for
 something — a worktree's slug, an open scratch window, `base` or the base
 branch — is refused, since those commands take any of them.
 
-Unlike `base`, which always means the one base window, `scratch` always opens a
-new window. `--prompt`, `--prompt-file`, `--repo` and a third positional that
+Unlike `base`, which always means the one base window, `scratch` opens a new
+window. `--prompt`, `--prompt-file`, `--repo` and a third positional that
 renames the window all work as they do on `new`.
+
+**When the name is a handle you will come back to, pass `--reuse`:**
+
+    treewright scratch --reuse review-42 --prompt "/review-pr 42"
+
+A scratch session already answering to the name is reached instead of refused.
+If its window is open, the prompt is typed at its agent, just as `send` would
+type it, and the window is switched to. If a restart took the window, the
+session is reopened on its conversation. If nothing has the name, a new
+session is opened. Use it for work that recurs under one name, such as a review
+asked for again, instead of reading `ls --json` and choosing between `scratch`,
+`send` and `resume` yourself.
+
+Never reach a scratch name you are not sure exists with `send` or `resume`.
+With no scratch session by that name they fall back to a worktree's prefix, so
+`review-4` reaches `review-42`. Under `--reuse` a prompt has to be one line
+whatever it finds, since it may be typed. `--prompt-file` always is one line.
 
 **A restart does not end it; quitting its agent or closing it does.** After a
 reboot, `resume <name>` and `restore` reopen it on the conversation it was

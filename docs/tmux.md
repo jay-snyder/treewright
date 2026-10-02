@@ -250,6 +250,14 @@ Nothing writes `@treewright_agent_state`. The receiving agent's own
 the protocol working as designed; a sender stamping the window would be guessing
 at a state only the agent can report.
 
+`scratch --reuse` is the other thing that types at a window — an open scratch
+session's, with the prompt it was given — and it does so through the same code
+(`deliver`, in `send.go`) rather than a restatement of it, so every rule above
+holds there by construction. The one-line rule is checked before it knows
+whether there is a window to type at, since its caller does not know either;
+see "Coming back to a scratch session by its name" in
+[`design-notes.md`](design-notes.md).
+
 ### Reaching an agent in another repository
 
 `send --repo <name> <slug>` types at an agent in a repository the sender is not

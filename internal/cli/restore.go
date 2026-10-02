@@ -197,7 +197,7 @@ func restoreWindows(env *Env, cfg *config.Config, run windowCommand, fresh bool,
 		}
 		scratchRun, err := resumeWindow(cfg, "", fresh, name)
 		if err == nil {
-			_, err = reopenScratchWindow(env, cfg, name, scratchRun, leaveTheClient)
+			_, err = reopenScratchWindow(env, cfg, name, "", scratchRun, leaveTheClient)
 		}
 		if err != nil {
 			env.warnf("could not open scratch window %s%s", name,

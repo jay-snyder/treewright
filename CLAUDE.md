@@ -165,9 +165,9 @@ breaks `brew upgrade` for everyone.
 | `internal/cli/cli.go` | `Env`, the command table, dispatch, help rendering. |
 | `internal/cli/commands.go` | `new`, `rm`, `ls`, `prune`, `resume`, `cd`, `base`, `attach`. |
 | `internal/cli/move.go` | `move`: uncommitted work out of the base checkout and into a worktree. |
-| `internal/cli/send.go` | `send`: one line typed at the agent in an open window. |
+| `internal/cli/send.go` | `send`: one line typed at the agent in an open window — `deliver`, which `scratch --reuse` types through as well. |
 | `internal/cli/close.go` | `close`: the tmux window on a worktree, gone worktree or not. |
-| `internal/cli/scratch.go` | `scratch`: another agent window on the main checkout, and the rule that its name and a slug never coincide. |
+| `internal/cli/scratch.go` | `scratch`: another agent window on the main checkout, the rule that its name and a slug never coincide, and `--reuse`, which reaches the session already under a name. |
 | `internal/cli/restore.go` | `restore`: every window a repository's session should have, after a restart. |
 | `internal/cli/sessions.go` | The record of which conversation each agent in the base checkout is running: written from `session-start`, ended by `close` and by `signal clear` on a quit, read by `resume` and `restore`. |
 | `internal/cli/prompt.go` | `{prompt}`, the two flags that fill it, and what `--prompt-file` builds. |
@@ -290,10 +290,15 @@ carries a scratch window as a `Scratch` flag plus the window, never as a slug. A
 scratch name and a worktree slug share one namespace, since `send`, `close` and
 `resume` take either: `scratch` refuses a live slug, a scratch session's name
 (open or recorded) and the base checkout's names, and `new`/`move` refuse a
-scratch session's name. Lookups take scratch names exactly, before worktree
-prefixes — through `scratchSessions`, which is `tmux.Scratch` plus the recorded
-sessions whose windows are gone, each carried as a `Window` with no ID. See
-"Scratch windows" in `docs/design-notes.md`.
+scratch session's name. `scratch --reuse` is the one way past the second of
+those and neither of the others — it reaches that session, typing at an open
+window through `send`'s `deliver` rather than a copy of it — and what it refuses
+does not depend on which case it meets: a line break and a template with no
+`{prompt}` are refused even where the prompt would not have been typed or run.
+Lookups take scratch names exactly, before worktree prefixes — through
+`scratchSessions`, which is `tmux.Scratch` plus the recorded sessions whose
+windows are gone, each carried as a `Window` with no ID. See "Scratch windows"
+in `docs/design-notes.md`.
 
 **The base checkout's windows resume by conversation, and only a quit or `close`
 ends a record.** `session-start` writes `.git/treewright/sessions/<name>` — `base`
