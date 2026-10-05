@@ -85,10 +85,30 @@ homebrew_casks:
     description: Give every ticket its own git worktree, tmux window, and agent session
     license: MIT
     binaries: [treewright]
-    # Raw Ruby, for two stanzas GoReleaser cannot express.
+    # Raw Ruby, for three stanzas GoReleaser cannot express.
     #
     # tw is the everyday name: a second link to the same binary, so it works
     # even before the shell integration (which also defines tw) is loaded.
+    #
+    # The quarantine flag. The released binaries are not code-signed, so macOS
+    # kills a quarantined one at launch — exit 137, nothing printed — until the
+    # flag the download arrived with is cleared. `hooks.post.install` did that
+    # until Homebrew deprecated the `postflight` block it renders into, for
+    # `postflight_steps`: declarative steps run in a sandbox rather than arbitrary
+    # Ruby. GoReleaser passes a hook's body through untouched, so the hooks can
+    # only emit the old stanza, and every brew command that loaded the cask
+    # printed a warning asking users to report it to the tap. A deprecation in
+    # Homebrew becomes an error a few releases on, and an error here is a cask
+    # that does not load. `on_macos` stands in for the old `xattr -h` probe, the
+    # cask carrying Linux URLs too. `{{ "{{staged_path}}" }}` is Homebrew's token
+    # behind GoReleaser's: custom_block is templated exactly once, so the outer
+    # braces are spent here and `{{staged_path}}` is what reaches the cask. And
+    # the step must succeed, where the old hook ignored a failure: an upgrade
+    # that stops on xattr's error leaves the working version in place, and one
+    # that carries on installs a binary that dies without a word. A brew older
+    # than 6.0.13, which added the `run` step, cannot load the cask at all, and
+    # `brew upgrade` updates brew first unless told not to. Verified against
+    # Homebrew 7.0.8.
     #
     # And the caveats, which brew prints on an upgrade exactly as it prints them
     # on an install — so a fixed string spends the one moment an upgrader is
@@ -115,6 +135,12 @@ homebrew_casks:
     # tidy-up; it is the bug. Verified against Homebrew 6.0.15.
     custom_block: |
       binary "treewright", target: "tw"
+
+      postflight_steps do
+        on_macos do
+          run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{ "{{staged_path}}" }}/treewright"]
+        end
+      end
 
       caveats do
         replacing = cask.installed_version
@@ -147,14 +173,8 @@ homebrew_casks:
     dependencies:
       - formula: git
       - formula: tmux
-    hooks:
-      post:
-        # The released binaries are not code-signed, so macOS would refuse to
-        # run them until the download's quarantine flag is cleared.
-        install: |
-          if system_command("/usr/bin/xattr", args: ["-h"]).exit_status == 0
-            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/treewright"]
-          end
+    # No `hooks:` key — the quarantine step is `postflight_steps` in custom_block
+    # above, since a hook renders into the `postflight` block Homebrew deprecated.
     # No `caveats:` key — the cask's caveats are the block in custom_block
     # above. The two would both be printed: a cask accumulates every caveats
     # stanza it is given rather than the last one winning.
