@@ -157,6 +157,13 @@ in `docs/design-notes.md` before editing it, and keep the Ruby trivial: a block
 that *raises* does not print a bad message, it stops the cask from loading and
 breaks `brew upgrade` for everyone.
 
+**The quarantine step is not a `hooks:` key waiting to be tidied back into one
+either.** It is `postflight_steps` in that same `custom_block`, because GoReleaser
+renders a hook into the `postflight` block Homebrew deprecated — a warning on
+every brew command that loads the cask, and later a cask that does not load —
+and without the step a Mac gets a binary that exits 137 and prints nothing. See
+"Clearing the quarantine flag" in `docs/design-notes.md`.
+
 ## Layout
 
 | Path | Owns |

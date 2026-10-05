@@ -1517,6 +1517,48 @@ any of this reach a Linux install, which arrives by `go install` or a tarball an
 has no caveats to print — one more reason `refresh` and `doctor` have to carry the
 same information on their own.
 
+### Clearing the quarantine flag
+
+The released binaries are not code-signed. Homebrew marks every download with
+`com.apple.quarantine` and carries the flag onto what it extracts, and macOS
+kills a quarantined unsigned binary at launch: exit 137, nothing on stderr. So
+the cask clears the flag from the staged binary once it is installed, and that
+step is the difference between `tw` running on a Mac and not running at all.
+
+It is a `postflight_steps` stanza in `custom_block`, not GoReleaser's
+`hooks.post.install`. The hook renders into a `postflight do` block of arbitrary
+Ruby, which Homebrew deprecated in 6.0.16 for `postflight_steps` — a declarative
+list of typed steps, run in a sandbox. GoReleaser passes a hook's body through
+untouched, so it cannot turn one into the other, and while the cask carried the
+old block every brew command that loaded it printed a warning asking the user to
+report the tap. A deprecation in Homebrew becomes an error a few releases on, and
+an error there is a cask that does not load. Once GoReleaser ships a steps form
+of its hooks, moving the stanza into one is a tidy-up rather than a fix.
+
+Three details are deliberate. `on_macos` stands in for the old hook's
+`xattr -h` probe, since the cask carries Linux tarballs as well. The path is
+Homebrew's own `{{staged_path}}` token, written `{{ "{{staged_path}}" }}` in the
+config because GoReleaser templates `custom_block` once on its way into the cask
+and the token uses the same delimiters. And the step must succeed, where the old
+hook ignored a failure: an upgrade that stops on xattr's error is rolled back to
+the version that worked, while one that carries on installs a binary that dies
+without a word — the failure the step exists to prevent, moved to where nobody
+sees it. `xattr -dr` exits 0 on a file that has no flag to clear, so an install
+made with quarantine turned off is not that failure.
+
+What it costs is that a brew older than 6.0.13 cannot load the cask at all: the
+stanza is older, but the `run` step and its `{{staged_path}}` expansion arrived
+there, and a step the DSL does not know raises while the cask is being read.
+`brew upgrade` updates brew before upgrading anything unless
+`HOMEBREW_NO_AUTO_UPDATE` says otherwise, so the case is narrow, and the
+alternative was a cask that every current brew warns about and a later one will
+refuse.
+
+Checked against Homebrew 7.0.8 by installing the generated cask from a scratch
+tap. Without the stanza the installed binary kept the flag and exited 137; with
+it the flag was gone, and an upgrade from a version with no step cleared it as
+well.
+
 ### Checking for a newer release
 
 Explicit only: `doctor` asks, `version --check` asks, and nothing else ever
