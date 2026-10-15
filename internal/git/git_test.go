@@ -107,7 +107,7 @@ func TestInspectStatuses(t *testing.T) {
 	f := gittest.New(t)
 	repo := git.Repo{Dir: f.MainDir}
 
-	atbase := f.Worktree("atbase") // left alone, so its tip is still origin/main
+	untouched := f.Worktree("untouched") // left alone, so its tip is still origin/main
 
 	localonly := f.Worktree("localonly")
 	f.Commit(localonly.Dir, "local change")
@@ -127,7 +127,7 @@ func TestInspectStatuses(t *testing.T) {
 		wantUnpush int
 		wantAhead  int
 	}{
-		{"tip at base is merged", atbase, git.StatusMerged, 0, 0, 0},
+		{"a branch nothing has been committed to is fresh", untouched, git.StatusFresh, 0, 0, 0},
 		{"local-only commit is unpushed", localonly, git.StatusUnpushed, 0, 1, 1},
 		{"pushed but unmerged is active", pushed, git.StatusActive, 0, 0, 1},
 		{"uncommitted changes outrank all", dirty, git.StatusDirty, 1, 0, 0},
@@ -224,6 +224,86 @@ func TestIsMergedAfterNormalMerge(t *testing.T) {
 	}
 }
 
+// TestAFreshBranchIsNotMerged is the regression test for a worktree fresh from
+// `new` reading as merged. None of its commits are outside origin/main because
+// it has none, which passed the merged check vacuously — and prune, which asks
+// that check directly, deleted it. Origin moving on is part of the case: the
+// branch then sits behind it, and still has nothing of its own.
+func TestAFreshBranchIsNotMerged(t *testing.T) {
+	f := gittest.New(t)
+	repo := git.Repo{Dir: f.MainDir}
+	wt := f.Worktree("fresh")
+
+	check := func(when string) {
+		t.Helper()
+		if !repo.IsFresh(wt.Branch, "main") {
+			t.Errorf("%s: IsFresh = false, want true", when)
+		}
+		if repo.IsMerged(wt.Branch, "main") {
+			t.Errorf("%s: IsMerged = true, want false — there is nothing to have merged", when)
+		}
+		if got := repo.Inspect(wt, "main").Status; got != git.StatusFresh {
+			t.Errorf("%s: Status = %q, want %q", when, got, git.StatusFresh)
+		}
+	}
+	check("as created")
+
+	f.Commit(f.MainDir, "somebody else's work")
+	f.Git(f.MainDir, "push", "--quiet", "origin", "main")
+	check("after origin moved on")
+
+	f.Commit(wt.Dir, "the first commit of its own")
+	if repo.IsFresh(wt.Branch, "main") {
+		t.Error("a branch with a commit of its own still reads as fresh")
+	}
+}
+
+// TestAFastForwardMergeIsMergedNotFresh covers the case that rules out
+// answering IsFresh from the commit graph. A branch fast-forward merged into
+// main — by hand, or by a forge that merges that way — ends with its tip on
+// main's own line, exactly where a branch with nothing on it sits. Only the
+// branch's history says it ever had commits, so a graph-only check would call
+// every such branch fresh and prune would never take one.
+func TestAFastForwardMergeIsMergedNotFresh(t *testing.T) {
+	f := gittest.New(t)
+	repo := git.Repo{Dir: f.MainDir}
+	wt := f.Worktree("fastforward")
+	f.Commit(wt.Dir, "change")
+
+	f.Git(f.MainDir, "merge", "--ff-only", "--quiet", wt.Branch)
+	f.Git(f.MainDir, "push", "--quiet", "origin", "main")
+
+	if repo.IsFresh(wt.Branch, "main") {
+		t.Error("fast-forward merged branch reads as fresh")
+	}
+	if got := repo.Inspect(wt, "main").Status; got != git.StatusMerged {
+		t.Errorf("Status = %q, want %q", got, git.StatusMerged)
+	}
+}
+
+// TestAMergedBranchWithAnExpiredReflogIsStillMerged pins which way the reflog's
+// absence falls. gc expires a branch's entries after ninety days, all of them, so
+// an old worktree nobody cleaned up has no record left saying it ever moved. Read
+// as fresh, it would never be pruned; it has to read as it did before the reflog
+// was consulted.
+func TestAMergedBranchWithAnExpiredReflogIsStillMerged(t *testing.T) {
+	f := gittest.New(t)
+	repo := git.Repo{Dir: f.MainDir}
+	wt := f.Worktree("old")
+	f.Commit(wt.Dir, "change")
+	f.Git(f.MainDir, "merge", "--no-ff", "--quiet", "-m", "merge", wt.Branch)
+	f.Git(f.MainDir, "push", "--quiet", "origin", "main")
+
+	f.Git(f.MainDir, "reflog", "expire", "--expire=now", "--expire-unreachable=now", "--all")
+
+	if repo.IsFresh(wt.Branch, "main") {
+		t.Error("a merged branch with no reflog reads as fresh")
+	}
+	if !repo.IsMerged(wt.Branch, "main") {
+		t.Error("a merged branch with no reflog does not read as merged")
+	}
+}
+
 func TestQueriesOnMissingRefsAreSafe(t *testing.T) {
 	f := gittest.New(t)
 	repo := git.Repo{Dir: f.MainDir}
@@ -236,6 +316,12 @@ func TestQueriesOnMissingRefsAreSafe(t *testing.T) {
 	}
 	if repo.IsMerged("", "main") {
 		t.Error("IsMerged(detached worktree) = true, want false")
+	}
+	if repo.IsFresh("no-such-branch", "main") {
+		t.Error("IsFresh(missing) = true, want false")
+	}
+	if repo.IsFresh("", "main") {
+		t.Error("IsFresh(detached worktree) = true, want false")
 	}
 	if repo.BranchExists("no-such-branch") {
 		t.Error("BranchExists(missing) = true, want false")

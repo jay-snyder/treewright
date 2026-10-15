@@ -138,6 +138,21 @@ func (r *Repo) SquashMerge(branch, message string) {
 	r.Git(r.MainDir, "fetch", "--quiet", "--prune", "origin")
 }
 
+// Land gives a slug's branch a commit of its own and merges it into main on
+// origin: the worktree a pull request leaves behind once it has merged. A test
+// that wants a merged worktree needs this rather than a bare one, which reads as
+// fresh — nothing is merged that was never committed. Each slug commits a file
+// named after itself, so several can land in one repository without conflicting.
+func (r *Repo) Land(slug string) {
+	r.t.Helper()
+	dir, branch := r.DirFor(slug), r.BranchFor(slug)
+	r.Write(dir, slug+".txt", slug+"\n")
+	r.Git(dir, "add", slug+".txt")
+	r.Git(dir, "commit", "--quiet", "-m", "work: "+slug)
+	r.Git(r.MainDir, "merge", "--no-ff", "--quiet", "-m", "merge "+branch, branch)
+	r.Git(r.MainDir, "push", "--quiet", "origin", "main")
+}
+
 // LooseObjects counts loose objects in the object database, for asserting that
 // an operation did or did not write to it.
 func (r *Repo) LooseObjects() int {

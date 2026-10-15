@@ -1160,8 +1160,8 @@ listing already carried.
 ## Statuses
 
 `ls` reports one status per worktree, in this precedence: `dirty` outranks
-everything because it is the most easily lost, then `merged`, then `unpushed`; a
-pushed-but-unmerged branch is `active`.
+everything because it is the most easily lost, then `fresh`, `merged`,
+`unpushed`; a pushed-but-unmerged branch is `active`.
 
 Two rows stand outside that scale, because it answers "how safe is this to
 remove" and neither is anything `rm` could remove: the base checkout is `base`,
@@ -1189,6 +1189,48 @@ That synthetic commit is written to the object database as a dangling object, so
 Its author, committer, and dates are fixed, so its hash depends only on the tree
 and parent being tested: repeated runs reuse the same object rather than leaving
 a new one behind each time, and `git gc` reaps it.
+
+**A branch with nothing on it is `fresh`, not `merged`.** The merge check opens
+by asking whether any of the branch's commits are missing from `origin/<base>`,
+and a worktree `new` has just made has none to be missing, so it passed without
+trying. `ls` called it merged, in the green that means "done, clear it away",
+and `prune`, which asks the same question, deleted it — with whatever agent had
+just been started in it still reading the ticket. So `IsMerged` itself excludes
+the case rather than `ls` merely outranking it: "merged" needs something to have
+been merged, and `prune` takes the answer straight from there.
+
+What tells the two apart is not in the commit graph. The graph's answer — a
+branch whose tip sits on the base branch's own first-parent line has nothing of
+its own — is also exactly the shape a fast-forward merge leaves, whether made by
+hand or by a forge set to merge that way, so it would call every such branch
+`fresh` for good and `prune` would never take one. What differs is history,
+whether the branch ever had a commit, and git keeps that in the branch's reflog:
+the `git worktree add -b` that `new` runs writes a `branch: Created from
+origin/main` entry, and everything that later moves the branch — a commit, a
+reset, a pull — writes another above it. A branch is `fresh` while that creation
+entry is still its newest, and while the commit it names is on `origin/<base>`,
+so a branch checked out from somebody's unmerged pull request reads as `active`
+rather than as unstarted.
+
+Two kinds of branch still read as they always did, as `merged` when their tip is
+upstream, because the record that would say otherwise is gone or says something
+else:
+
+- **A branch with no reflog** — one made under `core.logAllRefUpdates=false`, or
+  left untouched for ninety days, after which `gc` expires every entry rather
+  than keeping the newest. Reading a missing record as `fresh` would be the worse
+  error: every old merged worktree nobody got round to would become unprunable.
+- **A branch moved without being committed to** — pulled forward to a newer
+  `origin/<base>`, or committed to and then reset back. Its reflog has an entry
+  above the creation, and telling a pull from a fast-forward merge would mean
+  classifying the wording of everything git writes there, where recognizing the
+  one entry git writes on creation is a single prefix.
+
+`rm` was never affected: it consults the merge check only for a branch with
+commits outside `origin/<base>`, which a fresh branch does not have. Removing one
+still needs no `--force` — there is nothing in it to lose — and `fresh` is cyan
+rather than green for the same reason the status exists: nothing would be lost,
+but the work has not started, and green says it is finished.
 
 ## Reporting what failed
 

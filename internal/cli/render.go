@@ -47,6 +47,12 @@ func statusColor(s git.Status) ui.Color {
 		// Deliberately outside that scale. The base checkout is not a candidate
 		// for removal, so it gets the one color that is not urging anything.
 		return ui.Dim
+	case git.StatusFresh:
+		// Nothing in it would be lost, which reads like green — but green says
+		// the work is done and the worktree is waiting to be cleared away, and
+		// that is the misreading this status was split off from merged to stop.
+		// The work has not started; it is in flight.
+		return ui.Cyan
 	default:
 		return ui.Cyan
 	}

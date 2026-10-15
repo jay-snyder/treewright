@@ -221,6 +221,7 @@ going stale.
 | `merged` | Landed on `origin/main`. Safe to delete, and `tw prune` will. |
 | `unpushed (n)` | `n` commits that exist nowhere else. `tw rm` won't touch it without `--force`. |
 | `active` | Pushed, not merged. An open PR. `tw prune` leaves these alone. |
+| `fresh` | Nothing committed yet, just made by `tw new`. `tw prune` leaves these alone too. |
 | `base` | Your main checkout. Not a worktree, never deleted. |
 
 Squash merges count as merged, which sounds obvious but isn't: a squash merge

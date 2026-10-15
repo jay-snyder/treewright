@@ -75,7 +75,9 @@ One JSON object per checkout, and one per scratch window:
   or `restore` to reopen it on its conversation.
 - `status`: `dirty` and `unpushed` mean work
   that exists nowhere else; `merged` has landed and is safe to
-  remove; `active` is pushed and unmerged — an open pull request.
+  remove; `active` is pushed and unmerged — an open pull request;
+  `fresh` has nothing committed yet, so it is work just started
+  rather than work to clean up.
 - `agent_state`: what the agent in that window last reported —
   `working`, `waiting` (blocked on a person), or `done`.
   Empty when nothing has signaled.
