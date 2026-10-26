@@ -293,7 +293,10 @@ func TestLsWithNoWorktrees(t *testing.T) {
 func TestLsStatuses(t *testing.T) {
 	f := newFixture(t, "")
 
-	f.mustRun("new", "atbase")
+	f.mustRun("new", "untouched")
+
+	f.mustRun("new", "landed")
+	f.Land("landed")
 
 	f.mustRun("new", "localonly")
 	f.Commit(f.DirFor("localonly"), "local")
@@ -306,7 +309,8 @@ func TestLsStatuses(t *testing.T) {
 	f.Write(f.DirFor("dirty"), "a.txt", "seed\nuncommitted\n")
 
 	tests := []struct{ slug, want string }{
-		{"atbase", "merged"},
+		{"untouched", "fresh"},
+		{"landed", "merged"},
 		{"localonly", "unpushed"},
 		{"act", "active"},
 		{"dirty", "dirty"},
@@ -970,21 +974,28 @@ func TestRmDoesNotEmitCdFromElsewhere(t *testing.T) {
 func TestPrune(t *testing.T) {
 	f := newFixture(t, "")
 
-	f.mustRun("new", "merged1") // tip at origin/main
+	f.mustRun("new", "merged1")
+	f.Land("merged1")
 	f.mustRun("new", "act")
 	f.Commit(f.DirFor("act"), "pushed")
 	f.Push(f.DirFor("act"), f.BranchFor("act"))
 	f.mustRun("new", "dirty")
 	f.Write(f.DirFor("dirty"), "a.txt", "seed\nuncommitted\n")
+	// Clean, and with no commits outside origin/main — which is what prune used to
+	// take for merged, deleting a worktree whose agent had not yet made its first
+	// commit.
+	f.mustRun("new", "fresh")
 
 	t.Run("dry run lists but removes nothing", func(t *testing.T) {
 		r := f.exec("prune")
 		if !strings.Contains(r.stdout, f.DirFor("merged1")) {
 			t.Errorf("stdout = %q, want the merged worktree path", r.stdout)
 		}
-		// Open and dirty work must not be offered up for deletion.
-		if strings.Contains(r.stdout, f.DirFor("act")) || strings.Contains(r.stdout, f.DirFor("dirty")) {
-			t.Errorf("stdout = %q, want open and dirty work left out", r.stdout)
+		// Open, dirty and unstarted work must not be offered up for deletion.
+		for _, slug := range []string{"act", "dirty", "fresh"} {
+			if strings.Contains(r.stdout, f.DirFor(slug)) {
+				t.Errorf("stdout = %q, want %s left out", r.stdout, slug)
+			}
 		}
 		if !f.Exists("merged1") {
 			t.Error("dry run removed a worktree")
@@ -1002,6 +1013,9 @@ func TestPrune(t *testing.T) {
 		if !f.Exists("dirty") {
 			t.Error("a dirty worktree was removed")
 		}
+		if !f.Exists("fresh") {
+			t.Error("a new worktree with nothing committed yet was removed")
+		}
 	})
 }
 
@@ -1009,7 +1023,8 @@ func TestPrune(t *testing.T) {
 // and prune did not: prune can delete the directory the caller is standing in.
 func TestPruneEmitsCdWhenStandingInAPrunedWorktree(t *testing.T) {
 	f := newFixture(t, "")
-	f.mustRun("new", "reaped") // merged and clean, so prune will take it
+	f.mustRun("new", "reaped")
+	f.Land("reaped") // merged and clean, so prune will take it
 	t.Chdir(f.DirFor("reaped"))
 
 	commands := f.runWithEvalFile("prune", "-y")
@@ -1033,8 +1048,10 @@ func TestPruneLeavesTheWindowOfAWorktreeItCouldNotRemove(t *testing.T) {
 	f := newFixture(t, "command = 'sleep 300'\n")
 	noTTY(t)
 
-	f.mustRun("new", "reapable") // both merged and clean, so both are targets
+	f.mustRun("new", "reapable")
 	f.mustRun("new", "wedged")
+	f.Land("reapable") // both merged and clean, so both are targets
+	f.Land("wedged")
 	f.Git(f.MainDir, "worktree", "lock", f.DirFor("wedged"))
 
 	r := f.exec("prune", "-y")

@@ -704,6 +704,16 @@ the file, read through `Explicit` so a default never gets written back as a
 setting. Adding a key the generator writes means adding it to `configSettings`
 *and* to `settingsFrom`, or `--refresh` silently drops it.
 
+**`merged` needs something to have been merged.** A branch `new` has just made
+has no commits outside `origin/<base>` because it has none, which is the first
+thing `IsMerged` tests — so `IsMerged` itself says no while the branch's newest
+reflog entry is still its `branch: Created from`, and `ls` reports `fresh`.
+Don't move that exclusion into `Inspect` alone: `prune` asks `IsMerged`
+directly, and deleted fresh worktrees while it said yes. Don't swap the reflog
+for a graph test either: a fast-forward merge leaves the graph an untouched
+branch has. See "A branch with nothing on it is `fresh`" in
+`docs/design-notes.md`.
+
 **Read-only-looking commands still write to `.git`.** Squash-merge detection
 synthesizes a dangling commit object (`IsMerged`), with fixed author/committer
 env so the hash is deterministic and repeat runs reuse the object.

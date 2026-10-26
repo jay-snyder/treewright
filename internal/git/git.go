@@ -445,6 +445,12 @@ var squashCheckEnv = []string{
 // Stricter than "has no unpushed commits": a branch that is pushed but whose
 // pull request is still open is not merged.
 //
+// And a branch with nothing on it is not merged either, though it passes the
+// first test without trying — none of its commits are outside origin/<base>
+// because it has none of its own. That is IsFresh's case, and it is excluded here
+// rather than only outranked in Inspect because prune asks this question
+// directly: answered yes, it deletes the worktree `new` made a minute ago.
+//
 // The squash path writes one dangling commit object to the object database.
 // Nothing ever points a ref at it and git's normal gc reaps it, but this is the
 // reason treewright needs write access to .git even for read-only-looking commands.
@@ -457,8 +463,8 @@ func (r Repo) IsMerged(branch, base string) bool {
 		return false
 	}
 
-	if out, err := r.run("rev-list", "--count", branch, "--not", upstream); err == nil && out == "0" {
-		return true
+	if r.contained(branch, upstream) {
+		return !r.unmoved(branch)
 	}
 
 	mergeBase, err := r.run("merge-base", upstream, branch)
@@ -478,6 +484,49 @@ func (r Repo) IsMerged(branch, base string) bool {
 		return false
 	}
 	return strings.HasPrefix(out, "-")
+}
+
+// IsFresh reports whether branch has nothing of its own yet: nothing has moved it
+// since it was created, and origin/<base> already holds the commit it was
+// created at. That is a worktree fresh from `new`, before its first commit.
+//
+// The commit graph cannot answer this alone. A branch with nothing on it and a
+// branch fast-forward merged into origin/<base> look identical there — each tip
+// is a commit on the base branch's own line — and what tells them apart is
+// history: whether the branch ever had a commit of its own. The reflog is where
+// git keeps that, so the question is asked of it.
+func (r Repo) IsFresh(branch, base string) bool {
+	return r.unmoved(branch) && r.contained(branch, "origin/"+base)
+}
+
+// unmoved reports whether the newest entry in branch's reflog is still the one
+// that created it. The `git worktree add -b` that `new` runs writes that entry
+// — "branch: Created from origin/main" — and everything that moves a branch
+// afterwards, a commit, a reset, a pull, writes another above it. Reflog
+// messages are data git reads back itself (its own @{-1} is parsed out of
+// "checkout: moving from" entries), so they are written untranslated, and the
+// prefix is safe to match.
+//
+// A branch with no reflog to read is not unmoved as far as this can tell: one
+// made under core.logAllRefUpdates=false, or untouched long enough for gc to
+// expire every entry, which is ninety days by default. Those read as they did
+// before the question was asked, which for a branch whose tip is upstream is
+// merged. The newest entry is read rather than the oldest for the same reason:
+// gc expires entries oldest first, so a long-lived branch's oldest surviving
+// entry can be a commit that is now its tip.
+func (r Repo) unmoved(branch string) bool {
+	if branch == "" {
+		return false
+	}
+	out, err := r.run("reflog", "show", "-n", "1", "--format=%gs", "refs/heads/"+branch)
+	return err == nil && strings.HasPrefix(out, "branch: Created from ")
+}
+
+// contained reports whether every commit on branch is reachable from ref, which
+// is true of a branch whose commits have all landed and of one that has none.
+func (r Repo) contained(branch, ref string) bool {
+	out, err := r.run("rev-list", "--count", branch, "--not", ref)
+	return err == nil && out == "0"
 }
 
 // AheadBehind counts commits branch is ahead of and behind origin/<base>. ok is
@@ -510,10 +559,13 @@ func (r Repo) AheadBehind(branch, base string) (ahead, behind int, ok bool) {
 type Status string
 
 // The statuses `ls` reports, in the precedence it applies them: dirty outranks
-// everything because it is the most easily lost, then merged, then unpushed, and a
-// branch that is pushed but not merged is active.
+// everything because it is the most easily lost, then fresh, merged, unpushed,
+// and a branch that is pushed but not merged is active. Fresh and merged never
+// both hold — IsMerged excludes IsFresh's case — so their order is only which
+// question is cheaper to ask first.
 const (
 	StatusDirty    Status = "dirty"    // uncommitted changes present
+	StatusFresh    Status = "fresh"    // nothing committed since `new` made it
 	StatusMerged   Status = "merged"   // landed in origin/<base>; safe to remove
 	StatusUnpushed Status = "unpushed" // commits exist only here
 	StatusActive   Status = "active"   // pushed, not yet merged (open pull request)
@@ -543,7 +595,7 @@ type Info struct {
 // Inspect gathers a worktree's state relative to origin/<base>.
 //
 // Uncommitted work outranks everything because it is the most easily lost, then
-// merged, then unpushed; a pushed-but-unmerged branch is "active".
+// fresh, merged, unpushed; a pushed-but-unmerged branch is "active".
 func (r Repo) Inspect(wt Worktree, base string) Info {
 	info := Info{Worktree: wt}
 	info.DirtyFiles = DirtyFiles(wt.Dir)
@@ -553,6 +605,8 @@ func (r Repo) Inspect(wt Worktree, base string) Info {
 	switch {
 	case info.DirtyFiles > 0:
 		info.Status = StatusDirty
+	case r.IsFresh(wt.Branch, base):
+		info.Status = StatusFresh
 	case r.IsMerged(wt.Branch, base):
 		info.Status = StatusMerged
 	case info.Unpushed > 0:
