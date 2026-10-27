@@ -42,9 +42,12 @@ func tmuxctl(t *testing.T, args ...string) (string, error) {
 func startSession(t *testing.T, session, window, dir string) {
 	t.Helper()
 	requireTmux(t)
-	if out, err := tmuxctl(t, "-f", "/dev/null", "new-session", "-d", "-s", session, "-n", window, "-c", dir, "sleep 300"); err != nil {
-		testenv.Unavailablef(t, "cannot start a tmux server here: %v\n%s", err, out)
+	id, err := tmuxctl(t, "-f", "/dev/null", "new-session", "-d", "-P", "-F", "#{window_id}",
+		"-s", session, "-n", window, "-c", dir, "sleep 300")
+	if err != nil {
+		testenv.Unavailablef(t, "cannot start a tmux server here: %v\n%s", err, id)
 	}
+	waitForDirectory(t, id, window, dir)
 }
 
 // startShellSession creates a session whose window runs a shell rather than a
@@ -53,9 +56,12 @@ func startSession(t *testing.T, session, window, dir string) {
 func startShellSession(t *testing.T, session, window, dir string) {
 	t.Helper()
 	requireTmux(t)
-	if out, err := tmuxctl(t, "-f", "/dev/null", "new-session", "-d", "-s", session, "-n", window, "-c", dir, "/bin/sh"); err != nil {
-		testenv.Unavailablef(t, "cannot start a tmux server here: %v\n%s", err, out)
+	id, err := tmuxctl(t, "-f", "/dev/null", "new-session", "-d", "-P", "-F", "#{window_id}",
+		"-s", session, "-n", window, "-c", dir, "/bin/sh")
+	if err != nil {
+		testenv.Unavailablef(t, "cannot start a tmux server here: %v\n%s", err, id)
 	}
+	waitForDirectory(t, id, window, dir)
 }
 
 // walkInto moves a window's shell into dir, which is what `treewright cd` does to
@@ -70,14 +76,37 @@ func walkInto(t *testing.T, session, window, dir string) {
 	if out, err := tmuxctl(t, "send-keys", "-t", id, "cd "+dir, "Enter"); err != nil {
 		t.Fatalf("send cd to %s: %v\n%s", window, err, out)
 	}
+	waitForDirectory(t, id, window, dir)
+}
+
+// waitForDirectory polls until the window with this id reports dir as its pane's
+// directory, for every test that is about to find a window by where it stands.
+//
+// tmux keeps no record of that directory. #{pane_current_path} is read afresh
+// from the pane's process each time it is asked for — /proc/<pid>/cwd of the
+// pty's foreground process group on Linux — and new-window and new-session
+// answer as soon as that process has been forked, before it has taken the pty
+// or run its chdir. A read in between comes back empty, or names the directory
+// the server was started in, so a window opened on a directory is for a moment
+// standing somewhere else: panesOn does not count it, and treewright, matching a
+// window that carries no stamp by its directory, does not find it. A Mac may
+// never lose that race; the ubuntu CI runner lost it often enough to fail.
+//
+// Waiting on the window rather than polling panesOn until a count comes up
+// means a test still asserts the count it was written to, once, after the fact.
+func waitForDirectory(t *testing.T, id, window, dir string) {
+	t.Helper()
+	var last string
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		if out, err := tmuxctl(t, "display-message", "-p", "-t", id, "#{pane_current_path}"); err == nil && out == dir {
+		out, err := tmuxctl(t, "display-message", "-p", "-t", id, "#{pane_current_path}")
+		if err == nil && out == dir {
 			return
 		}
+		last = out
 		time.Sleep(10 * time.Millisecond)
 	}
-	t.Fatalf("window %s never moved into %s", window, dir)
+	t.Fatalf("window %s never reached %s — its pane reports %q", window, dir, last)
 }
 
 // windowStamp reads back one of the user options treewright records on a window.
@@ -120,9 +149,12 @@ func twoWindowsInOneWorktree(t *testing.T, f *fixture) string {
 // openWindowOn adds a window sitting in dir to a session that already exists.
 func openWindowOn(t *testing.T, session, window, dir string) {
 	t.Helper()
-	if out, err := tmuxctl(t, "new-window", "-d", "-t", "="+session+":", "-n", window, "-c", dir, "sleep 300"); err != nil {
-		t.Fatalf("open a window on %s: %v\n%s", dir, err, out)
+	id, err := tmuxctl(t, "new-window", "-d", "-P", "-F", "#{window_id}",
+		"-t", "="+session+":", "-n", window, "-c", dir, "sleep 300")
+	if err != nil {
+		t.Fatalf("open a window on %s: %v\n%s", dir, err, id)
 	}
+	waitForDirectory(t, id, window, dir)
 }
 
 // windowIDNamed finds a window by name in a session, for the commands that take

@@ -90,9 +90,12 @@ func TestRestoreOpensTheBaseWindowAndOneWindowPerWorktree(t *testing.T) {
 		t.Errorf("windows in session proj = %v, want %v", got, want)
 	}
 	// And each one is standing in its own checkout, not wherever treewright ran.
-	for _, dir := range []string{f.MainDir, f.DirFor("eng-1"), f.DirFor("eng-2")} {
-		if got := panesOn(t, dir); got != 1 {
-			t.Errorf("%d panes in %s, want 1", got, dir)
+	for _, w := range []struct{ name, dir string }{
+		{"main", f.MainDir}, {"eng-1", f.DirFor("eng-1")}, {"eng-2", f.DirFor("eng-2")},
+	} {
+		waitForDirectory(t, windowIDNamed(t, "proj", w.name), w.name, w.dir)
+		if got := panesOn(t, w.dir); got != 1 {
+			t.Errorf("%d panes in %s, want 1", got, w.dir)
 		}
 	}
 	// There is no answer to print — only a session that is back.

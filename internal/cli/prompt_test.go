@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -442,14 +443,32 @@ func TestResumePromptDelivery(t *testing.T) {
 
 // waitForNoPanes polls until no pane is left sitting in dir, for tests that
 // need the window a command opened to have closed by itself.
+//
+// A window treewright opened on dir counts by its stamp as well as by where its
+// pane stands. For a moment after it opens its pane is not yet standing in dir
+// — see waitForDirectory — and counted by its path alone it would read as
+// closed before its command had even started, leaving the next command to find
+// it still open. The stamp is on it before `new` returns.
 func waitForNoPanes(t *testing.T, dir string) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		if panesOn(t, dir) == 0 {
+		if panesOn(t, dir) == 0 && !windowStampedFor(t, dir) {
 			return
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf("a pane is still sitting in %s", dir)
+}
+
+// windowStampedFor reports whether any window on the server carries dir as the
+// worktree treewright opened it for.
+func windowStampedFor(t *testing.T, dir string) bool {
+	t.Helper()
+	out, err := tmuxctl(t, "list-windows", "-a", "-F", "#{@treewright_worktree}")
+	if err != nil {
+		// As in panesOn: a server whose last window has closed has exited.
+		return false
+	}
+	return slices.Contains(strings.Split(out, "\n"), dir)
 }
