@@ -853,7 +853,7 @@ func ServerOption(name string) string {
 //
 // It exists so that reloading the integration can put the bindings back on the
 // keys they are on rather than on the defaults. A user who moved them with
-// --resume-key did so in their tmux.conf, and a reload that silently bound T and
+// --resume-key did so in their tmux.conf, and a reload that silently bound G and
 // N as well would hand back the keys they deliberately gave up — including,
 // where those keys are now something else of theirs, by taking them.
 //

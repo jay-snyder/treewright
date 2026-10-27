@@ -34,7 +34,7 @@ Add `--prompt "the cart total rounds down at checkout"` and the agent in that
 window starts on it before you've even switched to it — `tw new` stops being
 "prepare a desk" and becomes "assign the work".
 
-Do that three times and `prefix + T` switches between all three from anywhere,
+Do that three times and `prefix + G` switches between all three from anywhere,
 including from inside a running agent. When the PR merges, `tw rm eng-2318`
 takes the whole thing away, and stops you if there's unpushed work in there.
 
@@ -133,14 +133,14 @@ type into:
 
 | Key | What it does |
 |---|---|
-| `prefix + T` | Pick a worktree and jump to it |
+| `prefix + G` | Pick a worktree and jump to it |
 | `prefix + N` | Type a slug, get a worktree |
 
 Both keys are free in stock tmux. Already using them? Pick your own on the same
 line:
 
 ```tmux
-run-shell 'treewright tmux-init --apply --resume-key G --new-key C-n'
+run-shell 'treewright tmux-init --apply --resume-key V --new-key C-n'
 ```
 
 ### If something didn't take
@@ -228,7 +228,7 @@ Squash merges count as merged, which sounds obvious but isn't: a squash merge
 leaves none of your branch's commits upstream, so the usual check calls landed
 work unpushed and refuses to clean it up.
 
-Hit `prefix + T` and that same table becomes a menu, in a popup sized to fit it:
+Hit `prefix + G` and that same table becomes a menu, in a popup sized to fit it:
 
 ```
       SLUG                          STATUS     AHEAD/BEHIND  WINDOW

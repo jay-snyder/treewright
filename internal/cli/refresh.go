@@ -174,7 +174,7 @@ func pluginCheckouts(env *Env, cfg *config.Config, module agentinit.Agent) []che
 // Reusing the keys is the load-bearing part. The snippet's keys are flags, set
 // at the tmux.conf line that loads it, and a reload that quietly bound the
 // defaults as well would hand back keys the user deliberately moved away from —
-// including, where T and N are now something of theirs, by taking them.
+// including, where G and N are now something of theirs, by taking them.
 //
 // Nothing is loaded into a server holding no treewright bindings at all. That is
 // not a refresh, it is an install, and which keys a tmux server binds is a
