@@ -204,10 +204,11 @@ func refreshConfig(env *Env, name string, dryRun bool) error {
 // settingsFrom reads a loaded config back into the shape the generator writes.
 //
 // Explicit rather than the value throughout, because Load has already filled the
-// blanks: cfg.Command holds "claude {prompt}" whether the file said so or the
-// default did, and writing that back would turn a default into a setting — the
-// one thing a regenerated file must not do, since a default is what follows
-// treewright's own changes and a setting is what refuses to.
+// blanks: cfg.Command holds "claude --name {name} {prompt}" whether the file
+// said so or the default did, and writing that back would turn a default into a
+// setting — the one thing a regenerated file must not do, since a default is
+// what follows treewright's own changes and a setting is what refuses to. The
+// release that added --name to that default is the case in point.
 func settingsFrom(cfg *config.Config) configSettings {
 	s := configSettings{
 		name:     cfg.Name,
@@ -654,7 +655,9 @@ func renderConfig(s configSettings) string {
 	fmt.Fprintf(&b, "# What to launch in the tmux window. command is used by new and base,\n")
 	fmt.Fprintf(&b, "# resume_command by resume; the two default independently, and either\n")
 	fmt.Fprintf(&b, "# overrides what agent supplies. {prompt} is where --prompt's text lands,\n")
-	fmt.Fprintf(&b, "# shell-quoted; without a prompt the placeholder disappears.\n")
+	fmt.Fprintf(&b, "# shell-quoted; without a prompt the placeholder disappears. {name} is the\n")
+	fmt.Fprintf(&b, "# name the agent answers to, for messaging of its own; leave it out and\n")
+	fmt.Fprintf(&b, "# the agent is given none, and is reached by \"treewright send\" instead.\n")
 	fmt.Fprintf(&b, "# Set one to \"\" for a window holding nothing but your shell — but the\n")
 	fmt.Fprintf(&b, "# agent key fills a blank command before that applies, so a repository\n")
 	fmt.Fprintf(&b, "# that names an agent has to remove that key as well.\n")

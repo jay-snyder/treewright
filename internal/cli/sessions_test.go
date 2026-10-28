@@ -354,8 +354,8 @@ func TestARecordNamingAVanishedConversationFallsBackToCommand(t *testing.T) {
 
 	f.mustRun("resume", "ask")
 
-	waitForContent(t, log, "start:\n", "the fresh agent behind a resume that found nothing")
-	if starts := startsOf(t, log); !slices.Equal(starts, []string{"start:--resume cleaned-up", "start:"}) {
+	waitForStart(t, log, "start:--name proj-ask")
+	if starts := startsOf(t, log); !slices.Equal(starts, []string{"start:--resume cleaned-up --name proj-ask", "start:--name proj-ask"}) {
 		t.Errorf("starts = %q, want the resume by id and then command", starts)
 	}
 }
@@ -369,7 +369,7 @@ func TestResumeFreshIgnoresTheRecord(t *testing.T) {
 	f.mustRun("resume", "--fresh", "base")
 
 	waitForContent(t, log, "start:", "the fresh agent")
-	if starts := startsOf(t, log); !slices.Equal(starts, []string{"start:"}) {
+	if starts := startsOf(t, log); !slices.Equal(starts, []string{"start:--name proj"}) {
 		t.Errorf("starts = %q, want command alone under --fresh", starts)
 	}
 }

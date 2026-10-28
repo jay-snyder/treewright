@@ -126,6 +126,7 @@ func openWindow(env *Env, cfg *config.Config, spec tmux.Spec, run windowCommand,
 	}
 	spec.Session = sessionFor(cfg)
 	spec.Repo = cfg.Name
+	spec.Agent = run.Agent
 
 	// The command stays as the user wrote it for everything below that talks
 	// about it, while tmux gets the script around it: a message naming a command
@@ -211,9 +212,16 @@ func isTheCallersOwnShell(w tmux.Window, dir string) bool {
 // it, rather than treewright predicting from somewhere outside the agent
 // whether a conversation exists. Everything else — `new`, `move`, `base` —
 // runs command already and has nothing to fall back to.
+//
+// Agent is the name the agent in the window answers to, recorded on the window
+// as it opens: "" when the templates gave it none. It rides here rather than
+// beside the spec because it is settled where the command is filled — the name
+// goes into the command, and only the caller filling it knows whether every
+// template it filled could take one.
 type windowCommand struct {
 	Command string // what the window runs
 	Fresh   string // what runs instead when Command fails at once, "" for none
+	Agent   string // the name the agent answers to, "" for none
 }
 
 // script renders what tmux is handed for this window.
@@ -292,7 +300,11 @@ func runStep(command string) string {
 // open past the command is the one place that stops being true: left alone, a
 // dead agent's "working" would sit in the ls table for as long as the window sat
 // unread, and its waiting marker would keep flagging a window whose agent is
-// gone. Both are cleared best-effort, straight through tmux rather than through
+// gone. The agent's name goes with them, since it is an address and nobody is
+// at it any more: left on the window it would send the next message to a name
+// no session answers to, where without it the reader is pointed at `send`,
+// which recognizes a held-open window and says so. All three are cleared
+// best-effort, straight through tmux rather than through
 // `treewright signal`, so the script stays runnable when the binary that wrote it
 // has since moved off PATH. Inside the pane, $TMUX names the right server —
 // including under TREEWRIGHT_TMUX_LABEL — and $TMUX_PANE targets the pane's own
@@ -301,6 +313,7 @@ func heldOpenTail() string {
 	return `if [ "$tw_status" -eq 0 ] || [ "$tw_status" -gt 128 ]; then exit "$tw_status"; fi` + "\n" +
 		`if [ -n "$TMUX_PANE" ]; then` + "\n" +
 		`  tmux set-window-option -q -u -t "$TMUX_PANE" ` + tmux.AgentStateOption + " 2>/dev/null || true\n" +
+		`  tmux set-window-option -q -u -t "$TMUX_PANE" ` + tmux.AgentNameOption + " 2>/dev/null || true\n" +
 		`  tw_name=$(tmux display-message -p -t "$TMUX_PANE" '#{window_name}' 2>/dev/null) || tw_name=''` + "\n" +
 		`  case "$tw_name" in ` + shellinit.Quote(tmux.WaitingMarker) + `*) tmux rename-window -t "$TMUX_PANE" "${tw_name#?}" 2>/dev/null || true ;; esac` + "\n" +
 		"fi\n" +

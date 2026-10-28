@@ -301,14 +301,30 @@ func TestClaudeModuleFacts(t *testing.T) {
 	// are spelled out here because importing config from an in-package test
 	// would be a cycle; TestAgentKeyIsADefaultsBundle in config holds the same
 	// values against the config constants from the other side.
-	if module.Command != "claude {prompt}" || module.ResumeCommand != "claude --continue {prompt}" {
-		t.Errorf("launch defaults = %q / %q, want the {prompt} template forms", module.Command, module.ResumeCommand)
+	//
+	// Each names the session, at {name}: --name is what makes the address
+	// another session's SendMessage reaches predictable, and resuming is named
+	// too, so an agent started before names were given gets one when it is
+	// next resumed.
+	if module.Command != "claude --name {name} {prompt}" || module.ResumeCommand != "claude --continue --name {name} {prompt}" {
+		t.Errorf("launch defaults = %q / %q, want the named {prompt} template forms", module.Command, module.ResumeCommand)
 	}
 	// Resuming one conversation by id, which is what keeps the base checkout's
-	// windows from continuing each other's. Both placeholders, since a --prompt
-	// reaches a window resumed this way as it reaches one resumed by directory.
-	if module.SessionResumeCommand != "claude --resume {session} {prompt}" {
-		t.Errorf("SessionResumeCommand = %q, want the --resume form taking the id and a prompt", module.SessionResumeCommand)
+	// windows from continuing each other's. All three placeholders, since a
+	// --prompt reaches a window resumed this way as it reaches one resumed by
+	// directory, and the session it resumes answers to the window's name.
+	if module.SessionResumeCommand != "claude --resume {session} --name {name} {prompt}" {
+		t.Errorf("SessionResumeCommand = %q, want the --resume form taking the id, the name and a prompt", module.SessionResumeCommand)
+	}
+	// The default a config written before names may spell out, which is still
+	// the module's own resume rather than one the config chose.
+	if !slices.Equal(module.FormerResumeCommands, []string{"claude --continue {prompt}"}) {
+		t.Errorf("FormerResumeCommands = %q, want the unnamed --continue form", module.FormerResumeCommands)
+	}
+	// Messaging is claude's own tool, named so the messages that would send a
+	// reader to "treewright send" can name it instead.
+	if module.MessageTool != "SendMessage" {
+		t.Errorf("MessageTool = %q, want claude's cross-session messaging tool", module.MessageTool)
 	}
 	// The one SessionEnd reason that is a person quitting — read off claude
 	// itself, since a kill reports "other" and must never end a record.

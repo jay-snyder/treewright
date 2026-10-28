@@ -33,12 +33,17 @@ const (
 	// prompt the placeholder is removed entirely. The substitution lives in
 	// internal/cli — to the config this is only a string — but the default
 	// carries the placeholder so the kickoff prompt works out of the box.
-	DefaultCommand = "claude {prompt}"
+	//
+	// {name} is where the name the agent answers to goes, filled the same way:
+	// what another agent addresses it by, rather than by typing at its window.
+	// The default is claude's, flag and all, because it has to agree with the
+	// claude module's — setting `agent = "claude"` must not change what runs.
+	DefaultCommand = "claude --name {name} {prompt}"
 
 	// DefaultResumeCommand reattaches to the previous session in a worktree.
 	// Because each worktree has its own path, `claude --continue` resumes
 	// exactly the session that last ran there.
-	DefaultResumeCommand = "claude --continue {prompt}"
+	DefaultResumeCommand = "claude --continue --name {name} {prompt}"
 
 	// DefaultTicketPattern recognizes a leading issue key such as "proj-142" or
 	// "bug-7" in a slug, so the tmux window can be named after the ticket rather
@@ -142,7 +147,7 @@ type Config struct {
 	CarryFiles []string `toml:"carry_files"`
 
 	// Command is what to launch in the new tmux window. Defaults to
-	// DefaultCommand, "claude {prompt}".
+	// DefaultCommand, "claude --name {name} {prompt}".
 	//
 	// Empty is a setting rather than an omission: `command = ""` opens the
 	// window on a shell and is the only way a repository can ask for a window
@@ -631,14 +636,45 @@ func (c *Config) AgentCarries() []string {
 // than through Explicit, so a file that spells the module's default out in
 // full still gets what the default gets.
 //
+// That includes a default the module has since moved on from. The module's
+// resume gained --name when agents were given names, and a file that had
+// spelled out the old one was suddenly a config with a resume_command of its
+// own — so it stopped recording sessions, its base window went back to
+// continuing whichever conversation ran last, and nothing said why. It had
+// chosen nothing the module lacked; the module changed under it. So a former
+// default still counts as the module's own here, and resuming by id hands it
+// the module's template as it stands, name included. Its own resume_command,
+// for the worktrees, stays exactly what the file says.
+//
 // Never inferred from resume_command's words: with no agent key there is no
 // module to ask, for the reason Agent is never guessed from Command.
 func (c *Config) SessionResumeCommand() string {
 	module, ok := agentinit.Lookup(c.Agent)
-	if c.Agent == "" || !ok || c.ResumeCommand != module.ResumeCommand {
+	if c.Agent == "" || !ok {
+		return ""
+	}
+	if c.ResumeCommand != module.ResumeCommand && !slices.Contains(module.FormerResumeCommands, c.ResumeCommand) {
 		return ""
 	}
 	return module.SessionResumeCommand
+}
+
+// MessageTool is what this repository's agent calls its own way of messaging
+// another running session by name, or "" where there is none to name: no
+// agent key, or a module with no such tool. Where it is "", every agent is
+// reached the way an agent with no name is — by `treewright send` typing at
+// its window — whether or not it was given a name.
+//
+// From the agent key and never from command, for the reason Agent is never
+// guessed from Command. A repository running claude without the key still
+// names its agents, since the default command does; what it does not get is
+// treewright telling anyone to use a tool it cannot be sure the agent has.
+func (c *Config) MessageTool() string {
+	module, ok := agentinit.Lookup(c.Agent)
+	if c.Agent == "" || !ok {
+		return ""
+	}
+	return module.MessageTool
 }
 
 // SessionQuitReason is the SessionEnd reason by which the agent says a person

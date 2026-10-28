@@ -1,6 +1,6 @@
 ---
 name: treewright
-description: Manage parallel work in repositories that use treewright (tw) — a git worktree, tmux window, and agent session per piece of work. Use when starting a task in parallel, spawning another agent on one, putting a second agent on the main checkout for work that needs no branch (an investigation, a question, a pull request review), checking which worktrees and agents are in flight or need attention, resuming earlier work, or cleaning up merged branches. Use instead of raw git worktree in a treewright-managed repository.
+description: Manage parallel work in repositories that use treewright (tw) — a git worktree, tmux window, and agent session per piece of work. Use when starting a task in parallel, spawning another agent on one, putting a second agent on the main checkout for work that needs no branch (an investigation, a question, a pull request review), checking which worktrees and agents are in flight or need attention, handing work to or messaging the agent in another worktree, resuming earlier work, or cleaning up merged branches. Use instead of raw git worktree in a treewright-managed repository.
 ---
 
 # Driving treewright
@@ -81,6 +81,10 @@ One JSON object per checkout, and one per scratch window:
 - `agent_state`: what the agent in that window last reported —
   `working`, `waiting` (blocked on a person), or `done`.
   Empty when nothing has signaled.
+- `agent_name`: the name the agent in that window answers to, which is what
+  `SendMessage` takes — see Continue or hand work onward. Read it here rather
+  than building it: it is empty wherever the agent has none, which is the
+  sign to reach it with `treewright send` instead.
 - `ahead`/`behind` measure against origin's base branch, and
   `null` means the comparison was impossible — unknown, not zero.
 - `window_is_current` marks the window you are running in, and
@@ -162,8 +166,8 @@ the prompt: one line telling the agent to read that file in full. That is the
 default for a handoff worth the name rather than a fallback for when something
 breaks. The agent can read the file again after a compaction, when the prompt it
 started on is long gone, and it outlives the session that wrote it. It is also
-the shape that reaches an agent whose window is already open, under Continue or
-hand work onward.
+the shape a long brief takes to an agent already running: a message naming the
+file, under Continue or hand work onward.
 
 `--prompt` is the same setting for an instruction short enough to type — passing
 both is an error — and it is refused past the length tmux will run a command of,
@@ -239,12 +243,14 @@ worktrees are no more yours to edit than they are the base agent's — the
 tripwire under Start a piece of work holds unchanged.
 
 **Name it for what it is doing.** The name is required, follows a slug's rules,
-and is how everything else reaches it: `treewright send retry-loop "…"`,
-`treewright close retry-loop`, and `treewright resume retry-loop` to switch to
-it. `review-36` and `ci-watch` tell whoever reads the window list what each
-window is for; `ask2` tells them nothing. A name already answering for
-something — a worktree's slug, an open scratch window, `base` or the base
-branch — is refused, since those commands take any of them.
+and is how everything else reaches it: `treewright close retry-loop`,
+`treewright resume retry-loop` to switch to it, and its agent answers to the
+repository's name and this one — the `agent_name` its row reports, such as
+`cibo-retry-loop` — for `SendMessage`. `review-36` and `ci-watch` tell whoever
+reads the window list what each window is for; `ask2` tells them nothing. A
+name already answering for something — a worktree's slug, an open scratch
+window, `base` or the base branch — is refused, since those commands take any
+of them.
 
 Unlike `base`, which always means the one base window, `scratch` opens a new
 window. `--prompt`, `--prompt-file`, `--repo` and a third positional that
@@ -252,15 +258,22 @@ renames the window all work as they do on `new`.
 
 **When the name is a handle you will come back to, pass `--reuse`:**
 
-    treewright scratch --reuse review-42 --prompt "/review-pr 42"
+    treewright scratch --reuse review-42 --prompt-file /tmp/review-42-brief.md
 
 A scratch session already answering to the name is reached instead of refused.
-If its window is open, the prompt is typed at its agent, just as `send` would
-type it, and the window is switched to. If a restart took the window, the
-session is reopened on its conversation. If nothing has the name, a new
-session is opened. Use it for work that recurs under one name, such as a review
-asked for again, instead of reading `ls --json` and choosing between `scratch`,
-`send` and `resume` yourself.
+If nothing has the name, a new session is opened on the prompt. If a restart
+took the window, the session is reopened on its conversation, with the prompt.
+If its window is open, the window is switched to and **nothing is typed**:
+treewright says the prompt was not delivered and names the agent, and you send
+it with `SendMessage`. Use it for work that recurs under one name, such as a
+review asked for again, instead of reading `ls --json` and choosing between
+`scratch` and `resume` yourself.
+
+**A slash command runs only as the prompt a new session starts on.**
+`treewright scratch review-42 --prompt "/review-pr 42"` opens a session that
+runs the review. In a message it is plain text, and the receiving agent will
+not run it — so the open session that did the first review is asked for the
+second in words: "the review on #42 was re-requested; review it again".
 
 Never reach a scratch name you are not sure exists with `send` or `resume`.
 With no scratch session by that name they fall back to a worktree's prefix, so
@@ -271,9 +284,13 @@ whatever it finds, since it may be typed. `--prompt-file` always is one line.
 reboot, `resume <name>` and `restore` reopen it on the conversation it was
 having. Once it has ended there is nothing to reopen, so what it finds has to
 land somewhere that lasts before then — a file, a pull request comment, or a
-message back to whoever asked:
+message back to whoever asked.
 
-    treewright send --repo cibo base "findings are in /tmp/retry-loop-findings.md"
+A message back is a reply: `SendMessage` to the `from` address of the message
+that asked. When you open a scratch window with a brief, say in it whom to
+report to — your own `agent_name`, from your row in `ls --json`, the one with
+`window_is_current` — so its agent has an address before anyone has messaged
+it.
 
 **Close one you opened once its answer is somewhere, and ask before closing one
 you did not.** `treewright close <name>` ends that agent's conversation for
@@ -288,35 +305,40 @@ person opened is theirs.
 An unambiguous prefix of a slug is enough, and the expansion is reported; a
 scratch window's name is taken in full. The prompt reaches the agent only when
 the resume actually starts one: a window that was already open is switched to
-instead, with a warning that the prompt went undelivered.
+instead, with a warning that the prompt went undelivered and how to reach the
+agent standing there.
 
-That warning is not the end of the road. The agent in that window is an ordinary
-TUI on an ordinary tty, and `send` types at it — a worktree's agent by its slug,
-a scratch window's by its name:
+**An agent already running is reached with `SendMessage`, to its
+`agent_name`** from `treewright ls --json`:
+
+    SendMessage to "cibo-eng-142": "read /tmp/eng-142-review.md and address the comments in it"
+
+Check `ListAgents` first. A name it does not list has no live session behind
+it — the window closed, or the agent in it exited — and `treewright resume` is
+the way back, with `--prompt` carrying what you would have sent.
+
+The message arrives between that agent's tool calls, marked as coming from
+another session, so a busy agent reads it at its next step and an idle one
+starts a turn on it. It may run to several lines. It cannot answer a question
+or a permission prompt the agent is sitting on — a `waiting` agent blocked on
+one of those still needs its person — and a slash command in it is text.
+
+**To hear when it is done, pass `notify_when_idle: true`** — on its own, or with
+the message — rather than watching `agent_state`: one notice arrives when that
+agent next goes idle. Never poll `ls` or `ListAgents` in a loop for it.
+
+It is still somebody else's session: send instructions rather than steering
+their work, and say what you need back. The answer comes as a reply to the
+`from` address your message arrived with.
+
+**An agent with an empty `agent_name` is reached with `send`**, which types at
+its window — one opened before treewright named agents, or a repository whose
+command gives its agent no name:
 
     treewright send eng-142 "read /tmp/eng-142-review.md and address the comments in it"
 
-What the window is showing is printed before anything is typed, and it is worth
-reading: an agent sitting on a question with options takes keystrokes as the
-answer to it, so a message sent to one answers a question you never saw.
-`--dry-run` shows that and sends nothing, for when looking is all you wanted.
-
-One line. Enter is what submits in these TUIs, so a message with a newline in it
-is refused rather than posting the rest as further turns: anything longer goes
-in a file and the line names it, exactly as a long brief does. A message that
-lands mid-turn is queued and picked up when that turn ends, so this works
-whether the row reads `working` or `waiting`.
-
-It refuses the window you are running in — typing at yourself puts the message
-into this session, ahead of whatever you were answering — and a window whose
-command has died and is being held open on its output, there being no agent
-left in it to reach.
-
-`waiting` is the case this is for — that agent is blocked on a person, and this
-is how it gets unblocked without one walking over to the window. It is still
-somebody else's session: send instructions, not keystrokes that drive their UI.
-And a window a person is typing in is a window you will collide with, so this is
-for reaching agents rather than interrupting people.
+It shows what the window is displaying before it types, and that is worth
+reading; `treewright help send` has the rest.
 
 ## Clean up
 

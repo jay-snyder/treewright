@@ -172,7 +172,8 @@ and without the step a Mac gets a binary that exits 137 and prints nothing. See
 | `internal/cli/cli.go` | `Env`, the command table, dispatch, help rendering. |
 | `internal/cli/commands.go` | `new`, `rm`, `ls`, `prune`, `resume`, `cd`, `base`, `attach`. |
 | `internal/cli/move.go` | `move`: uncommitted work out of the base checkout and into a worktree. |
-| `internal/cli/send.go` | `send`: one line typed at the agent in an open window — `deliver`, which `scratch --reuse` types through as well. |
+| `internal/cli/send.go` | `send`: one line typed at the agent in an open window, for a person and for an agent with no name to be messaged at — `deliver`, which `scratch --reuse` types through as well. |
+| `internal/cli/names.go` | The name each agent answers to: the scheme, the cross-repository collision `new`/`move`/`scratch` refuse, and `messageRoute` — the agent's own messaging where it has a name, `send` where it does not. |
 | `internal/cli/close.go` | `close`: the tmux window on a worktree, gone worktree or not. |
 | `internal/cli/scratch.go` | `scratch`: another agent window on the main checkout, the rule that its name and a slug never coincide, and `--reuse`, which reaches the session already under a name. |
 | `internal/cli/restore.go` | `restore`: every window a repository's session should have, after a restart. |
@@ -299,9 +300,11 @@ scratch name and a worktree slug share one namespace, since `send`, `close` and
 (open or recorded) and the base checkout's names, and `new`/`move` refuse a
 scratch session's name. `scratch --reuse` is the one way past the second of
 those and neither of the others — it reaches that session, typing at an open
-window through `send`'s `deliver` rather than a copy of it — and what it refuses
-does not depend on which case it meets: a line break and a template with no
-`{prompt}` are refused even where the prompt would not have been typed or run.
+window whose agent has no name through `send`'s `deliver` rather than a copy of
+it, and typing nothing at one whose agent has (the prompt is reported
+undelivered, naming the agent) — and what it refuses does not depend on which
+case it meets: a line break and a template with no `{prompt}` are refused even
+where the prompt would not have been typed or run.
 Lookups take scratch names exactly, before worktree prefixes — through
 `scratchSessions`, which is `tmux.Scratch` plus the recorded sessions whose
 windows are gone, each carried as a `Window` with no ID. See "Scratch windows"
@@ -318,8 +321,10 @@ module's `QuitReason`, and only while it still names the ending session;
 removing on any SessionEnd erases every scratch session at the moment the record
 exists for. **The base window's record is never removed**, only rewritten by its
 next session. **The id form is the module's, not a setting**: it applies while
-`resume_command` equals the module's own (`Config.SessionResumeCommand`), and a
-config that wrote its own keeps no records. Ids are validated on the way in and
+`resume_command` equals the module's own (`Config.SessionResumeCommand`) — or a
+default the module has since moved on from, its `FormerResumeCommands`, since a
+config that spelled one out chose nothing — and a config that wrote its own
+keeps no records. Ids are validated on the way in and
 on the way out, since they reach a shell line. A record that cannot be written is
 the one unattended failure left silent, as `signal`'s are: the agent reading
 `session-start`'s stdout can do nothing about it, and what it costs is resuming
@@ -346,6 +351,26 @@ itself, through the same `attachTo` that `attach` runs, and only on a clean run:
 tmux paints over the screen, so the one report worth reading is the one where
 nothing attached. See "Putting a session back after a restart" in
 `docs/design-notes.md`.
+
+**Every agent treewright launches is named, and the name is read off its
+window.** `{name}` is `<config>-<slug>`, `<config>-<scratch name>`, or `<config>`
+for the base window — core's value, in the module's flag (`--name` for claude,
+in all three of its templates and in the config defaults, which must agree with
+it). `openWindow` stamps `@treewright_agent_name` only when every template the
+window may run gave the name (`namedAs`), and everything that needs the name —
+`ls --json`'s `agent_name`, the guard's refusal, the undelivered-prompt warning,
+`scratch --reuse` — reads the stamp rather than rebuilding it from the config,
+since a window opened before names, or under another command, runs an agent
+called something else. The held-open wrapper unsets it with the state. **Native
+where there is a name, `send` where there is not**: a message names the agent's
+own tool (`Config.MessageTool`, from the module, never sniffed from `command`)
+only when the window has a name *and* the module has a tool; otherwise it names
+`send`, which reaches either. treewright never sends a message itself — a
+session's socket and token are its own. **One name is never given twice**:
+claude does not fail closed on duplicates, so `new`, `move` and `scratch` run
+`refuseAgentNameTaken`, which refuses a name another registered repository's
+agent answers to (a config named after this one plus a hyphen). See "Agents
+reaching each other" in `docs/agents.md`.
 
 **Branches always fork from `origin/<base_branch>`.** No flag overrides this;
 offline falls back to the local base branch and says so.
@@ -390,10 +415,13 @@ case it was typed in — key, slug or `--window` override alike — so a window 
 the way the thing it is named after reads. See "Naming a window, with or without
 a ticket" in `docs/design-notes.md`.
 
-**`{prompt}` is resolved by `fillPrompt`, everywhere.** Every consumer of
-`command` and `resume_command` fills the template before using it — `base`
-too, with an empty prompt — or the literal placeholder leaks into a shell
-line. No prompt removes the placeholder entirely, never substitutes `''` (an
+**`{prompt}` and `{name}` are resolved by `fillPrompt`, everywhere.** Every
+consumer of `command` and `resume_command` fills the template before using it —
+`base` too, with an empty prompt — or the literal placeholder leaks into a shell
+line. The two are filled in one `strings.Replacer` pass, so a prompt mentioning
+`{name}` and a slug holding braces can never fill each other; don't split it
+into two `ReplaceAll`s. The name is never empty — a `{name}` filled with nothing
+leaves `--name` in front of the prompt. No prompt removes the placeholder entirely, never substitutes `''` (an
 empty argument is an instruction to most agents), and a prompt aimed at a
 template without the placeholder is refused *before anything is created*.
 `openWindow` reports created-vs-found so callers can warn when a prompt landed

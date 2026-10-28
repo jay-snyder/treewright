@@ -100,8 +100,8 @@ func TestNewWithAPromptAndNoTmuxDoesNotClaimAWindowWasOpen(t *testing.T) {
 		t.Errorf("stderr warns about a window that was already open, with no tmux installed:\n%s", r.stderr)
 	}
 	// The recovery the no-tmux branch owns: the command to run by hand, with
-	// the prompt already quoted into it.
-	if !strings.Contains(flat(r.stderr), "run claude 'fix the rounding'") {
+	// the prompt and the agent's name already quoted into it.
+	if !strings.Contains(flat(r.stderr), "run claude --name 'proj-eng-9' 'fix the rounding'") {
 		t.Errorf("stderr = %q, want the filled command as the by-hand recovery", flat(r.stderr))
 	}
 }
@@ -186,7 +186,7 @@ func TestALongPromptIsRefusedForTheWindowResumeWillActuallyOpen(t *testing.T) {
 	// carries both — which is what makes this the pair's refusal and not either
 	// command's.
 	prompt := strings.Repeat("a", tmux.MaxCommandLength*2/3)
-	if _, err := fillPrompt("claude --continue {prompt}", "resume_command", prompt); err != nil {
+	if _, err := fillPrompt("claude --continue {prompt}", "resume_command", prompt, "proj-alpha"); err != nil {
 		t.Fatalf("the prompt no longer fits one command alone, so this proves nothing: %v", err)
 	}
 
@@ -261,7 +261,7 @@ func TestALongPromptThatFitsStillOpensAWindow(t *testing.T) {
 	// what reaches tmux is the longest command treewright says it will hand over.
 	prompt := strings.Repeat("a", tmux.MaxCommandLength)
 	for {
-		if _, err := fillPrompt(template, "command", prompt); err == nil {
+		if _, err := fillPrompt(template, "command", prompt, "proj-alpha"); err == nil {
 			break
 		}
 		prompt = prompt[:len(prompt)-1]

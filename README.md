@@ -262,8 +262,8 @@ branch_prefix  = "john/"              # branch is <prefix><slug> (default: none)
 # branch_prefixes = ["feature/", "bug/"]   # or several — pick one: `tw new bug/eng-1`
 carry_files    = ["apps/api/.env"]    # files a fresh worktree needs and doesn't have
 agent          = "claude"             # fills in the two commands, carries its settings and wiring
-command        = "claude {prompt}"    # what the window launches; "" for a shell and no agent
-resume_command = "claude --continue {prompt}"
+command        = "claude --name {name} {prompt}"  # what the window launches; "" for a shell and no agent
+resume_command = "claude --continue --name {name} {prompt}"
 post_create    = "npm install"        # background setup after `new`; a list runs in order
 features       = ["fresh-base"]       # optional extras, off unless you name them (see below)
 ticket_pattern = '(?i)^(eng-[0-9]+)'  # names the window; "" if you don't track work by ticket
@@ -353,6 +353,11 @@ agent that a `new` or `resume` actually starts, this reaches the one standing
 there. It shows you the pane first, every time: an agent sitting on a question
 with options takes your next keystrokes as the answer, so a message sent blind
 can pick an option nobody read.
+
+Every agent treewright starts is named after the repo and the work —
+`storefront-eng-2318`, and plain `storefront` for the base window — so one
+Claude agent can message another directly instead of typing into its window.
+`tw ls --json` lists each agent's name, and the plugin teaches Claude to use it.
 
 ## It won't let you lose work
 

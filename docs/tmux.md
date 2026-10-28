@@ -161,6 +161,7 @@ options:
 | `@treewright_branch` | The branch that worktree is on. |
 | `@treewright_scratch` | The name a scratch window was opened under. Unset on every other window. |
 | `@treewright_agent_state` | What the agent in it last signaled. Written by `signal`, not at creation — see "Agent state" in [`agents.md`](agents.md). |
+| `@treewright_agent_name` | The name the agent in it was launched under, which messaging of the agent's own reaches it at. Unset when the command gave it none, and taken off by the held-open wrapper with the state — see "Agents reaching each other" in [`agents.md`](agents.md). |
 
 Of these, the worktree is what *identifies* a window. A pane's
 directory moves with every `cd`, and two windows can stand in one directory at
@@ -205,6 +206,17 @@ prefix because they are a public, greppable interface, and a cryptic `@tw_` woul
 save nothing anyone types by hand.
 
 ## Typing at the window
+
+**`send` is for a person, and for an agent with no messaging of its own.** An
+agent that can message another session by name — claude, through
+`SendMessage` — reaches it that way instead, at the name treewright launched it
+under: the message arrives between the receiver's tool calls, marked as
+another session's, and can never be read as the answer to a question on its
+screen, which every rule below exists to make less likely and none can rule
+out. Every message that used to name `send` names that route where it exists,
+and `send` where it does not; see "Agents reaching each other" in
+[`agents.md`](agents.md). `send` keeps everything below, because typing at a
+window reaches whatever is in it, named or not.
 
 `--prompt` reaches an agent only where the resume actually starts one: the
 command carrying it runs in a window that was *created*, so a resume that finds
@@ -251,12 +263,14 @@ the protocol working as designed; a sender stamping the window would be guessing
 at a state only the agent can report.
 
 `scratch --reuse` is the other thing that types at a window — an open scratch
-session's, with the prompt it was given — and it does so through the same code
-(`deliver`, in `send.go`) rather than a restatement of it, so every rule above
-holds there by construction. The one-line rule is checked before it knows
-whether there is a window to type at, since its caller does not know either;
-see "Coming back to a scratch session by its name" in
-[`design-notes.md`](design-notes.md).
+session's, with the prompt it was given, when that session's agent has no name
+to be messaged at — and it does so through the same code (`deliver`, in
+`send.go`) rather than a restatement of it, so every rule above holds there by
+construction. An agent with a name is not typed at: the prompt is reported
+undelivered with the name to send it to. The one-line rule is checked before it
+knows whether there is a window to type at, or whether its agent has a name,
+since its caller does not know either; see "Coming back to a scratch session by
+its name" in [`design-notes.md`](design-notes.md).
 
 ### Reaching an agent in another repository
 

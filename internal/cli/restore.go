@@ -79,6 +79,11 @@ func cmdRestore(env *Env, args []string) error {
 		return fmt.Errorf("tmux is not installed, so there is no session to restore")
 	}
 
+	managed, err := repoFor(cfg).Managed()
+	if err != nil {
+		return err
+	}
+
 	// resume's own pair, built by resume's own function: resume_command with
 	// command behind it, or command alone under --fresh. That is what gives every
 	// restored worktree agent its conversation back — claude --continue picks the
@@ -87,19 +92,20 @@ func cmdRestore(env *Env, args []string) error {
 	// The windows standing in the base checkout get the same thing through
 	// resumeWindow, which reaches their recorded conversations first.
 	//
-	// Built before anything is opened, so a command too long for tmux is one
-	// refusal rather than a dozen.
-	run, err := resumeCommand(cfg, "", fresh)
-	if err != nil {
-		return err
+	// One per worktree, since each carries the name its agent answers to — the
+	// name `resume` would give it, so an agent restored is addressed exactly as
+	// one resumed. All built before anything is opened, so a command too long
+	// for tmux is one refusal rather than a dozen.
+	runs := make(map[string]windowCommand, len(managed))
+	for _, wt := range managed {
+		run, err := resumeCommand(cfg, "", fresh, agentName(cfg, wt.Slug))
+		if err != nil {
+			return err
+		}
+		runs[wt.Slug] = run
 	}
 
-	managed, err := repoFor(cfg).Managed()
-	if err != nil {
-		return err
-	}
-
-	opened, failed := restoreWindows(env, cfg, run, fresh, managed)
+	opened, failed := restoreWindows(env, cfg, runs, fresh, managed)
 	selectBaseWindow(cfg)
 	session := sessionFor(cfg)
 
@@ -168,15 +174,15 @@ func cmdRestore(env *Env, args []string) error {
 // repo.Managed returns them, which is slug order.
 //
 // The base window and the scratch windows resume their recorded conversations,
-// and the worktrees resume by directory with run. A scratch window already open
-// is left exactly as it is, as a worktree's is.
+// and the worktrees resume by directory with runs, keyed by slug. A scratch
+// window already open is left exactly as it is, as a worktree's is.
 //
 // A window that fails does not take the windows behind it down with it. Each
 // failure is reported where it happened, naming the window, because that is the
 // one thing the summary afterwards cannot say and the reader needs: which windows
 // they are about to open by hand.
-func restoreWindows(env *Env, cfg *config.Config, run windowCommand, fresh bool, managed []git.Worktree) (opened int, failed []string) {
-	baseRun, err := resumeWindow(cfg, "", fresh, baseName)
+func restoreWindows(env *Env, cfg *config.Config, runs map[string]windowCommand, fresh bool, managed []git.Worktree) (opened int, failed []string) {
+	baseRun, err := resumeWindow(cfg, "", fresh, baseName, baseAgentName(cfg))
 	if err == nil {
 		_, err = openBaseWindow(env, cfg, baseRun, leaveTheClient)
 	}
@@ -195,7 +201,7 @@ func restoreWindows(env *Env, cfg *config.Config, run windowCommand, fresh bool,
 			opened++
 			continue
 		}
-		scratchRun, err := resumeWindow(cfg, "", fresh, name)
+		scratchRun, err := resumeWindow(cfg, "", fresh, name, agentName(cfg, name))
 		if err == nil {
 			_, err = reopenScratchWindow(env, cfg, name, "", scratchRun, leaveTheClient)
 		}
@@ -218,7 +224,7 @@ func restoreWindows(env *Env, cfg *config.Config, run windowCommand, fresh bool,
 			Name:   cfg.WindowName(wt.Slug, ""),
 			Slug:   wt.Slug,
 			Branch: wt.Branch,
-		}, run, leaveTheClient); err != nil {
+		}, runs[wt.Slug], leaveTheClient); err != nil {
 			env.warnf("could not open a window on %s%s", wt.Slug,
 				asFields(field("tmux said", err.Error())))
 			failed = append(failed, wt.Slug)

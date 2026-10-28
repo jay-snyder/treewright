@@ -517,7 +517,7 @@ func TestScratchReuseReopensARecordedSessionUnderThisCallsTitle(t *testing.T) {
 	if r.err != nil {
 		t.Fatalf("scratch --reuse: %v\n%s", r.err, r.both())
 	}
-	waitForContent(t, log, "start:--resume review-conversation /review-pr 42", "the reopened scratch window's agent")
+	waitForContent(t, log, "start:--resume review-conversation --name proj-review-42 /review-pr 42", "the reopened scratch window's agent")
 	if got := windowsIn(t, "proj"); !slices.Equal(got, []string{"review: 42"}) {
 		t.Errorf("windows = %v, want one window, under the name this call gave", got)
 	}
@@ -688,7 +688,7 @@ func TestScratchReuseWithoutTmuxResumesTheRecordedConversationHere(t *testing.T)
 	if r := f.exec("scratch", "--reuse", "--repo", "proj", "ask", "--prompt", "carry on"); r.err != nil {
 		t.Fatalf("scratch --reuse without tmux: %v\n%s", r.err, r.both())
 	}
-	if got, want := startsOf(t, log), []string{"start:--resume ask-conversation carry on in " + f.MainDir}; !slices.Equal(got, want) {
+	if got, want := startsOf(t, log), []string{"start:--resume ask-conversation --name proj-ask carry on in " + f.MainDir}; !slices.Equal(got, want) {
 		t.Errorf("starts = %q, want %q — the recorded conversation, in the main checkout", got, want)
 	}
 }

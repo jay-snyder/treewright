@@ -68,6 +68,10 @@ type Agent struct {
 	// Command launches the agent fresh; ResumeCommand picks up where it left
 	// off. They are the defaults a config naming this module gets for its
 	// command and resume_command, each still overridable in the file.
+	//
+	// Every template here may name the agent at {name}, which core fills with
+	// the name the agent answers to — see MessageTool below. A template without
+	// one launches an agent treewright gives no name.
 	Command       string
 	ResumeCommand string
 
@@ -88,6 +92,31 @@ type Agent struct {
 	// a config that wrote its own has taken resuming into its own hands, and
 	// its flags are not treewright's to drop. See Config.SessionResumeCommand.
 	SessionResumeCommand string
+
+	// FormerResumeCommands are what ResumeCommand used to be, in releases a
+	// config may have been written against. A config spelling one of them out
+	// in full is still on the module's own resume, for the one question
+	// Config.SessionResumeCommand asks: it chose nothing the module's template
+	// lacks, and changing the module's default is not the config taking
+	// resuming into its own hands. Without this, the release that changed the
+	// default would have stopped recording sessions for exactly those configs,
+	// with nothing anywhere to say so.
+	FormerResumeCommands []string
+
+	// MessageTool is what the agent itself calls the way it sends a message to
+	// another running session by that session's name, and empty for an agent
+	// with no such thing.
+	//
+	// It is the half of messaging that is a fact about the agent. The other
+	// half is the name, which is treewright's to give — every template above
+	// can take it at {name}, and a window whose agent was launched with one is
+	// recorded as answering to it. Where both are there, the messages that
+	// would otherwise send a person or an agent to `treewright send` name this
+	// instead: a message the agent delivers itself arrives between its tool
+	// calls, marked as coming from another session, rather than as keystrokes
+	// typed into whatever its pane is showing. See "Agents reaching each other"
+	// in docs/agents.md.
+	MessageTool string
 
 	// QuitReason is the reason the agent's SessionEnd hook payload gives when
 	// a person quit it, as opposed to the session being cleared, being swapped
