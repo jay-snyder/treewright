@@ -42,6 +42,7 @@ _treewright() {
     'rm:tear down a worktree and its branch'
     'prune:remove every merged, clean worktree'
     'close:close the tmux window open on a worktree'
+    'yield:mark the window you are in as safe for the base window to close'
     'setup:write a config for the repository you are standing in'
     'config:print the settings in force, defaults included'
     'doctor:check the installation and every registered config'

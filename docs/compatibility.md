@@ -56,7 +56,7 @@ or changed in meaning.
 | Surface | The promise |
 |---|---|
 | The output contract | stdout carries the answer and nothing else, and each command's answer is the one the table under "Output contract" in [`design-notes.md`](design-notes.md#output-contract) gives it. `cd "$(tw new x)"` and `tw ls --json \| jq` keep working. `TestStdoutCarriesOnlyTheAnswer` is the enforcement. |
-| `ls --json` | The field names and types: `slug`, `base`, `scratch`, `dir`, `branch`, `status`, `ahead`, `behind`, `dirty_files`, `unpushed`, `window`, `window_id`, `window_session`, `window_is_current`, `window_last_in_session`, `agent_state`, `agent_name`. `agent_name` is the name the window's agent answers to, read off the window, and empty wherever treewright gave it none. `ahead` and `behind` stay nullable — `null` means the comparison was impossible, which is not `0`. The base row stays row 0 in every repository the command can answer about. A row after it is a worktree unless it carries `"scratch": true`, which marks a scratch session: its `slug` is the name it answers to, its `branch` is empty, its divergence `null`, and its window fields are empty while it is a recorded session whose window is gone — so anything that treats the rows after row 0 as worktrees filters on `scratch`, and anything that wants what is running reads `window_id`. Fields are added, never removed or retyped. |
+| `ls --json` | The field names and types: `slug`, `base`, `scratch`, `dir`, `branch`, `status`, `ahead`, `behind`, `dirty_files`, `unpushed`, `window`, `window_id`, `window_session`, `window_is_current`, `window_last_in_session`, `window_yielded`, `agent_state`, `agent_name`. `agent_name` is the name the window's agent answers to, read off the window, and empty wherever treewright gave it none. `ahead` and `behind` stay nullable — `null` means the comparison was impossible, which is not `0`. The base row stays row 0 in every repository the command can answer about. A row after it is a worktree unless it carries `"scratch": true`, which marks a scratch session: its `slug` is the name it answers to, its `branch` is empty, its divergence `null`, and its window fields are empty while it is a recorded session whose window is gone — so anything that treats the rows after row 0 as worktrees filters on `scratch`, and anything that wants what is running reads `window_id`. Fields are added, never removed or retyped. |
 | Exit codes | `0` success, `1` ran and failed, `2` invoked wrong — and `2` also for `guard`'s refusal, frozen the hardest of all because the number is owned by somebody else's specification: a PreToolUse hook blocks on 2 and on nothing else. |
 | The config file format | The keys and their meanings — `version`, `main_dir`, `base_branch`, `branch_prefix`, `branch_prefixes`, `agent`, `carry_files`, `command`, `resume_command`, `post_create`, `features`, `ticket_pattern`, `tmux_session` — including the load-bearing empty strings: `ticket_pattern = ""` turns the search off, `command = ""` opens a shell. Unknown keys stay rejected. The registry stays at `${TREEWRIGHT_CONFIG_DIR:-${XDG_CONFIG_HOME:-~/.config}/treewright/repos}`. A config written today loads in every later 1.x. |
 | The pasted lines | `eval "$(treewright shell-init zsh)"` and its two siblings, and `run-shell 'treewright tmux-init --apply'`, keep meaning what they mean. These are the two edits treewright asks a person to make in files it will never touch again — breaking either breaks every install at once, in a file its owner has long since stopped thinking about. |
@@ -119,6 +119,19 @@ surface. Nothing machine-read reads it, and it is a correction rather than a
 choice: the old behavior threw an attached operator out of the session they
 were watching. `attach` and `restore`, whose answer *is* a session, are
 untouched.
+
+**`yield` and `window_yielded` were added under the same rule**, a command and an
+`ls --json` field that did not exist before, and so does the bare `close`: an
+invocation that was a usage error everywhere now closes the window it runs in
+when that is a worktree or scratch window, and is still a usage error anywhere
+else. What `close` now refuses is the part that is not additive — from inside
+one of treewright's windows, a close that used to succeed is refused unless it
+is the caller's own window, or the base window closing one whose agent has
+yielded. That is made at 0.x, announced in the release that carries it, and for
+the reason the client move was: it is a correction, after the old behavior
+closed an operator's base window out from under them. From outside
+treewright's windows nothing changed. See "Closing a window: its own agent, or
+from outside" in [`design-notes.md`](design-notes.md).
 
 ## What is never promised
 

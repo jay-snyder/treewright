@@ -2,7 +2,9 @@ package tmux
 
 import (
 	"maps"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -51,7 +53,7 @@ func scratchPane(id, session, name, repo, scratch, worktree, dir string) string 
 // listed renders one line in paneFormat's own order: the two free-text fields at
 // the ends, the fixed ones between.
 func listed(windows int, id, session, name, repo, worktree, scratch, state, agent, dir string) string {
-	return strings.Join([]string{name, id, session, repo, worktree, scratch, state, agent, strconv.Itoa(windows), dir}, "\t")
+	return strings.Join([]string{name, id, session, repo, worktree, scratch, state, agent, "", strconv.Itoa(windows), dir}, "\t")
 }
 
 func TestParsePanes(t *testing.T) {
@@ -662,5 +664,51 @@ func TestLastLines(t *testing.T) {
 				t.Errorf("lastLines(%q, %d) = %q, want %q", tc.out, tc.n, got, tc.want)
 			}
 		})
+	}
+}
+
+// TestReachesCallersServerResolvesSocketsAsTmuxDoes: -S outright, -L under the
+// socket directory with its symlinks resolved, and neither meaning $TMUX's own.
+// Outside tmux there is no server of the caller's to reach.
+func TestReachesCallersServerResolvesSocketsAsTmuxDoes(t *testing.T) {
+	base := t.TempDir()
+	// The directory named through a symlink, as /tmp is on macOS, so the
+	// comparison has to resolve it to agree with the path $TMUX holds.
+	actual := filepath.Join(base, "real")
+	if err := os.MkdirAll(filepath.Join(actual, "tmux-"+strconv.Itoa(os.Getuid())), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(base, "link")
+	if err := os.Symlink(actual, link); err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := filepath.EvalSymlinks(actual)
+	if err != nil {
+		t.Fatal(err)
+	}
+	own := filepath.Join(resolved, "tmux-"+strconv.Itoa(os.Getuid()), "work")
+
+	t.Setenv("TMUX_TMPDIR", link)
+	t.Setenv("TMUX", "")
+	if ReachesCallersServer("", "") {
+		t.Error("outside tmux, a bare command reached the caller's server")
+	}
+
+	t.Setenv("TMUX", own+",123,0")
+	for _, tc := range []struct {
+		label, socket string
+		want          bool
+	}{
+		{"", "", true},
+		{"work", "", true},
+		{"default", "", false},
+		{"twscratch", "", false},
+		{"", own, true},
+		{"", filepath.Join(link, "tmux-"+strconv.Itoa(os.Getuid()), "work"), true},
+		{"", filepath.Join(base, "elsewhere", "work"), false},
+	} {
+		if got := ReachesCallersServer(tc.label, tc.socket); got != tc.want {
+			t.Errorf("ReachesCallersServer(%q, %q) = %v, want %v", tc.label, tc.socket, got, tc.want)
+		}
 	}
 }

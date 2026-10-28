@@ -576,6 +576,15 @@ func cmdRm(env *Env, args []string) error {
 	// run from the base window, and the one left pointing at a deleted directory
 	// is the window named after the worktree.
 	staleWindow := tmux.Windows(sessionFor(cfg))[dir]
+	// --yes asked for that window to be closed, so whether this caller may close
+	// it is decided now, before anything is removed: a refusal after the removal
+	// would leave the half of the request that cannot be undone done, and the
+	// half that was refused looking like an afterthought.
+	if yes && staleWindow.ID != "" {
+		if refusal := callerOf().refusal(staleWindow, false, false); refusal != nil {
+			return refusal.rmError(env, cfg, staleWindow.Name, slug)
+		}
+	}
 
 	if err := repo.RemoveWorktree(dir); err != nil {
 		return err
@@ -659,7 +668,8 @@ func lastInSessionNote(window tmux.Window) string {
 }
 
 // closeRemovedWindow closes the removed worktree's window without asking, as
-// --yes said to.
+// --yes said to. cmdRm has already put that close through closer.refusal, before
+// it removed anything, so nothing here asks again.
 //
 // --yes answered "close the window", which is not the same as "tell me nothing
 // about what was in it" — the whole reason a window is not closed unasked is
@@ -679,7 +689,15 @@ var openTTY = func() (*os.File, error) { return os.OpenFile("/dev/tty", os.O_RDW
 
 // askWindowClose asks before closing the removed worktree's window — or, with
 // nobody to ask, says what to run instead.
+//
+// Both go through closer.refusal, as every close does, and the question is not
+// asked at all where the answer could not be carried out. A person at the
+// terminal answers for the yield: the y/N is theirs, and the yield exists
+// for the agent that has nobody to ask. They do not answer for the rest of the
+// rule, which is about the window the command is running in rather than about
+// who is typing.
 func askWindowClose(env *Env, cfg *config.Config, slug string, window tmux.Window) {
+	caller := callerOf()
 	tty, err := openTTY()
 	if err != nil {
 		// Nobody to ask — treewright was run by a script or an agent. Say what to
@@ -687,12 +705,22 @@ func askWindowClose(env *Env, cfg *config.Config, slug string, window tmux.Windo
 		// running in it. `close` still finds the window afterwards: it is found by
 		// the directory treewright recorded on it, and that record outlives the
 		// directory this command has just deleted.
+		if refusal := caller.refusal(window, false, false); refusal != nil {
+			env.progressf("tmux window %s now points at a deleted directory%s\n%s",
+				window.Name, under(lastInSessionNote(window)), refusal.leftOpen(env, cfg, window.Name, slug))
+			return
+		}
 		env.progressf("tmux window %s now points at a deleted directory%s%s",
 			window.Name, under(lastInSessionNote(window)),
 			asFields(field("close it with", closeHint(env, cfg, slug))))
 		return
 	}
 	defer tty.Close()
+	if refusal := caller.refusal(window, false, true); refusal != nil {
+		env.progressf("tmux window %s now points at a deleted directory%s\n%s",
+			window.Name, under(lastInSessionNote(window)), refusal.leftOpen(env, cfg, window.Name, slug))
+		return
+	}
 
 	// Above the question rather than through progressf, because the caveats and
 	// the question have to arrive together on the same terminal, and stderr may

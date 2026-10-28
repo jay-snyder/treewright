@@ -174,7 +174,7 @@ and without the step a Mac gets a binary that exits 137 and prints nothing. See
 | `internal/cli/move.go` | `move`: uncommitted work out of the base checkout and into a worktree. |
 | `internal/cli/send.go` | `send`: one line typed at the agent in an open window, for a person and for an agent with no name to be messaged at — `deliver`, which `scratch --reuse` types through as well. |
 | `internal/cli/names.go` | The name each agent answers to: the scheme, the cross-repository collision `new`/`move`/`scratch` refuse, and `messageRoute` — the agent's own messaging where it has a name, `send` where it does not. |
-| `internal/cli/close.go` | `close`: the tmux window on a worktree, gone worktree or not. |
+| `internal/cli/close.go` | `close`: the tmux window on a worktree, gone worktree or not; `yield`; and `closer.refusal`, the one check every path that closes a window goes through. |
 | `internal/cli/scratch.go` | `scratch`: another agent window on the main checkout, the rule that its name and a slug never coincide, and `--reuse`, which reaches the session already under a name. |
 | `internal/cli/restore.go` | `restore`: every window a repository's session should have, after a restart. |
 | `internal/cli/sessions.go` | The record of which conversation each agent in the base checkout is running: written from `session-start`, ended by `close` and by `signal clear` on a quit, read by `resume` and `restore`. |
@@ -189,7 +189,7 @@ and without the step a Mac gets a binary that exits 137 and prints nothing. See
 | `internal/cli/message.go` | How a message is shaped on the way out: `progressf`/`warnf`/`errorf`, the continuation indent, `asLines`, `under`, `count`. |
 | `internal/cli/popup.go` | `popup`, popup sizing, the no-worktrees message. |
 | `internal/cli/signal.go` | `signal`: the agent-state protocol's one verb, run by agent hooks. |
-| `internal/cli/guard.go` | `guard`: the PreToolUse decision, run by agent hooks — which tool calls may change another worktree, and the shell reader that answers it. |
+| `internal/cli/guard.go` | `guard`: the PreToolUse decision, run by agent hooks — which tool calls may change another worktree, and the shell reader that answers it — and the raw tmux kills it refuses on the caller's own server. |
 | `internal/cli/features.go` | `session-start`: the one verb every optional behavior runs behind, run by agent hooks — and what each of them does. |
 | `internal/cli/eval.go` | The eval-file protocol. |
 | `internal/cli/init.go` | `shell-init`, `tmux-init`, `agent-init`, `__complete`. |
@@ -571,7 +571,26 @@ the slug rather than resolved among the worktrees for the same reason — a pref
 resolves only while there is something to match against. Everything it reports
 is reported *before* the window goes: closing the caller's own window kills the
 pane treewright runs in, and closing a session's last window can detach whoever
-would have read it.
+would have read it. **With no slug it closes the window it is running in**, found
+from the pane — the way an agent closes itself, and the only way that never has
+it work out its own window's name, which is the step that went wrong.
+
+**A window is closed only by its own agent, or from outside treewright's
+windows.** The caller's window decides, from `tmux.CallersWindow`: from a
+worktree or scratch window only that window; the base window from none of
+treewright's windows, its own included; from the base window another window only
+once its agent has run `yield`, which sets `@treewright_yielded` on its own
+window and which `signal working` and `signal clear` take back; from outside
+treewright's windows, anything. Every path that closes a window — `close`,
+`rm --yes`, `rm`'s and `prune`'s question — goes through `closer.refusal`, and
+`rm --yes` asks it before removing anything. The y/N alone skips the yield, a
+person at the terminal being the confirmation it stands in for. No `--force`, and
+no warning in place of a refusal: the cases are the ones where the caller was
+sure and wrong, as the scratch agent that closed the base window was. Telling
+the base window from a worktree's means asking the window's own config for its
+`main_dir`, since the stamps differ only in the path. See "Closing a window: its
+own agent, or from outside" in `docs/design-notes.md` and "Yielding a window" in
+`docs/agents.md`.
 
 **A window whose agent is `working` is warned about wherever one is closed** —
 `close`, `rm --yes`, and above `rm`/`prune`'s own prompt — through
@@ -610,9 +629,10 @@ agent stands in the base checkout and asked by directory it would stamp the base
 window. The state it writes lives on the window option `@treewright_agent_state`,
 never on disk — the agent is the window's command, so agent death is state death
 — and the `!` waiting marker is display only: `tmux.Windows` strips it at parse,
-so `Window.Name` is always the clean name. The held-open wrapper is the one place
-a window outlives its agent, and it clears both itself. See "Agent state" in
-`docs/agents.md`.
+so `Window.Name` is always the clean name. `working` and `clear` also take back
+the window's yield: a new prompt is new work, and the yield answered for the old.
+The held-open wrapper is the one place a window outlives its agent, and it clears
+all three itself. See "Agent state" in `docs/agents.md`.
 
 **`guard` is `signal`'s discipline with a sharper reason, and it is the one
 command that never returns a usage error.** It reads a PreToolUse payload on
@@ -626,6 +646,17 @@ on nothing else, which is why the refusal is `ErrRefused` — and why being
 invoked wrong is out of scope rather than an `ErrUsage`, that being exit 2 as
 well: a mis-wired hook would otherwise refuse every tool call in the session and
 hand back this command's help as the reason.
+
+**It also refuses a raw tmux kill, the one judgement it makes that is not about
+paths.** `kill-window`, `kill-pane`, `kill-session`, `kill-server`, the
+`respawn-` verbs and `unlink-window` — aliases, unambiguous prefixes and a second
+command after a `;` included — are refused from any of treewright's windows,
+base included, when they would reach the server that window is on, and the
+refusal names the bare `close`. The server is resolved as tmux resolves it
+(`tmux.ReachesCallersServer`): `-S`, then `-L` under the socket directory, then
+`$TMUX`. So `tmux -L twscratch kill-server`, which ends the scratch-server demo
+above, passes. The kill verbs are looked for before the pane is asked, so a Bash
+call with none costs no tmux round trip.
 
 **Reads of another worktree are never refused, and neither is treewright
 itself.** Reviewing another agent's work is the ordinary way to check on it, and

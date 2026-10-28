@@ -90,6 +90,58 @@ them while the states prove whether they are enough:
 from a hook's stdin payload), and `@treewright_agent_since` for when the state
 was set ("waiting for 25m" in `ls`).
 
+### Yielding a window
+
+The base window closes another window only once that window's agent has said
+nothing in it would be lost. The reason is the one `warnIfAgentWorking` gives
+for warning: the agent is the window's command, so closing the window stops it,
+and whether that loses anything is a fact only the agent has. The state does not
+answer it — `done` says a turn ended, not that nothing is half finished — so the
+agent is asked. The maintainer's rule, when it was decided: if the window cannot
+confirm either way, it cannot be closed.
+
+**treewright cannot read the answer to a question.** A reply to a message goes
+to the agent that asked, never to the binary, and `send` has no reply channel at
+all. So the answer is something the binary can check: `tw yield`, run by the
+agent in its own window, sets `@treewright_yielded` on the window found from its
+pane. It can only ever mark the window it runs in, so no agent can answer for
+another, and how the question travelled does not matter. `ls --json` reports it
+as `window_yielded`, which is how an asker with no reply channel reads it.
+
+**It is current only until the agent works again.** `signal working` takes it
+back, and that is every `UserPromptSubmit`: an agent handed a new prompt has
+taken on something since it said it was done. The question itself arrives as a
+prompt, so it clears any older mark, and the mark on a window is always the
+answer to the latest question. `signal clear` takes it back too, the agent
+having left, and the held-open wrapper clears it with the state — a dead agent's
+output is exactly what nobody has answered for.
+
+**No answer means no close.** A window held open on a dead agent's output, a
+window running only a shell, and an agent stuck `waiting` on a person all carry
+no mark, so all are refused from the base window. They are left for a person,
+who closes them from outside treewright's windows, where the rule does not
+reach. There is no `--force`, for the reason `warnIfAgentWorking` gives.
+
+**`rm`'s and `prune`'s y/N is the exception, and it is not one.** A person at the
+terminal answering "close its window?" is the confirmation the mark stands in
+for; the mark exists for an agent asking on its own behalf, which never has a
+tty.
+
+**Asking comes before removing.** After `rm`, the agent in that window stands in
+a directory that no longer exists. `tw yield` itself does not care — it reads
+the pane and the registry, never the working directory — but an agent's own
+tool calls may, so the guide teaches asking first: ask, read `window_yielded`,
+then remove and close. The route the question takes is the one every message
+takes — the agent's own messaging to the name on its window where it has one,
+`send` where it does not, as "Agents reaching each other" below sets out — and
+the refusal spells it in one place, `askToYield` in `close.go`.
+
+**Why `yield`.** `release` was the first name, and lost because it already means
+two things in a tool that drives git: a software release, and treewright's own
+release check in `version --check`. `yield` is what a process does when it gives
+up what it holds of its own accord, which is what the agent is doing with its
+window.
+
 ## Agent modules
 
 `signal` is half of a deliberate split: treewright's core provides agent-neutral
@@ -405,6 +457,26 @@ same-repository spellings do. That is the distinction the rule has always drawn:
 doing another agent's work yourself is what is refused, and handing work to an
 agent is what treewright is for. Across repositories that is the only route
 there is, since the other repository's worktrees are not even listed here.
+
+**It also refuses a raw tmux kill, and that is the one judgement it makes that
+is not about paths.** `tmux kill-window`, `kill-pane`, `kill-session`,
+`kill-server`, the two `respawn-` verbs and `unlink-window` — by alias, by the
+unambiguous prefix tmux accepts, and after a `;` that starts a second tmux
+command — are refused from any of treewright's windows, the base window's
+included, when they would reach the server that window is on. `close` decides
+which windows an agent may close, and a raw kill decides nothing: the incident
+that made `close` strict began with an agent asking tmux which window it was in
+and being told about another, and a raw kill is the same mistake with the check
+taken out. The refusal names the bare `tw close`, which closes the agent's own
+window and nothing else.
+
+The server is resolved as tmux resolves it — `-S` outright, `-L` under the
+socket directory, neither meaning `$TMUX`'s — so a line naming some other server
+passes. That is a scratch server, which is where CLAUDE.md sends every
+experiment, and its own demo ends in `tmux -L twscratch kill-server`. Scope is
+the pane, as everywhere else in the guard: outside a window treewright opened
+there is nothing of treewright's for the line to close by mistake, and a Bash
+call with no kill verb in it never costs a tmux round trip to find that out.
 
 ### Procedure belongs in the binary, not in the guide
 

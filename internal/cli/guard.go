@@ -34,6 +34,18 @@ import (
 // slugs constantly and refusing those would be refusing the way out the message
 // names.
 //
+// It refuses one other thing, and that is the one place it reads a command for
+// something other than the paths in it: a raw tmux line that kills, respawns or
+// unlinks a window, pane, session or server on the server the agent's own
+// window is on. `close` decides which windows an agent may close — its own, and
+// from the base window only those whose agents have yielded — and a
+// `tmux kill-window` decides nothing. The incident that made `close` strict
+// began with an agent asking tmux which window it was in and being told about
+// another, and a raw kill is that same mistake with the check taken out. So it
+// is refused from any of treewright's windows, the base window's included, and
+// the refusal names the bare `treewright close`. A -L or -S naming some other
+// server passes: that is a scratch server, which is where experiments belong.
+//
 // It inherits `signal`'s discipline, for the same reason and one more.
 // **Silent and permissive out of scope**: outside tmux, outside a registered
 // repository, outside git, on a payload it cannot parse, or on a tool it does
@@ -113,6 +125,10 @@ func cmdGuard(env *Env, args []string) error {
 	if !slices.Contains(guardedTools, call.ToolName) {
 		return nil
 	}
+	if verb, ok := killsCallersServer(call); ok {
+		env.errorf("%s", killRefusal(env, verb, call.Input.Command))
+		return ErrRefused
+	}
 	scope, ok := guardScopeFor(call.Cwd)
 	if !ok {
 		return nil
@@ -140,6 +156,143 @@ func readHookPayload(env *Env, into any) bool {
 		return false
 	}
 	return json.NewDecoder(env.Stdin).Decode(into) == nil
+}
+
+// ---- the caller's own server ------------------------------------------------
+
+// tmuxKillVerbs are tmux's commands that end a window, a pane, a session or the
+// server, or take a window out from under its session: every way a raw tmux
+// line can do what `close` decides whether to do. tmuxKillAliases are their
+// short forms, which tmux matches before anything else.
+var (
+	tmuxKillVerbs   = words(`kill-window kill-pane kill-session kill-server respawn-window respawn-pane unlink-window`)
+	tmuxKillAliases = words(`killw killp respawnw respawnp unlinkw`)
+)
+
+// tmuxValueFlags are tmux's own flags that take a value, which may be stuck to
+// the letter (-Lwork) or be the next word (-L work).
+const tmuxValueFlags = "cfLST"
+
+// killsCallersServer finds a tmux command in a Bash call that would end a
+// window, pane, session or server on the server the calling agent's own window
+// is on, and returns it as the refusal names it.
+//
+// It is in scope only for an agent standing in one of treewright's windows, the
+// base window included, which the pane says and a cheap parse of the line has
+// already made worth asking: a Bash call with no such verb in it never costs a
+// tmux round trip. A -L or -S naming some other server is a scratch server, and
+// passes — CLAUDE.md's own experiments end in `tmux -L twscratch kill-server`.
+// A relative -S is read against the directory the call reports.
+//
+// tmux matches a command by an unambiguous prefix of its name, so `kill-w` is
+// kill-window and is refused as one; a prefix tmux would call ambiguous is
+// refused too, since tmux would not have run it either. What is matched is the
+// command position only — the first word after tmux's own flags and after each
+// `;` that separates one tmux command from the next — so a window name or a
+// message that happens to say kill-window is not a kill.
+//
+// Only a Bash call carries a command, and every other tool's is empty, which
+// has no segments to read.
+func killsCallersServer(call hookCall) (string, bool) {
+	for _, seg := range scanCommand(call.Input.Command) {
+		program, args := programOf(seg.words)
+		if program != "tmux" {
+			continue
+		}
+		label, socket, commands := tmuxInvocation(args)
+		for _, command := range commands {
+			if !isTmuxKill(command) {
+				continue
+			}
+			if socket != "" {
+				socket = resolve(socket, call.Cwd)
+			}
+			if inTreewrightsWindow() && tmux.ReachesCallersServer(label, socket) {
+				return "tmux " + command, true
+			}
+		}
+	}
+	return "", false
+}
+
+// inTreewrightsWindow reports that the calling agent's pane is in a window
+// treewright opened.
+func inTreewrightsWindow() bool {
+	w, ok := tmux.CallersWindow()
+	return ok && w.Stamped()
+}
+
+// tmuxInvocation reads tmux's own server flags off its arguments, and the
+// command words after them: the first, and each that follows a `;` argument or
+// an argument ending in one, which is how tmux separates commands on one line.
+func tmuxInvocation(args []string) (label, socket string, commands []string) {
+	i := 0
+	for ; i < len(args); i++ {
+		a := args[i]
+		if a == "--" {
+			i++
+			break
+		}
+		if !strings.HasPrefix(a, "-") || a == "-" {
+			break
+		}
+		// A cluster of single letters, the last of which may take a value.
+		for j := 1; j < len(a); j++ {
+			if !strings.ContainsRune(tmuxValueFlags, rune(a[j])) {
+				continue
+			}
+			value := a[j+1:]
+			if value == "" && i+1 < len(args) {
+				i++
+				value = args[i]
+			}
+			switch a[j] {
+			case 'L':
+				label = value
+			case 'S':
+				socket = value
+			}
+			break
+		}
+	}
+	expectCommand := true
+	for _, a := range args[i:] {
+		if expectCommand && a != ";" {
+			commands = append(commands, strings.TrimSuffix(a, ";"))
+		}
+		expectCommand = strings.HasSuffix(a, ";")
+	}
+	return label, socket, commands
+}
+
+// isTmuxKill reports a tmux command word that tmux would run as one of
+// tmuxKillVerbs.
+func isTmuxKill(command string) bool {
+	if command == "" {
+		return false
+	}
+	if tmuxKillAliases[command] {
+		return true
+	}
+	for verb := range tmuxKillVerbs {
+		if strings.HasPrefix(verb, command) {
+			return true
+		}
+	}
+	return false
+}
+
+// killRefusal is what an agent reaching for a raw tmux kill is handed back.
+// Like the other refusal it names the way through rather than only the wall:
+// the bare close, which closes the window the agent is running in and nothing
+// else, and decides what else may be closed where tmux would not have asked.
+func killRefusal(env *Env, verb, call string) string {
+	return "" +
+		verb + " would reach the tmux server this agent's window is on" +
+		asFields(field("refused", abbreviatedCall(call))) +
+		"\nfrom inside treewright's windows, a window is closed through treewright, and only your own" +
+		"\na scratch server, named with -L or -S, is not refused" +
+		asFields(field("close this one", env.copyable(canonicalName+" close")))
 }
 
 // ---- scope -------------------------------------------------------------------

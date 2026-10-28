@@ -420,6 +420,13 @@ type worktreeJSON struct {
 	// no window is open, and false for a window with company.
 	WindowLastInSession bool `json:"window_last_in_session"`
 
+	// WindowYielded says the agent in the window has run `treewright yield`
+	// since it was last handed work: nothing in the window would be lost to
+	// closing it, which is what `close` from the base window waits for. It is
+	// how an agent that asked through `send`, which has no reply, reads the
+	// answer. False when no window is open.
+	WindowYielded bool `json:"window_yielded"`
+
 	// AgentState is what the agent in the window last said it was doing, via
 	// `signal`: working, waiting, or done. Empty like the window fields when no
 	// window is open — and when one is open but nothing has ever signaled, since
@@ -473,6 +480,7 @@ func worktreesJSON(rows []row, current string) []worktreeJSON {
 			// come back as the caller's own.
 			WindowIsCurrent:     w.ID != "" && w.ID == current,
 			WindowLastInSession: w.LastInSession(),
+			WindowYielded:       w.Yielded,
 		}
 		if r.Compared {
 			ahead, behind := r.Ahead, r.Behind

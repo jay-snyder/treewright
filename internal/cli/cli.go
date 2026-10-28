@@ -740,11 +740,25 @@ something running in them.`,
 		},
 		{
 			name:    "close",
-			args:    argRepoFlag + " <slug>",
+			args:    argRepoFlag + " [slug]",
 			summary: "close the tmux window open on a worktree",
 			long: `Closes the window treewright opened on a worktree, and nothing else —
 the worktree, the branch and any work in them are left alone. "treewright rm" is
 what removes those.
+
+Run with no slug inside a worktree or scratch window, it closes that window: the
+one it is running in, found from the pane rather than from a name. That is how
+an agent closes its own window, and the one way to do it that cannot name the
+wrong window.
+
+Which windows it may close depends on the window it is run in. From inside a
+worktree or scratch window, only that window. The base window, from inside none
+of treewright's windows, its own included: a person closes it from a shell
+outside them, or by quitting its agent. From the base window, another window
+once that window's agent has run "treewright yield", which is the agent
+saying nothing in it would be lost. From outside treewright's windows, any.
+Everything else is refused before anything happens, and there is no flag past
+it.
 
 It works after the worktree is gone, which is mostly what it is for. rm and
 prune do not close a window without being asked, since something may still be
@@ -754,7 +768,7 @@ outlives the directory.
 
 An unambiguous prefix of a slug is enough while the worktree is still there;
 once it has been removed there is nothing to match against, so name it in full.
-"base" closes the main checkout's window, and a scratch window's name closes
+"base" names the main checkout's window, and a scratch window's name names
 that one.
 
 Closing a scratch window ends its session, not only its window: its
@@ -769,13 +783,37 @@ one — so every hint treewright prints for this command names the repository, a
 so should you.
 
 Closing a session's last window ends the session, which moves an attached client
-elsewhere or detaches it. That is said rather than refused, as is closing the
-window you are running in — which is a real thing to want, and the last thing
-that happens in that session.
+elsewhere or detaches it, and closing the window you are running in is the last
+thing that happens in that session. Both are said before the window goes.
 
 Nothing is printed to stdout: there is no answer here, only something done.`,
 			flags: []flagDoc{repoFlagDoc},
 			run:   cmdClose,
+		},
+		{
+			name:    "yield",
+			args:    "",
+			summary: "mark the window you are in as safe for the base window to close",
+			long: `Marks the window it is run in as safe to close: nothing the agent in it
+is doing would be lost. It is how an agent answers the base window asking to
+close it, since treewright cannot read a reply. "treewright close" and
+"treewright rm --yes" from the base window close another window only once its
+agent has run this.
+
+It marks only the window it is running in, found from the pane, so no agent can
+yield a window but its own. The mark lasts until the agent is handed its next
+prompt, and goes with the agent if it exits; window_yielded in
+"treewright ls --json" reports it.
+
+Run it only when that is true. An agent with work in flight, or with work it
+has not handed on, says so to whoever asked instead.
+
+Outside a worktree or scratch window it is an error, there being no window here
+for anyone to close. The base window is never closed from inside treewright's
+windows, so it has nothing to yield.
+
+Nothing is printed to stdout.`,
+			run: cmdYield,
 		},
 		{
 			name:    "setup",
