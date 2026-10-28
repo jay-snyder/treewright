@@ -425,6 +425,21 @@ type worktreeJSON struct {
 	// window is open — and when one is open but nothing has ever signaled, since
 	// an option never set is not an answer.
 	AgentState string `json:"agent_state"`
+
+	// AgentName is the name the agent in the window answers to — the address
+	// an agent with messaging of its own sends to, rather than typing at the
+	// window. Read off the window, where treewright recorded it as the agent
+	// was launched under it, and so empty wherever treewright gave the agent
+	// none: no window open, a command template with no {name}, an agent whose
+	// window predates names, or one that has died and left its window held
+	// open. Empty means `send` is the way to it.
+	//
+	// Reported rather than left for a consumer to build from the repository's
+	// name and the slug, for the reason window_is_current is: the scheme is a
+	// fact treewright has, and a name built by hand is right only until the
+	// first window it does not describe — which is every window opened before
+	// the scheme, for as long as it stays open.
+	AgentName string `json:"agent_name"`
 }
 
 // worktreesJSON renders the listing. current is the window the caller is
@@ -452,6 +467,7 @@ func worktreesJSON(rows []row, current string) []worktreeJSON {
 			WindowID:      w.ID,
 			WindowSession: w.Session,
 			AgentState:    w.State,
+			AgentName:     w.Agent,
 			// The empty id has to be excluded explicitly: outside tmux current
 			// is empty too, and every row with no window open would otherwise
 			// come back as the caller's own.

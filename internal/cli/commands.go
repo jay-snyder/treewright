@@ -58,13 +58,13 @@ func cmdNew(env *Env, args []string) error {
 // missing the other, which is how validateSlug came to render new's help for a
 // move that went wrong.
 type worktreePlan struct {
-	cfg     *config.Config
-	named   string // the repository the caller named, "" for the one they stand in
-	prefix  string
-	slug    string
-	prompt  string
-	command string
-	window  string // the [window-name] override, "" for the configured name
+	cfg    *config.Config
+	named  string // the repository the caller named, "" for the one they stand in
+	prefix string
+	slug   string
+	prompt string
+	run    windowCommand
+	window string // the [window-name] override, "" for the configured name
 }
 
 // planWorktree runs that shared opening for cmd, whose name is what a refusal
@@ -91,6 +91,12 @@ func planWorktree(env *Env, cmd, repo string, positional []string, prompt, promp
 	if err := refuseSlugOfAScratchWindow(env, cfg, slug); err != nil {
 		return worktreePlan{}, err
 	}
+	// The slug is also half of the name the window's agent will answer to, and
+	// that name is shared with every other registered repository. See
+	// refuseAgentNameTaken.
+	if err := refuseAgentNameTaken(cfg, slug, "slug"); err != nil {
+		return worktreePlan{}, err
+	}
 	// Before anything is created, with the other refusals, because it is about
 	// this invocation rather than about anything on disk — and because a window
 	// name is worth changing while changing it is still free.
@@ -103,13 +109,13 @@ func planWorktree(env *Env, cmd, repo string, positional []string, prompt, promp
 	if err != nil {
 		return worktreePlan{}, err
 	}
-	command, err := fillPrompt(cfg.Command, "command", prompt)
+	run, err := launch(cfg, prompt, agentName(cfg, slug))
 	if err != nil {
 		return worktreePlan{}, err
 	}
 	return worktreePlan{
 		cfg: cfg, named: repo, prefix: prefix, slug: slug,
-		prompt: prompt, command: command, window: override,
+		prompt: prompt, run: run, window: override,
 	}, nil
 }
 
@@ -118,7 +124,7 @@ func planWorktree(env *Env, cmd, repo string, positional []string, prompt, promp
 func (p worktreePlan) openWindow(env *Env, dir, branch string) {
 	openWorktreeWindow(env, p.cfg, worktreeWindow{
 		Slug: p.slug, Branch: branch, Dir: dir,
-		Name: p.cfg.WindowName(p.slug, p.window), Command: p.command, Prompt: p.prompt,
+		Name: p.cfg.WindowName(p.slug, p.window), Run: p.run, Prompt: p.prompt,
 	}, arrivalFor(p.cfg, p.named))
 }
 
@@ -207,12 +213,12 @@ func createWorktree(env *Env, cfg *config.Config, prefix, slug string) (dir, bra
 // tmux is given, plus the prompt, which is not tmux's business but decides
 // whether there is anything to warn about afterwards.
 type worktreeWindow struct {
-	Slug    string
-	Branch  string
-	Dir     string
-	Name    string
-	Command string
-	Prompt  string
+	Slug   string
+	Branch string
+	Dir    string
+	Name   string
+	Run    windowCommand
+	Prompt string
 }
 
 // openWorktreeWindow opens the window on a worktree that has just been created,
@@ -228,11 +234,11 @@ func openWorktreeWindow(env *Env, cfg *config.Config, w worktreeWindow, arrive a
 		Name:   w.Name,
 		Slug:   w.Slug,
 		Branch: w.Branch,
-	}, windowCommand{Command: w.Command}, arrive)
+	}, w.Run, arrive)
 	if err != nil {
 		env.warnf("%v", err)
 	}
-	warnIfPromptUndelivered(env, w.Prompt, created, err)
+	warnIfPromptUndelivered(env, cfg, choice{Worktree: git.Worktree{Dir: w.Dir, Slug: w.Slug}}, w.Prompt, created, err)
 }
 
 // warnIfBaseIsAhead says so when the base branch holds commits origin has not
@@ -278,11 +284,18 @@ func warnIfBaseIsAhead(env *Env, repo git.Repo, cfg *config.Config) {
 // included — as the thing to run by hand. The old warning fired here anyway,
 // telling the user to paste the prompt to an agent in a window that was "already
 // open" when neither existed.
-func warnIfPromptUndelivered(env *Env, prompt string, created bool, err error) {
+//
+// The recovery is the agent's own messaging where it has some and answers to a
+// name, and `send` where it does not — see messageRoute. It used to be "paste it
+// to the agent there", which is a person's answer, and the reader is as often an
+// agent: the one that ran the resume to hand work over, and has no hands to
+// paste with.
+func warnIfPromptUndelivered(env *Env, cfg *config.Config, target choice, prompt string, created bool, err error) {
 	if prompt == "" || created || err != nil || !tmux.Available() {
 		return
 	}
-	env.warnf("prompt not delivered — the window was already open\npaste it to the agent there")
+	env.warnf("prompt not delivered — the window was already open\n%s",
+		messageRoute(env, cfg, windowOf(cfg, target), target.name()))
 }
 
 // validateSlug rejects slugs that would not round-trip through a directory name
@@ -902,13 +915,23 @@ func cmdResume(env *Env, args []string) error {
 	if err != nil {
 		return err
 	}
-	run, err := resumeCommand(cfg, prompt, fresh)
-	if err != nil {
-		return err
-	}
 	slug := at(positional, 0)
 	if slug != "" {
 		_, slug = splitPrefix(env, cfg, slug)
+	}
+	// Filled here under the name typed, and again below under the name of the
+	// row picked, since the agent's name is in what tmux is handed and the
+	// menu has not said which agent that is yet. Nothing a refusal could be
+	// about depends on the difference but the length, which a name changes by
+	// the few bytes between a prefix and the slug it expands to — so it is this
+	// fill that refuses, before anyone has picked anything, and the second
+	// that measures exactly.
+	provisional := baseAgentName(cfg)
+	if slug != "" {
+		provisional = agentName(cfg, slug)
+	}
+	if _, err := resumeCommand(cfg, prompt, fresh, provisional); err != nil {
+		return err
 	}
 
 	repo := repoFor(cfg)
@@ -945,6 +968,11 @@ func cmdResume(env *Env, args []string) error {
 	case err != nil:
 		return err
 	}
+	agent := target.agentName(cfg)
+	run, err := resumeCommand(cfg, prompt, fresh, agent)
+	if err != nil {
+		return err
+	}
 
 	// An open scratch window is the session being asked for, so resuming one is
 	// switching to it — the same thing resume does with any window it finds
@@ -953,17 +981,17 @@ func cmdResume(env *Env, args []string) error {
 	if target.Scratch {
 		if target.Window.ID != "" {
 			arriveAt(env, cfg, target.Window, run.Command, arrivalFor(cfg, repoName))
-			warnIfPromptUndelivered(env, prompt, false, nil)
+			warnIfPromptUndelivered(env, cfg, target, prompt, false, nil)
 			return nil
 		}
 		name := target.name()
-		scratchRun, err := resumeWindow(cfg, prompt, fresh, name)
+		scratchRun, err := resumeWindow(cfg, prompt, fresh, name, agent)
 		if err != nil {
 			return err
 		}
 		warnIfBaseIsElsewhere(env, cfg)
 		created, err := reopenScratchWindow(env, cfg, name, "", scratchRun, arrivalFor(cfg, repoName))
-		warnIfPromptUndelivered(env, prompt, created, err)
+		warnIfPromptUndelivered(env, cfg, target, prompt, created, err)
 		return err
 	}
 
@@ -980,12 +1008,12 @@ func cmdResume(env *Env, args []string) error {
 	// and one whose agent left no session behind dead-ends there exactly as a
 	// worktree does.
 	if target.Base {
-		baseRun, err := resumeWindow(cfg, prompt, fresh, baseName)
+		baseRun, err := resumeWindow(cfg, prompt, fresh, baseName, agent)
 		if err != nil {
 			return err
 		}
 		created, err := openBaseWindow(env, cfg, baseRun, arrivalFor(cfg, repoName))
-		warnIfPromptUndelivered(env, prompt, created, err)
+		warnIfPromptUndelivered(env, cfg, target, prompt, created, err)
 		return err
 	}
 
@@ -1000,7 +1028,7 @@ func cmdResume(env *Env, args []string) error {
 		Slug:   target.Slug,
 		Branch: target.Branch,
 	}, run, arrivalFor(cfg, repoName))
-	warnIfPromptUndelivered(env, prompt, created, err)
+	warnIfPromptUndelivered(env, cfg, target, prompt, created, err)
 	return err
 }
 
@@ -1029,12 +1057,16 @@ const resumeCommandPair = "resume_command with command behind it"
 // why a command with no {prompt} in it is refused here rather than at the moment
 // the fallback fires: there is no reporting anything from inside a window
 // treewright left minutes ago, and at this point nothing has been created.
-func resumeCommand(cfg *config.Config, prompt string, fresh bool) (windowCommand, error) {
+//
+// The name fills both as well, and for the same reason: whichever of the two
+// ends up running, the agent in the window is the one answering to it. A
+// session that already had a name keeps it either way, and one started before
+// treewright gave names is given one by being resumed.
+func resumeCommand(cfg *config.Config, prompt string, fresh bool, name string) (windowCommand, error) {
 	if fresh {
-		command, err := fillPrompt(cfg.Command, "command", prompt)
-		return windowCommand{Command: command}, err
+		return launch(cfg, prompt, name)
 	}
-	return resumeWith(cfg, cfg.ResumeCommand, "resume_command", resumeCommandPair, prompt)
+	return resumeWith(cfg, cfg.ResumeCommand, "resume_command", resumeCommandPair, prompt, name)
 }
 
 // sessionResumeKey and sessionResumePair are how the prompt and length checks
@@ -1062,16 +1094,21 @@ const (
 //
 // --fresh ignores the record, as it ignores resume_command: a new session is
 // what was asked for, and the agent's own SessionStart then records that one.
-func resumeWindow(cfg *config.Config, prompt string, fresh bool, name string) (windowCommand, error) {
-	id, ok := recordedSession(cfg, name)
+//
+// record is the name the window's conversation is recorded under — `base` or
+// the scratch name — and agent the name its agent answers to, which are two
+// different things for the base window: its record is `base`, and its agent is
+// the repository's own name.
+func resumeWindow(cfg *config.Config, prompt string, fresh bool, record, agent string) (windowCommand, error) {
+	id, ok := recordedSession(cfg, record)
 	if !ok || fresh {
-		return resumeCommand(cfg, prompt, fresh)
+		return resumeCommand(cfg, prompt, fresh, agent)
 	}
-	// The id goes in before the prompt, so that a prompt which happens to
-	// contain the placeholder's spelling is never taken for it. The id cannot
-	// contain the prompt's — validSessionID admits no braces.
+	// The id goes in before the prompt and the name, so that either one
+	// happening to contain the placeholder's spelling is never taken for it.
+	// The id cannot contain theirs — validSessionID admits no braces.
 	template := strings.ReplaceAll(cfg.SessionResumeCommand(), sessionPlaceholder, shellinit.Quote(id))
-	return resumeWith(cfg, template, sessionResumeKey, sessionResumePair, prompt)
+	return resumeWith(cfg, template, sessionResumeKey, sessionResumePair, prompt, agent)
 }
 
 // sessionPlaceholder is where an agent module's resume-by-id template takes the
@@ -1080,8 +1117,8 @@ const sessionPlaceholder = "{session}"
 
 // resumeWith is the rest of resumeCommand, for whichever resume template the
 // window is to run, key and pair naming it in the refusals.
-func resumeWith(cfg *config.Config, template, key, pair, prompt string) (windowCommand, error) {
-	resume, err := fillPrompt(template, key, prompt)
+func resumeWith(cfg *config.Config, template, key, pair, prompt, name string) (windowCommand, error) {
+	resume, err := fillPrompt(template, key, prompt, name)
 	if err != nil {
 		return windowCommand{}, err
 	}
@@ -1090,15 +1127,15 @@ func resumeWith(cfg *config.Config, template, key, pair, prompt string) (windowC
 	// repository that asked for one keeps resume_command alone, and a --prompt is
 	// not refused on account of a template that could never have read it.
 	if strings.TrimSpace(cfg.Command) == "" {
-		return windowCommand{Command: resume}, nil
+		return windowCommand{Command: resume, Agent: namedAs(name, template)}, nil
 	}
-	command, err := fillPrompt(cfg.Command, "command", prompt)
+	command, err := fillPrompt(cfg.Command, "command", prompt, name)
 	if err != nil {
 		return windowCommand{}, err
 	}
 	// Each half fits, which is not the question tmux asks: the window is handed
 	// one script holding both, with the prompt in each of them.
-	run := windowCommand{Command: resume, Fresh: command}
+	run := windowCommand{Command: resume, Fresh: command, Agent: namedAs(name, template, cfg.Command)}
 	if err := checkCommandFits(run.script(), pair, prompt); err != nil {
 		return windowCommand{}, err
 	}
@@ -1360,12 +1397,13 @@ func cmdBase(env *Env, args []string) error {
 	}
 	// No --prompt here — base reuses its one window nearly every time, which is
 	// exactly when a prompt would go undelivered — but the placeholder still has
-	// to come out of the template on the first open of the day.
-	command, err := fillPrompt(cfg.Command, "command", "")
+	// to come out of the template on the first open of the day, and the agent
+	// still answers to the repository's name.
+	run, err := launch(cfg, "", baseAgentName(cfg))
 	if err != nil {
 		return err
 	}
-	_, err = openBaseWindow(env, cfg, windowCommand{Command: command}, arrivalFor(cfg, named))
+	_, err = openBaseWindow(env, cfg, run, arrivalFor(cfg, named))
 	return err
 }
 

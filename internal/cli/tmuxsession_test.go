@@ -509,6 +509,7 @@ type windowRow struct {
 	WindowID            string `json:"window_id"`
 	WindowIsCurrent     bool   `json:"window_is_current"`
 	WindowLastInSession bool   `json:"window_last_in_session"`
+	AgentName           string `json:"agent_name"`
 }
 
 func windowRows(t *testing.T, f *fixture) map[string]windowRow {

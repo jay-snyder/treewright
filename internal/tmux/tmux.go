@@ -57,6 +57,7 @@ type Spec struct {
 	Slug    string // names the worktree, when this is one
 	Branch  string // the branch that worktree is on
 	Scratch string // names the scratch window, when this is one
+	Agent   string // the name its agent was launched under, when it was given one
 }
 
 // MaxCommandLength is the longest command treewright will give a window, in
@@ -111,6 +112,19 @@ type Window struct {
 	// other window. A window carrying one is identified by it rather than by
 	// Worktree, which then says only where the window stands.
 	Scratch string
+
+	// Agent is the name the agent in this window was launched under — its
+	// address for messaging of its own — and empty when treewright gave it none:
+	// a command template with no {name} in it, a window opened before names were
+	// given, or one whose agent has died and left the window held open.
+	//
+	// Read off the window rather than worked out from the config, because what
+	// is being asked is what *this* agent answers to, and the config only says
+	// what the next one will. The two part company for as long as a window
+	// opened under an older treewright, or an older command, stays open — and
+	// an address that names nobody is worse than none, since the fallback for
+	// none is typing at the window, which reaches the agent either way.
+	Agent string
 
 	// Repo is the config the window was opened for, empty for a window treewright
 	// did not open. A scratch name means something only within one repository —
@@ -224,10 +238,11 @@ func ServerRunning() bool {
 // The user options treewright records on every window it opens. Windows treewright did
 // not open have none, and read as empty.
 //
-// Four are read back, and they ride in paneFormat below: the worktree and the
+// Five are read back, and they ride in paneFormat below: the worktree and the
 // scratch name, which between them are what identifies a window; the repository,
-// which scopes a scratch name; and the agent state, which is what the agent
-// running in it last said it was doing. The rest are written for the user's own
+// which scopes a scratch name; the agent state, which is what the agent running
+// in it last said it was doing; and the agent's name, which is how another agent
+// reaches it without typing at its pane. The rest are written for the user's own
 // tmux.conf, where "#{@treewright_slug}" in a status line costs nothing to render
 // and the alternative is a shell-out to git on every status interval.
 //
@@ -236,9 +251,10 @@ func ServerRunning() bool {
 // window closing is the option evaporating, so a crashed agent can never leave a
 // stale "working" behind and there is nothing to garbage-collect. It is written
 // by `treewright signal`, which the agent's own hooks run.
-// AgentStateOption and WaitingMarker are exported for the one consumer outside
-// this package: the held-open wrapper in internal/cli, which clears both from
-// shell when a window outlives the agent that was signaling in it.
+// AgentStateOption, AgentNameOption and WaitingMarker are exported for the one
+// consumer outside this package: the held-open wrapper in internal/cli, which
+// clears all three from shell when a window outlives the agent that was
+// signaling in it.
 const (
 	worktreeOption = "@treewright_worktree"
 	repoOption     = "@treewright_repo"
@@ -249,6 +265,11 @@ const (
 	// AgentStateOption holds what the agent in a window last signaled.
 	AgentStateOption = "@treewright_agent_state"
 
+	// AgentNameOption holds the name the agent in a window was launched under.
+	// Written once, when the window is opened, and never by the agent — the
+	// name is treewright's to give, where the state is the agent's to report.
+	AgentNameOption = "@treewright_agent_name"
+
 	// WaitingMarker is prefixed to a window's name while its agent is waiting on
 	// the user, so the one state that needs to reach you across the room shows in
 	// any status line with nothing added to tmux.conf. Windows returns names with
@@ -258,15 +279,15 @@ const (
 )
 
 // paneFormat lists a pane as window name, window id, session, the repository
-// and worktree its window was opened for, its scratch name, the agent state
-// recorded on it, how many windows its session holds, then path.
+// and worktree its window was opened for, its scratch name, the agent state and
+// the agent name recorded on it, how many windows its session holds, then path.
 //
 // The fields are tab-separated, and exactly two of them are free text tmux
 // cannot be told to escape: the window name, which rename-window lets a user
 // put anything into — a tab included — and the pane's path. So the two bracket
 // the listing, one at each end, and between them sit only fields that cannot
 // hold a tab: the id and the count are tmux's own spellings of a number, the
-// state is a word from signal's closed vocabulary, and the three stamps are
+// state is a word from signal's closed vocabulary, and the four stamps are
 // values stamp declines to write when they hold a tab. A fixed left-to-right
 // split used to put the name in the middle, where one tab shifted the worktree,
 // the state and the path each a field over; splitPaneLine now anchors on the
@@ -276,12 +297,12 @@ const (
 // The window count is here rather than asked per window because this listing is
 // gathered once for a whole table. See Window.SessionWindows.
 const paneFormat = "#{window_name}\t#{window_id}\t#{session_name}\t#{" + repoOption + "}\t#{" + worktreeOption + "}\t#{" +
-	scratchOption + "}\t#{" + AgentStateOption + "}\t#{session_windows}\t#{pane_current_path}"
+	scratchOption + "}\t#{" + AgentStateOption + "}\t#{" + AgentNameOption + "}\t#{session_windows}\t#{pane_current_path}"
 
 // fixedFields is how many fields paneFormat puts between the window name and
 // the path, the window id first and the window count last. splitPaneLine
 // anchors on those two, so the count is this many fields less one after the id.
-const fixedFields = 7
+const fixedFields = 8
 
 // Windows maps each pane's working directory to the window holding it, across
 // every session on the server. It is what stops `resume` from opening a second
@@ -469,6 +490,7 @@ func splitPaneLine(line string) (w Window, path string, ok bool) {
 			Worktree:       fields[idx+3],
 			Scratch:        fields[idx+4],
 			State:          fields[idx+5],
+			Agent:          fields[idx+6],
 			SessionWindows: windows,
 		}, strings.Join(fields[idx+fixedFields:], "\t"), true
 	}
@@ -560,8 +582,12 @@ func newWindow(s Spec, args []string) (Window, error) {
 	stamp(id, repoOption, s.Repo)
 	stamp(id, slugOption, s.Slug)
 	stamp(id, branchOption, s.Branch)
+	// Best-effort like the rest. A window missing it reads as an agent with no
+	// name, which is answered by typing at its pane — the way every agent was
+	// reached before names were given, and still a way that reaches it.
+	stamp(id, AgentNameOption, s.Agent)
 
-	return Window{ID: id, Session: s.Session, Name: s.Name, Worktree: s.Dir, Scratch: s.Scratch, Repo: s.Repo}, nil
+	return Window{ID: id, Session: s.Session, Name: s.Name, Worktree: s.Dir, Scratch: s.Scratch, Repo: s.Repo, Agent: s.Agent}, nil
 }
 
 // Stamped reports that treewright opened this window. It gates the things

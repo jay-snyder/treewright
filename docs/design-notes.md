@@ -272,15 +272,19 @@ the name would be a second session answering to one word — and the first time
 its agent started, its record would overwrite the one it collided with.
 
 **Resuming by id is the module's, not a setting.** The id form is
-`claude --resume {session} {prompt}`, a field on the claude module rather than a
-third config key: `command` and `resume_command` are settings people override
-for their own reasons, and a key they had to know about to keep resume exact
-would be a trap. It applies while `resume_command` is the module's own, compared
+`claude --resume {session} --name {name} {prompt}`, a field on the claude
+module rather than a third config key: `command` and `resume_command` are
+settings people override for their own reasons, and a key they had to know
+about to keep resume exact would be a trap. It applies while `resume_command` is the module's own, compared
 by value. A config that wrote its own — claude with a model pinned, say — has
 flags in it the module's template knows nothing about, and the right
 conversation resumed without them is a different agent from the one the file
 asks for; so that config keeps its own command, keeps no records, and resumes
-the base window by directory as before. With no `agent` key there is no module
+the base window by directory as before. A default the module has since moved on
+from still counts as its own — a config that spelled out
+`claude --continue {prompt}` before agents had names chose nothing the module
+lacks — see "A config that spelled out the old default" in
+[`agents.md`](agents.md). With no `agent` key there is no module
 to ask, for the reason a module is never guessed from `command`. A recorded id
 with nothing behind it — a transcript cleaned up, a session that never said
 anything — makes `--resume` exit 1 within a second, which is the fast failure
@@ -301,11 +305,12 @@ flag.
 ### Coming back to a scratch session by its name
 
 **`scratch --reuse <name>` reaches the scratch session already answering to the
-name instead of refusing it.** An open window has the prompt typed at its agent
-and is brought forward. One whose window a restart took is reopened on its
-conversation. With no session by that name, one is opened as `scratch` opens
-one. The name becomes a handle a caller keeps, rather than one it is handed
-once.
+name instead of refusing it.** An open window is brought forward, and its agent
+is handed the prompt only if it has no name to be messaged at; otherwise the
+prompt is reported undelivered with that name. One whose window a restart took
+is reopened on its conversation. With no session by that name, one is opened as
+`scratch` opens one. The name becomes a handle a caller keeps, rather than one
+it is handed once.
 
 The caller that asked for it wanted one agent per pull request review —
 `review-42`, opened on `/review-pr 42` — with a re-requested review landing in
@@ -338,8 +343,23 @@ order also covers a slug that collides with a scratch name because a worktree
 was made by hand, which the lookups would otherwise settle in the scratch
 session's favor.
 
-**An open window is typed at through `send`'s own path** (`deliver`, in
-`send.go`), not a copy of it. So all of `send`'s protections come along: the
+**An open window whose agent has a name is not typed at.** Where the agent
+was launched under a name and its module names a tool to message it with, the
+prompt is reported undelivered — the way `resume` reports one aimed at a window
+already open — with the name and the tool, and the window is brought forward.
+This used to type the prompt like any other open window, and that is the one
+route that can land as the answer to whatever the agent's screen is asking;
+`send` shows the pane first to make that less likely, and the popup that asked
+for `--reuse` discards stderr, so nobody was looking. The caller is usually an
+agent that can send the message itself, safely, and treewright cannot send it
+on the caller's behalf — a session's messaging is that session's own. The
+slash command the first caller opened its reviews on is the case that makes
+this concrete: `/review-pr 42` runs as the prompt a new session starts on, and
+in a message it is text. See "Agents reaching each other" in
+[`agents.md`](agents.md).
+
+**An open window whose agent has no name is typed at through `send`'s own
+path** (`deliver`, in `send.go`), not a copy of it. So all of `send`'s protections come along: the
 pane shown before anything is typed, the refusal of the caller's own window,
 and the refusal of a window held open after its agent died. A tmux popup has
 no `$TMUX_PANE`, so a caller running in one has no window of its own to be
@@ -351,8 +371,9 @@ agent's window is how its output gets read.
 caller passes `--reuse` precisely because it does not know whether a window is
 open. A call that worked whenever none was, and failed the day one was, would
 be the dependence on unseen state the flag exists to remove. So a prompt with a
-line break in it is refused in all three cases, although only the open window
-types it, and Enter only submits there. `--prompt-file` is the way through,
+line break in it is refused in all three cases, although only an open window
+whose agent has no name types it, and Enter only submits there — whether that
+agent has a name being one more thing the caller cannot see. `--prompt-file` is the way through,
 since what it builds is one line. `command` is filled in all three as well, so
 a prompt the repository's template has no `{prompt}` for, or one too long for
 tmux, is refused the same way whether or not the template would have run.
@@ -375,16 +396,19 @@ would leave the conversation that was asked for behind.
 
 **The client follows `scratch`'s rule**, `arrivalFor`: brought to the window,
 unless `--repo` names another repository. **stdout stays empty**, and under
-`--reuse` one line on stderr says which case it met — `opened scratch session`,
-`send`'s own pane and `sent to` report, `scratch window … is already open`, or
-`reopened scratch session … on its recorded conversation`. A plain `scratch`
-says nothing new, since it can only have done the first.
+`--reuse` stderr says which case it met — `opened scratch session`, `prompt not
+delivered` with the agent's name, `send`'s own pane and `sent to` report,
+`scratch window … is already open`, or `reopened scratch session … on its
+recorded conversation`. A plain `scratch` says nothing new, since it can only
+have done the first.
 
-What it does not fix is the hazard `send` already has. The pane is shown so the
-sender can see an agent sitting on a question before typing an answer into it,
-and a caller that discards stderr — the popup that asked for this does — never
-sees it. `waiting` is the state `send` exists to reach, so refusing it here
-would refuse the case the feature is most often for.
+What it does not fix, for an agent with no name, is the hazard `send` already
+has. The pane is shown so the sender can see an agent sitting on a question
+before typing an answer into it, and a caller that discards stderr — the popup
+that asked for this does — never sees it. `waiting` is the state `send` exists
+to reach, so refusing it here would refuse the case the feature is most often
+for. An agent with a name is out of that hazard's reach, which is the reason it
+is no longer typed at.
 
 ## Putting a session back after a restart
 

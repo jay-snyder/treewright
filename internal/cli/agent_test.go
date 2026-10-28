@@ -317,7 +317,7 @@ func TestThePluginTeachesTheCLIThatExists(t *testing.T) {
 	for _, field := range reflect.VisibleFields(reflect.TypeFor[worktreeJSON]()) {
 		tags[field.Tag.Get("json")] = true
 	}
-	for _, field := range []string{"base", "scratch", "status", "agent_state", "ahead", "behind"} {
+	for _, field := range []string{"base", "scratch", "status", "agent_state", "agent_name", "ahead", "behind"} {
 		if !strings.Contains(plugin, "`"+field+"`") && !strings.Contains(plugin, `"`+field+`"`) {
 			t.Errorf("the plugin no longer explains the %s field", field)
 		}
@@ -407,7 +407,7 @@ func TestConfigReportsWhatTheAgentKeySupplies(t *testing.T) {
 	if carried.from != "agent" || carried.value != want {
 		t.Errorf("carry_files = %+v, want %q from the agent\n%s", carried, want, out)
 	}
-	if got := configRows(t, out)["command"]; got.from != "agent" || got.value != "claude {prompt}" {
+	if got := configRows(t, out)["command"]; got.from != "agent" || got.value != "claude --name {name} {prompt}" {
 		t.Errorf("command = %+v, want the agent's default marked as the agent's", got)
 	}
 

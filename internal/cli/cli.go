@@ -191,10 +191,16 @@ no tickets sets ticket_pattern = "" and always gets the second.
 
 --prompt hands the agent its first instruction, so the window opens already
 working rather than waiting to be told what the work is. The text lands where
-the command template says with {prompt} — the default is "claude {prompt}" —
-shell-quoted as one argument. Without the flag the placeholder simply
-disappears; with the flag and no placeholder to take it, the error says where
-to write one.
+the command template says with {prompt} — the default is
+"claude --name {name} {prompt}" — shell-quoted as one argument. Without the
+flag the placeholder simply disappears; with the flag and no placeholder to
+take it, the error says where to write one.
+
+{name} is the name the window's agent answers to: the repository's config name,
+a hyphen, and the slug — cibo-eng-142 — which an agent with messaging of its
+own can reach it by. "treewright ls --json" reports it as agent_name. Because
+those names are shared by every registered repository, a slug whose name
+another repository's agent already answers to is refused.
 
 --repo names the repository to make the worktree in, by the name its config is
 registered under, instead of the one you are standing in. Everything follows
@@ -305,8 +311,9 @@ checkout too.
 placeholder of whichever command runs — so it has to fit both templates, since
 either may be the one that ends up reading it. It only reaches an agent the
 resume actually starts: a window that was already open is switched to as usual,
-with a warning that the prompt went undelivered — and "treewright send" is what
-reaches the agent standing in it.
+with a warning that the prompt went undelivered and how to reach the agent
+standing in it — by its own messaging, at the name it answers to, where it has
+one, and by "treewright send" where it does not.
 
 --repo resumes a worktree of another repository, named by its config. As with
 "new", your client stays where it is when the repository is not the one you are
@@ -331,6 +338,13 @@ what that buys and what it leaves you to clean up.`,
 			long: `Types a message into the window open on a worktree and presses Enter,
 which is how an agent already running gets its next instruction. --prompt only
 reaches an agent a resume actually starts; this reaches the one standing there.
+
+It is for a person, and for an agent with no messaging of its own. An agent that
+can message another session by name should use that instead — each agent's
+name is the agent_name "treewright ls --json" reports — since a message sent
+that way arrives between the receiver's own steps rather than as keystrokes
+landing on whatever its screen is showing. Everything below is what typing at a
+screen takes to be safe, and it still cannot be made as safe as that.
 
 An unambiguous prefix of a slug is enough, "base" reaches the main checkout's
 window, and a scratch window's name reaches the agent in it. There has to be a
@@ -416,7 +430,10 @@ command, and there is no worktree to clean up afterwards.
 
 You name it, and the name is how everything else reaches it: "treewright send
 <name>" types at its agent, "treewright close <name>" closes it, and "treewright
-resume <name>" switches to it. ls lists it under the base row, with the status
+resume <name>" switches to it. Its agent answers to the repository's config
+name, a hyphen and this one — cibo-review-42 — for an agent with messaging of
+its own, and a name another registered repository's agent already answers to is
+refused. ls lists it under the base row, with the status
 "scratch". The name follows a slug's rules, and one already answering for
 something — a worktree, a scratch session, the base checkout — is refused,
 since those commands take any of them and could not tell two apart.
@@ -434,8 +451,11 @@ window — after which the name is free again. This needs an agent module that
 resumes by id, as "treewright help resume" says.
 
 --reuse makes the name a handle to come back to: a scratch session already
-answering to it is reached instead of refused. An open one has the prompt typed
-at its agent, as "treewright send" types it, and is switched to. One lost to a
+answering to it is reached instead of refused. An open one is switched to, and
+whether its agent gets the prompt depends on whether it has a name to be
+messaged at: if it does, nothing is typed, and the prompt is reported
+undelivered with that name, to be sent by the agent's own messaging; if it does
+not, the prompt is typed at it, as "treewright send" types it. One lost to a
 restart is reopened on its conversation, under the [window-name] given this
 time. With no session by that name, one is opened as usual. A worktree's slug
 and the base checkout's names are still refused, and nothing is matched by
@@ -587,8 +607,10 @@ agent is standing in is refused, and everything else is allowed through.
 This is for an agent's own hooks to run rather than for typing. The claude
 plugin wires it, and the refusal it prints is what the agent reads: the work in
 a worktree belongs to the agent in that worktree's window, so the way on is to
-hand the instructions over with "treewright resume <slug> --prompt-file" or
-"treewright send <slug>", not to do the work from here.
+hand the instructions over with "treewright resume <slug> --prompt-file", or in
+one line to the agent standing there — by its own messaging where it answers to
+a name, and by "treewright send <slug>" where it does not — not to do the work
+from here.
 
 Reads of another worktree are never refused — reviewing what another agent
 wrote is legitimate, and has to stay cheap. Neither is anything treewright's

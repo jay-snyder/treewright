@@ -341,11 +341,13 @@ func TestAgentKeyIsADefaultsBundle(t *testing.T) {
 // TestResumingByIDFollowsTheModulesResumeCommand: the id form is the module's
 // other spelling of its own resume, so it applies exactly while resume_command
 // is the module's — however the file came to say so — and a config that wrote
-// its own keeps its own, flags and all.
+// its own keeps its own, flags and all. A default the module has since moved on
+// from is still the module's: the file chose nothing, the module changed.
 func TestResumingByIDFollowsTheModulesResumeCommand(t *testing.T) {
 	dir := registry(t, map[string]string{
 		"bare":      "main_dir = \"/tmp/repo\"\nagent = \"claude\"\n",
-		"spelled":   "main_dir = \"/tmp/repo\"\nagent = \"claude\"\nresume_command = \"claude --continue {prompt}\"\n",
+		"spelled":   "main_dir = \"/tmp/repo\"\nagent = \"claude\"\nresume_command = \"claude --continue --name {name} {prompt}\"\n",
+		"former":    "main_dir = \"/tmp/repo\"\nagent = \"claude\"\nresume_command = \"claude --continue {prompt}\"\n",
 		"command":   "main_dir = \"/tmp/repo\"\nagent = \"claude\"\ncommand = \"claude --model other {prompt}\"\n",
 		"own":       "main_dir = \"/tmp/repo\"\nagent = \"claude\"\nresume_command = \"claude --continue --model other {prompt}\"\n",
 		"no-module": "main_dir = \"/tmp/repo\"\n",
@@ -353,6 +355,8 @@ func TestResumingByIDFollowsTheModulesResumeCommand(t *testing.T) {
 	for name, want := range map[string]bool{
 		"bare":    true,
 		"spelled": true,
+		// Written before agents had names, and the module's default then.
+		"former": true,
 		// command is not what resuming runs, so it has no say over the id form.
 		"command": true,
 		"own":     false,
@@ -370,6 +374,32 @@ func TestResumingByIDFollowsTheModulesResumeCommand(t *testing.T) {
 		}
 		if quit := c.SessionQuitReason(); (quit != "") != want {
 			t.Errorf("%s: SessionQuitReason() = %q, want one: %v — a record must never be written by a rule that cannot also end it", name, quit, want)
+		}
+	}
+}
+
+// TestTheMessageToolComesFromTheAgentKey: what an agent is told to message
+// another with is the module's fact, so it is there only when a module is
+// named — never read off a command that happens to start with claude, which
+// the global default does.
+func TestTheMessageToolComesFromTheAgentKey(t *testing.T) {
+	dir := registry(t, map[string]string{
+		"module":    "main_dir = \"/tmp/repo\"\nagent = \"claude\"\n",
+		"own":       "main_dir = \"/tmp/repo\"\nagent = \"claude\"\ncommand = \"claude --model other {prompt}\"\n",
+		"no-module": "main_dir = \"/tmp/repo\"\n",
+	})
+	for name, want := range map[string]string{
+		"module": "SendMessage",
+		// A command of its own is still claude's: the key says which agent runs.
+		"own":       "SendMessage",
+		"no-module": "",
+	} {
+		c, err := Load(filepath.Join(dir, name+".toml"))
+		if err != nil {
+			t.Fatalf("Load(%s): %v", name, err)
+		}
+		if got := c.MessageTool(); got != want {
+			t.Errorf("%s: MessageTool() = %q, want %q", name, got, want)
 		}
 	}
 }

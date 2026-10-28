@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/jay-snyder/treewright/internal/config"
 	"github.com/jay-snyder/treewright/internal/shellinit"
 )
 
@@ -17,6 +18,10 @@ import (
 
 // promptPlaceholder is where a command template takes the prompt's text.
 const promptPlaceholder = "{prompt}"
+
+// namePlaceholder is where a command template takes the name its agent is to
+// answer to. See names.go for what the name is and why treewright gives one.
+const namePlaceholder = "{name}"
 
 // How the two prompt flags are spelled, parsed and documented, in one place.
 //
@@ -104,12 +109,15 @@ func resolvePrompt(cmd, prompt, promptFile string) (string, error) {
 	return fmt.Sprintf(promptPointer, path), nil
 }
 
-// fillPrompt resolves a command template against the prompt the user gave, and
-// refuses one the result is too long for tmux to run.
+// fillPrompt resolves a command template against the prompt the user gave and
+// the name its agent is to answer to, and refuses one the result is too long
+// for tmux to run.
 //
 // key names the config setting the template came from — command or
 // resume_command — since that is the line either error should send the reader
-// to.
+// to. name is never empty: every window treewright opens has an agent name to
+// give, and a {name} filled with nothing would leave the template's own flag
+// in front of whatever came next — `--name 'the prompt'`.
 //
 // Both refusals belong here, at the one point every caller passes through
 // before it has created anything. A prompt the template cannot take and a
@@ -120,8 +128,8 @@ func resolvePrompt(cmd, prompt, promptFile string) (string, error) {
 // The length is measured against the window this command would be the whole of.
 // `resume` runs two of them in one window and measures the pair itself, since
 // neither half can see the other from here.
-func fillPrompt(command, key, prompt string) (string, error) {
-	filled, err := fillTemplate(command, key, prompt)
+func fillPrompt(command, key, prompt, name string) (string, error) {
+	filled, err := fillTemplate(command, key, prompt, name)
 	if err != nil {
 		return "", err
 	}
@@ -129,6 +137,20 @@ func fillPrompt(command, key, prompt string) (string, error) {
 		return "", err
 	}
 	return filled, nil
+}
+
+// launch is what a window runs to start its agent fresh: command, filled with
+// the prompt and with the name the agent is to answer to, and recorded as
+// answering to that name only when command gave it one.
+//
+// `new`, `move`, `scratch` and `base` all start with this, and resume's --fresh
+// is the same thing asked for deliberately.
+func launch(cfg *config.Config, prompt, name string) (windowCommand, error) {
+	command, err := fillPrompt(cfg.Command, "command", prompt, name)
+	if err != nil {
+		return windowCommand{}, err
+	}
+	return windowCommand{Command: command, Agent: namedAs(name, cfg.Command)}, nil
 }
 
 // fillTemplate substitutes the prompt into the template. Three cases, each
@@ -152,7 +174,19 @@ func fillPrompt(command, key, prompt string) (string, error) {
 // appended. Appending happens to be right for claude and is still a guess
 // about an arbitrary agent's CLI; the error names the setting and shows where
 // the text should go, which turns the guess into the user's own line.
-func fillTemplate(command, key, prompt string) (string, error) {
+//
+// The name is filled in the same pass, shell-quoted the same way, and a
+// template without {name} is simply a template whose agent is given none —
+// never an error, since naming an agent is something its CLI has to support,
+// and the template is where a repository says whether its agent does.
+//
+// One pass rather than one replacement after the other, because each value is
+// text the user chose and neither may be read as the other's placeholder. A
+// prompt that mentions {name} — this file's own documentation, pasted in as a
+// brief — would otherwise have the agent's name written into the middle of
+// it, and a slug may hold braces, so a name could carry a {prompt} for the
+// second replacement to find. strings.Replacer never rescans what it wrote.
+func fillTemplate(command, key, prompt, name string) (string, error) {
 	// A blank template is the setting that opens a window on a shell, so there
 	// is no agent standing there to be handed anything. It gets its own
 	// refusal because the general one below would tell the reader to write a
@@ -162,9 +196,10 @@ func fillTemplate(command, key, prompt string) (string, error) {
 		return "", fmt.Errorf("%s is blank, so the window opens a shell and there is no agent to hand a prompt to\nset %s to what should run there, with %s where the text belongs",
 			key, key, promptPlaceholder)
 	}
+	named := []string{namePlaceholder, shellinit.Quote(name)}
 	if !strings.Contains(command, promptPlaceholder) {
 		if prompt == "" {
-			return command, nil
+			return strings.NewReplacer(named...).Replace(command), nil
 		}
 		return "", fmt.Errorf("%s has no %s placeholder to take the prompt\nwrite one where the text belongs, e.g. %s = \"claude %s\"",
 			key, promptPlaceholder, key, promptPlaceholder)
@@ -173,11 +208,15 @@ func fillTemplate(command, key, prompt string) (string, error) {
 		// The adjacent space goes with the placeholder, so "claude {prompt}"
 		// becomes "claude" rather than "claude " — targeted, rather than a
 		// whitespace collapse that would reach inside the template's own
-		// quoted arguments.
-		command = strings.ReplaceAll(command, " "+promptPlaceholder, "")
-		command = strings.ReplaceAll(command, promptPlaceholder+" ", "")
-		command = strings.ReplaceAll(command, promptPlaceholder, "")
-		return strings.TrimSpace(command), nil
+		// quoted arguments. The spaced forms come first: a Replacer tries its
+		// pairs in the order given, so the space is taken with the
+		// placeholder wherever there is one to take.
+		removed := strings.NewReplacer(append([]string{
+			" " + promptPlaceholder, "",
+			promptPlaceholder + " ", "",
+			promptPlaceholder, "",
+		}, named...)...)
+		return strings.TrimSpace(removed.Replace(command)), nil
 	}
-	return strings.ReplaceAll(command, promptPlaceholder, shellinit.Quote(prompt)), nil
+	return strings.NewReplacer(append([]string{promptPlaceholder, shellinit.Quote(prompt)}, named...)...).Replace(command), nil
 }

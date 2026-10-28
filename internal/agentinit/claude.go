@@ -83,6 +83,20 @@ import _ "embed"
 // fresh or resumed. The first two must agree with the config package's
 // defaults, which a test holds them to.
 //
+// {name} is the session's name, and `--name` is what sets it: the address
+// another session's SendMessage reaches it at. Without the flag claude names a
+// session after its directory plus two random characters, which nobody can
+// predict, so treewright names every agent it launches and records the name on
+// the window. All three templates carry it, which is not redundancy: a resumed
+// session keeps the name it had, but one started before treewright gave names
+// had a random one, and resuming it is the moment it can be given a real one.
+// What claude does with names was read off the binary (2.1.312): it keeps them
+// exactly as given — case, dots and length included — an exact name beats a
+// prefix of a longer one, and two live sessions under one name are not refused
+// but resolved to whichever the sender spoke to last. That last is why core
+// refuses to give one name twice. See "Agents reaching each other" in
+// docs/agents.md.
+//
 // What claude reports at the two ends of a session was read off the binary
 // (2.1.283) rather than taken from its documentation, which is silent on the
 // half that matters. `/clear` ends the session with reason `clear` and then
@@ -98,9 +112,12 @@ import _ "embed"
 // failure resume's fallback runs `command` behind.
 var claude = Agent{
 	Name:                 "claude",
-	Command:              "claude {prompt}",
-	ResumeCommand:        "claude --continue {prompt}",
-	SessionResumeCommand: "claude --resume {session} {prompt}",
+	Command:              "claude --name {name} {prompt}",
+	ResumeCommand:        "claude --continue --name {name} {prompt}",
+	SessionResumeCommand: "claude --resume {session} --name {name} {prompt}",
+	// The default before agents were named. See FormerResumeCommands.
+	FormerResumeCommands: []string{"claude --continue {prompt}"},
+	MessageTool:          "SendMessage",
 	QuitReason:           "prompt_input_exit",
 	ProjectSettings:      ".claude/settings.local.json",
 	UserDir:              "~/.claude",

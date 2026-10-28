@@ -24,6 +24,16 @@ import (
 // also missed everything internal/tmux already knows: TREEWRIGHT_TMUX_LABEL,
 // exact() session targets, and the @treewright_worktree stamp that says which
 // window a worktree actually owns.
+//
+// It is for a person, and for an agent with no messaging of its own. An agent
+// that can message another session by name should do that instead, and every
+// message here that used to name `send` names that route where it exists: a
+// message delivered that way arrives between the receiver's tool calls, marked
+// as another session's, and can never be read as the answer to a question on
+// its screen — which is the hazard every rule below exists to make less likely,
+// and none of them can rule out. treewright names each agent it launches so
+// that route has an address; see names.go. `send` keeps everything it had,
+// because typing at a window reaches whatever is in it, named or not.
 
 // capturedLines is how much of the receiving pane is shown before a message is
 // sent. Twenty is what the guide's `tail -20` showed and is about a third of a
@@ -87,10 +97,7 @@ func cmdSend(env *Env, args []string) error {
 	// A scratch window comes with its window, since the one standing for its
 	// directory is the base window. Everything below is by window id, so it
 	// holds for either — the refusal of the caller's own window included.
-	window := target.Window
-	if !target.Scratch {
-		window = tmux.Windows(sessionFor(cfg))[target.Dir]
-	}
+	window := windowOf(cfg, target)
 	if window.ID == "" {
 		return fmt.Errorf("no window is open on %s in %s, so there is no agent to reach%s",
 			name, cfg.Name, asFields(field("open one with", hint(env, cfg, "resume", name))))

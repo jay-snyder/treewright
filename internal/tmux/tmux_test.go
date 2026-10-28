@@ -38,20 +38,20 @@ func signaled(id, session, name, worktree, state, dir string) string {
 
 // inSession renders a pane whose session holds a given number of windows.
 func inSession(windows int, id, session, name, worktree, state, dir string) string {
-	return listed(windows, id, session, name, "", worktree, "", state, dir)
+	return listed(windows, id, session, name, "", worktree, "", state, "", dir)
 }
 
 // scratchPane renders a pane of a scratch window: stamped with the checkout it
 // was opened on, as every window treewright opens is, and with the repository
 // and the name it answers to.
 func scratchPane(id, session, name, repo, scratch, worktree, dir string) string {
-	return listed(2, id, session, name, repo, worktree, scratch, "", dir)
+	return listed(2, id, session, name, repo, worktree, scratch, "", "", dir)
 }
 
 // listed renders one line in paneFormat's own order: the two free-text fields at
 // the ends, the fixed ones between.
-func listed(windows int, id, session, name, repo, worktree, scratch, state, dir string) string {
-	return strings.Join([]string{name, id, session, repo, worktree, scratch, state, strconv.Itoa(windows), dir}, "\t")
+func listed(windows int, id, session, name, repo, worktree, scratch, state, agent, dir string) string {
+	return strings.Join([]string{name, id, session, repo, worktree, scratch, state, agent, strconv.Itoa(windows), dir}, "\t")
 }
 
 func TestParsePanes(t *testing.T) {
@@ -242,6 +242,21 @@ func TestParsePanes(t *testing.T) {
 			prefer: "myrepo",
 			want: map[string]Window{
 				"/wt/eng-1": {ID: "@2", Session: "myrepo", Name: "eng-1", State: "waiting", Worktree: "/wt/eng-1", SessionWindows: 2},
+			},
+		},
+		{
+			// The agent's name rides it too, beside the state and with the same
+			// width of fixed fields either side — so a window name with a tab in
+			// it still cannot push the name into the count, or the count into
+			// the path.
+			name:   "an agent name is read back",
+			out:    listed(2, "@2", "myrepo", "ENG\t1", "myrepo", "/wt/eng-1", "", "working", "myrepo-eng-1", "/wt/eng-1"),
+			prefer: "myrepo",
+			want: map[string]Window{
+				"/wt/eng-1": {
+					ID: "@2", Session: "myrepo", Name: "ENG\t1", Repo: "myrepo", Worktree: "/wt/eng-1",
+					State: "working", Agent: "myrepo-eng-1", SessionWindows: 2,
+				},
 			},
 		},
 		{

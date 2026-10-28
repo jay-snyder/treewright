@@ -386,8 +386,10 @@ is the default one.
 **The refusal is the point of the hook, not a side effect of it.** A refusal
 that only refuses teaches an agent to look for a spelling that gets past it;
 one that names the fix ends the turn the way it should have gone. So it names
-the worktree, what was refused, and the two commands that reach the agent
-standing there — through the same message writers as everything else, because
+the worktree, what was refused, and the two routes to the agent standing there
+— a brief through `resume --prompt-file`, and one line by the agent's own
+messaging or by `send`, as "Agents reaching each other" below decides — through
+the same message writers as everything else, because
 the agent reads it now and the maintainer reads it in the transcript later.
 
 **The window is deliberately not part of the test.** The guard asks where the
@@ -726,10 +728,193 @@ prose that survives into the guide.
 runs only in a window that was actually created, and `resume` mostly finds
 windows rather than creating them — so `openWindow` reports which of the two
 happened, and a prompt that landed on an already-open window gets a warning
-naming the recovery: paste it there. Silently dropping text the user typed
-once and cannot retype from memory would be the quiet failure everything else
-here refuses to be. `base` takes no `--prompt` at all, since reusing its one
-window is its normal case — the flag would warn more often than it worked.
+naming the recovery: the agent's own messaging and the name it answers to,
+where it has both, and `send` where it does not — see "Agents reaching each
+other" below. It used to say "paste it there", which is a person's answer, and
+the reader is as often the agent that ran the resume to hand work over.
+Silently dropping text the user typed once and cannot retype from memory would
+be the quiet failure everything else here refuses to be. `base` takes no
+`--prompt` at all, since reusing its one window is its normal case — the flag
+would warn more often than it worked.
+
+## Agents reaching each other
+
+`send` reaches the agent in another window by typing at its pane. Claude Code
+now carries messages between sessions itself — the `ListAgents` and
+`SendMessage` tools, on by default since 2.1.224 — and what it needs from
+treewright is the one thing a slug is not: an address. **Every agent treewright
+launches is given a name, and a Claude agent reaches another by that name
+rather than by typing at its window.** `send` stays, for a person and for an
+agent with no messaging of its own.
+
+### Why a message beats a keystroke
+
+All of this was observed on 2026-10-28 against claude 2.1.312, with throwaway
+named sessions on a scratch tmux server:
+
+- **A message never goes through the keyboard.** A busy session reads it
+  between tool calls, and an idle one starts a turn on it. It cannot answer a
+  question or a permission prompt — the hazard `send` prints the pane first to
+  make less likely, and cannot rule out.
+- **It arrives marked as another session's.** The receiver's
+  `UserPromptSubmit` payload holds
+  `<cross-session-message from="uds:…" from-name="<name>" from-mode="prompting">…`,
+  not text that reads as its user's own typing.
+- **A slash command in it does not run.** `/exit`, sent as a message, did not
+  end the receiver, which said it would not act on another session's `/exit`.
+- **It may span lines.** A three-line message arrived intact, where `send` has
+  to refuse a line break because Enter is what submits.
+- **The receiver can reply**, by sending to the `from` address.
+- **The state protocol needs nothing new.** `UserPromptSubmit` fires when a
+  message starts a turn in an idle session and `Stop` fires after it, so the
+  plugin's `signal working` and `signal done` keep `@treewright_agent_state`
+  right with no change.
+- **Permission modes.** A receiver in the default mode took a message from a
+  sender in auto mode without holding it, those two being one permission class.
+  Claude's documentation says a session in the other class — bypassing
+  permissions — has incoming messages held for its user's approval and dropped
+  after five minutes, and the sender is told when that happens.
+
+**treewright does not send, and cannot.** There is no `claude` subcommand for
+it, and each session's socket and token go to that session's own hooks and Bash
+commands and to nothing else. Reaching another session's would mean reading its
+token out of `~/.claude/sessions/`, which is the protection this is for. So the
+agent sends, with its own tool, and what treewright adds is the address and the
+sentence that names it. Speaking claude's socket protocol from Go stays out of
+scope for the same reason.
+
+### The name, and why it is that name
+
+A worktree's agent is `<config>-<slug>`, a scratch window's is
+`<config>-<scratch name>`, and the base window's is `<config>`: `cibo-eng-142`,
+`cibo-review-42`, `cibo`. What claude does with names decided the shape, and was
+read off the same sessions:
+
+- **`--name` sets the address** (`nameSource: "user"` in
+  `~/.claude/sessions/<pid>.json`). Without it claude names a session after its
+  directory plus two random characters, which nobody can predict, so nobody can
+  be handed it.
+- **Names are kept exactly as given.** Upper case, `.`, `_` and seventy-four
+  characters all came through. The receiver's display cut the long one at
+  about sixty-four with an ellipsis, but sending to the full name delivered. So
+  treewright can predict the address to the character.
+- **An exact name wins over a longer one it is a prefix of.** With `tw-probe`
+  and `tw-probe-one` both live, sending to `tw-probe` reached `tw-probe`; a bare
+  prefix that matches nothing exactly fails and lists the candidates. So `cibo`
+  is safe beside `cibo-eng-142`.
+- **Two live sessions under one name do not fail closed.** The send went to the
+  one the sender had already talked to, with only a note. So treewright must
+  never give one name twice — see the collision rule below.
+- **Names survive resuming.** `--resume <id>` without `--name` kept the old
+  name; `--resume <id> --name new` and `--continue --name new` both took the
+  new one.
+- **The SessionStart payload carries the name** as `session_title`, on
+  `startup` and `resume` alike. That is undocumented, and nothing depends on it.
+
+The scheme is also what claude would have derived from a worktree's directory,
+minus the random tail, and it matches the directory outright when the config is
+named after the checkout. Within one repository two names never collide, since
+slugs and scratch names already share one namespace there.
+
+**The value is core's and the flag is the module's.** `{name}` is a placeholder
+like `{prompt}`, filled in the same pass and shell-quoted the same way —
+one pass, so a prompt that mentions `{name}` and a slug that happens to hold
+braces can never fill each other. The claude module's three templates carry
+`--name {name}`, and so do the config defaults, which must agree with the
+module so that writing `agent = "claude"` never changes what runs. A template
+without `{name}` launches an agent with no name: that is how a repository whose
+agent cannot take one says so. Resuming is named too, not only starting: a
+resumed session keeps its name anyway, but one started before treewright gave
+names had a random one, and being resumed is when it gets a real one. A claude
+too old to know `--name` would exit on it at once, in every window; a repository
+stuck on one writes `command` and `resume_command` out without `{name}`.
+
+**The name is recorded on the window as it opens**, in `@treewright_agent_name`,
+and everything reads it from there — `ls --json`'s `agent_name`, the guard's
+refusal, the undelivered-prompt warning, `scratch --reuse`. The config only says
+what the *next* agent will be called. A window opened under an older
+treewright, or an older command, is running one called something else for as
+long as it stays open, and an address that names nobody is worse than none: the
+answer to none is `send`, which reaches the agent either way. It is recorded
+only when every template that may run in the window gave the name — a resume
+window runs `resume_command` with `command` behind it — and the held-open
+wrapper takes it off with the agent state, since a dead agent's name is an
+address nobody answers.
+
+### The collision is refused when the name is given out
+
+Hyphen-joined names collide across two registered repositories whenever one
+config is named after the other plus a hyphen. `api` with a worktree `v2-fix`
+and `api-v2` with a worktree `fix` are both `api-v2-fix`, and `api`'s worktree
+`v2` is `api-v2`, the name of the other repository's base window. Since
+duplicates do not fail closed, `new`, `move` and `scratch` refuse a name another
+registered repository's agent answers to — its base window, a worktree, or a
+scratch session, open or recorded — and say which, before anything is created.
+That is the rule scratch windows already follow ("a collision is refused when
+the name is given out"), one level up: refused once, while choosing another name
+costs nothing, rather than detected at every send.
+
+What is not checked, and why. Names claude derives itself always carry a random
+suffix, so they cannot collide with these and are ignored. A repository whose
+templates give no names takes none. And the base window's own name is never
+refused, there being no other name for it to take — so a repository registered
+as `api-v2` beside an `api` that already has a `v2` worktree is the one collision
+this cannot stop, and `new` refuses every one after it.
+
+Separators that could not collide were considered and rejected, though not
+tested. `/` is the only character barred from both config names and slugs, but
+`@cibo/eng-142` reads as a file mention in claude's prompt, and `<repo>/<slug>`
+is ruled out of treewright's vocabulary already — see "A repository is named by
+`--repo`" in `CLAUDE.md`. `:` is barred from slugs only, and `@server:resource`
+is how an MCP resource is written.
+
+### Native where there is a name, `send` where there is not
+
+That is the rule each message follows. The route is native when the window's
+agent was recorded under a name **and** the config's agent module names a tool
+to reach it by — `MessageTool`, which is `SendMessage` for claude. The wording
+is the module's because the tool is a fact about claude. Everywhere else it is
+`send`. A config with no `agent` key still names its agents, since the default
+command does, but treewright does not tell anyone to use a tool it cannot be
+sure the agent has; it names `send`, which reaches a named agent as surely as an
+unnamed one.
+
+- **`resume --prompt` on an open window** names the agent and the tool, or
+  `send` with the repository.
+- **The guard's refusal** keeps `resume --prompt-file` as the route for a brief,
+  and gives the one-line route as `SendMessage to <name>` where the refused
+  worktree's window has a named agent.
+- **`scratch --reuse` on an open window** types nothing at a named agent. It
+  switches to the window and reports the prompt undelivered, as `resume` does,
+  naming the agent. Typing was the one route that could land as the answer to
+  whatever the agent's screen was asking, and the caller of `--reuse` is
+  usually an agent with the safer route itself. An agent with no name is still
+  typed at, through `deliver`. See "Coming back to a scratch session by its
+  name" in [`design-notes.md`](design-notes.md).
+- **The skill** teaches `SendMessage` to `agent_name`; `ListAgents` before
+  sending, since a name it does not list has no live session and `resume` is the
+  way back; replying to the `from` address; `notify_when_idle` rather than
+  watching `agent_state`; and that a slash command runs only as the prompt a new
+  session starts on, never in a message. `send` survives in it for an agent
+  whose `agent_name` is empty, and its pane, one-line and held-open rules live
+  in `treewright help send` rather than in the guide.
+
+### A config that spelled out the old default
+
+`Config.SessionResumeCommand` — resuming the base checkout's windows by
+conversation id — applies while `resume_command` is the module's own, compared
+by value. Adding `--name` changed the module's own, so a config that had written
+the old default out in full would have stopped recording sessions and gone back
+to resuming its base window by directory, with nothing anywhere to say so.
+
+Two answers were on the table: count the old default as the module's too, or
+have `doctor` say so. **The old default counts as the module's**, through the
+module's `FormerResumeCommands`. The config chose nothing the module lacked —
+the module moved under it — so there is no decision for its owner to make, and
+a warning would have arrived after the records it was about had already stopped
+being written. Such a config's worktrees still resume with the command it wrote,
+unnamed; its base and scratch windows resume by id with the module's template as
+it stands, name included.
 
 ## When there is nothing to resume
 

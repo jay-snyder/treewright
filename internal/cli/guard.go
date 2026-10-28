@@ -121,7 +121,7 @@ func cmdGuard(env *Env, args []string) error {
 	if !ok {
 		return nil
 	}
-	env.errorf("%s", found.refusal(env))
+	env.errorf("%s", found.refusal(env, scope.cfg))
 	return ErrRefused
 }
 
@@ -145,10 +145,13 @@ func readHookPayload(env *Env, into any) bool {
 // ---- scope -------------------------------------------------------------------
 
 // guardScope is what the guard needs to know about where it is: the checkout
-// the caller stands in, and the worktrees of that repository which are not it.
+// the caller stands in, the worktrees of that repository which are not it, and
+// the repository's config, which the refusal reads to say how its agents are
+// reached.
 type guardScope struct {
 	here    string            // git's spelling of the caller's own checkout
 	foreign map[string]string // worktree directory → slug, the caller's own excluded
+	cfg     *config.Config
 }
 
 // guardScopeFor works out where the calling agent is standing, reporting
@@ -191,7 +194,7 @@ func guardScopeFor(cwd string) (guardScope, bool) {
 	if err != nil {
 		return guardScope{}, false
 	}
-	scope := guardScope{here: here, foreign: map[string]string{}}
+	scope := guardScope{here: here, foreign: map[string]string{}, cfg: cfg}
 	for _, wt := range managed {
 		if wt.Dir == here {
 			continue
@@ -756,8 +759,19 @@ func skipHeredoc(runes []rune, newline int, delimiter string) int {
 // find. The brief file is named rather than described because the instructions
 // this session has are the whole reason a fresh agent cannot pick the work up,
 // and a prompt short enough to type usually is not them.
-func (f guardFinding) refusal(env *Env) string {
+//
+// The one line goes by the agent's own messaging where the agent in that
+// worktree's window answers to a name and its module names a tool to reach it
+// by, and by `send` everywhere else — the window found by its directory, so an
+// agent started before names were given is still typed at, which reaches it.
+// See messageRoute for why the native route comes first wherever there is one.
+func (f guardFinding) refusal(env *Env, cfg *config.Config) string {
 	brief := "/tmp/" + f.slug + "-brief.md"
+	line := `"read ` + brief + ` in full"`
+	oneLine := env.copyable(`treewright send ` + f.slug + ` ` + line)
+	if tool, agent, ok := nativeRoute(cfg, tmux.Windows(sessionFor(cfg))[f.dir]); ok {
+		oneLine = env.copyable(tool) + " to " + env.copyable(agent) + ": " + line
+	}
 	return "" +
 		f.slug + " is another agent's worktree, and this is not its window" +
 		asFields(
@@ -767,7 +781,7 @@ func (f guardFinding) refusal(env *Env) string {
 		"\nhand the work over instead, finished work included" +
 		asFields(
 			field("with a brief", env.copyable("treewright resume "+f.slug+" --prompt-file "+brief)),
-			field("or one line", env.copyable(`treewright send `+f.slug+` "read `+brief+` in full"`)),
+			field("or one line", oneLine),
 		) +
 		"\nwrite that file first — a fresh agent has none of this session"
 }

@@ -77,6 +77,14 @@ func cmdScratch(env *Env, args []string) error {
 	if known && !reuse {
 		return refuseScratchSession(env, cfg, name, session)
 	}
+	// A name new to this repository is also a name new to its agent, and that
+	// name is shared with every other registered repository. A session already
+	// under it was given it when it was opened, and was checked then.
+	if !known {
+		if err := refuseAgentNameTaken(cfg, name, "name"); err != nil {
+			return err
+		}
+	}
 	// command, never resume_command, for a window that did not exist a moment
 	// ago: there is nothing to resume in it. Filled here, before anything opens,
 	// so the placeholder and length refusals are the ones `new` gives — and filled
@@ -92,11 +100,10 @@ func cmdScratch(env *Env, args []string) error {
 			return err
 		}
 	}
-	command, err := fillPrompt(cfg.Command, "command", prompt)
+	run, err := launch(cfg, prompt, agentName(cfg, name))
 	if err != nil {
 		return err
 	}
-	run := windowCommand{Command: command}
 	if known {
 		return reuseScratch(env, cfg, session, override, prompt, run, arrivalFor(cfg, repoName))
 	}
@@ -147,26 +154,48 @@ const reuseFlag = "--reuse"
 // prefix when there is none, so a blind `resume --prompt` reaches a worktree
 // whose slug merely starts with the name.
 //
-// An open window is typed at through deliver, the path `send` takes, so every
+// An open window whose agent answers to a name, and has messaging of its own
+// to be reached by, is not typed at. The prompt is reported undelivered, as
+// `resume` reports one aimed at a window already open, with the agent's name
+// and the tool to send it with — and the window is brought forward. Typing at
+// a pane is the one route that can land as the answer to whatever the agent's
+// screen is asking, which `send` can only make less likely by showing the pane
+// first, and the caller that passes --reuse is usually an agent that has the
+// safer route itself. treewright cannot take that route on its behalf: a
+// session's messaging belongs to that session and to its own children, and
+// reaching another's from here would mean reading the credentials it keeps
+// for exactly that reason.
+//
+// An open window whose agent has no name — a command of the repository's own,
+// an agent with no messaging, or a window opened before names were given — is
+// typed at as it always was, through deliver, the path `send` takes, so every
 // refusal of its comes along: the caller's own window, and a window held open
 // after its agent died. Then it is brought forward, as `resume` brings forward
-// an open window. With no prompt there is nothing to type, and this is resume.
+// an open window. With no prompt there is nothing to deliver, and this is
+// resume.
 //
 // A recorded session is reopened on its conversation, as `resume` reopens one,
 // under the window name this call gave.
 func reuseScratch(env *Env, cfg *config.Config, session tmux.Window, override, prompt string, run windowCommand, arrive arrival) error {
 	name := session.Scratch
 	if session.ID != "" {
-		if prompt == "" {
+		_, _, native := nativeRoute(cfg, session)
+		switch {
+		case prompt == "":
 			env.progressf("scratch window %s is already open in %s", name, cfg.Name)
-		} else if err := deliver(env, cfg, scratchChoice(cfg, session), session, prompt, false); err != nil {
-			return err
+		case native:
+			env.warnf("prompt not delivered — scratch window %s is already open\n%s",
+				name, messageRoute(env, cfg, session, name))
+		default:
+			if err := deliver(env, cfg, scratchChoice(cfg, session), session, prompt, false); err != nil {
+				return err
+			}
 		}
 		arriveAt(env, cfg, session, run.Command, arrive)
 		return nil
 	}
 
-	resumed, err := resumeWindow(cfg, prompt, false, name)
+	resumed, err := resumeWindow(cfg, prompt, false, name, agentName(cfg, name))
 	if err != nil {
 		return err
 	}
@@ -188,13 +217,15 @@ func reuseScratch(env *Env, cfg *config.Config, session tmux.Window, override, p
 
 // refuseALineBreakToReuse refuses a --reuse prompt that could not be typed.
 //
-// Only one of the three cases types the prompt — an open window, where Enter is
-// what submits — and the other two hand it to a command line, where a line
-// break is just text. It is refused in all three anyway, before any of them is
-// acted on, because which case a --reuse call meets is exactly what its caller
-// does not know: that is the reason for the flag. A prompt that worked whenever
-// no window happened to be open, and failed the day one was, is the dependence
-// on unseen state the flag exists to remove.
+// Only one of the three cases types the prompt — an open window whose agent has
+// no name to be messaged by, where Enter is what submits — and the other two
+// hand it to a command line, where a line break is just text. It is refused in
+// all three anyway, before any of them is acted on, because which case a
+// --reuse call meets is exactly what its caller does not know: that is the
+// reason for the flag. A prompt that worked whenever no window happened to be
+// open, and failed the day one was, is the dependence on unseen state the flag
+// exists to remove — and whether the open window's agent was given a name is
+// one more fact of the same kind.
 //
 // --prompt-file is the way through, since what it builds is one line naming the
 // file.
