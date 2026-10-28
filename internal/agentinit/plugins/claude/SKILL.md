@@ -89,7 +89,9 @@ One JSON object per checkout, and one per scratch window:
   `null` means the comparison was impossible — unknown, not zero.
 - `window_is_current` marks the window you are running in, and
   `window_last_in_session` the window whose closing would end its session.
-  Both matter under Clean up, and both are false where no window is open.
+  `window_yielded` says that window's agent has run `treewright yield`, which
+  closing it from the base window waits for. All three matter under Clean up,
+  and all are false where no window is open.
 - The listing does not fetch, so a branch merged since the last fetch still
   reads active; rm and prune fetch before they judge, and they are the ones to
   trust.
@@ -292,11 +294,15 @@ report to — your own `agent_name`, from your row in `ls --json`, the one with
 `window_is_current` — so its agent has an address before anyone has messaged
 it.
 
-**Close one you opened once its answer is somewhere, and ask before closing one
-you did not.** `treewright close <name>` ends that agent's conversation for
-good — there is no resuming it — so never while it reports `working`, and rm and
-prune never touch a scratch window, there being no worktree to remove. One the
-person opened is theirs.
+**A scratch window is closed by its own agent, or from the base window once
+that agent has yielded.** Its agent closes it with a bare `treewright close`
+once its answer is somewhere: run with no name in a scratch window, close takes
+that window and nothing else, and from a scratch window every other close is
+refused, the base window's above all. If you opened one from the base window,
+ask its agent to yield as Clean up describes, and close it by name only once
+`window_yielded` says it has. Closing one ends its conversation for good —
+there is no resuming it — and rm and prune never touch a scratch window, there
+being no worktree to remove. One the person opened is theirs.
 
 ## Continue or hand work onward
 
@@ -357,6 +363,34 @@ decision is the person's — the question below exists to reach them. prune's
 --yes is not the same flag: it confirms only the removals, and every window
 still gets its question.
 
+**From the base window, another window closes only once its agent has
+yielded.** Closing a window stops its agent, and only that agent knows whether
+anything would be lost, so `close` refuses until the agent has run
+`treewright yield` in its own window. Ask before you remove the worktree, while
+the agent still stands somewhere it can run a command, the way you reach any
+agent — `SendMessage` to its `agent_name`, with `notify_when_idle: true`:
+
+    SendMessage to "cibo-eng-142": "your window is about to be closed: if nothing in it would be lost, run treewright yield"
+
+and `send` where its `agent_name` is empty:
+
+    treewright send --repo cibo eng-142 "your window is about to be closed: if nothing in it would be lost, run treewright yield"
+
+Then wait for its reply or the idle notice — with `send`, for its row's
+`agent_state` to read `done` — and read `window_yielded` in
+`treewright ls --json`. True means its window can be closed
+on a yes. False means it said no or could not answer — a window held open on a
+dead agent's output, a shell, an agent stuck `waiting` on a person — and the
+window stays for the person to close from outside treewright's windows; say so
+in the question. A refusal is the answer rather than an obstacle: there is no
+flag past it, and no other spelling of the close to try.
+
+**When you are the agent asked to yield**, run `treewright yield` only if
+nothing you are doing would be lost: no work in flight, nothing uncommitted you
+have not handed on. Otherwise say why not, to whoever asked, and do not yield.
+It marks only your own window, and the next prompt you are handed takes it
+back.
+
 Removal leaves the work's tmux window open on a directory that no longer
 exists, and with no tty on this end treewright names the command that closes
 each one rather than asking:
@@ -394,13 +428,19 @@ anyway.
 the question exists for. An agent asked to tear down the worktree it is
 standing in meets that window every time, so exempting it is an exception that
 swallows the rule: nothing gets asked, and the person is handed back exactly
-the printed command the paragraph above refuses to hand back.
-`window_is_current` says which one is yours, and being yours changes the
-ordering of a yes, never whether you ask. Closing it ends this session, so a
-yes on it is honoured last — after the final message rather than instead of
-it. Report the teardown, say whatever is left to say, and then kill the window
-as the closing action of the turn: it is the final step of the cleanup you
-were asked for, and the session ending is what that step costs.
+the printed command the paragraph above refuses to hand back. Being yours
+changes the ordering of a yes, never whether you ask. Closing it ends this
+session, so a yes on it is honoured last — after the final message rather than
+instead of it. Report the teardown, say whatever is left to say, and then run a
+bare `treewright close` as the closing action of the turn: with no name, close
+takes the window it is running in and nothing else. It is the final step of the
+cleanup you were asked for, and the session ending is what that step costs.
+
+**Never work out which window is yours with `tmux display-message`.** Without
+`-t "$TMUX_PANE"` it answers about whichever window the attached client is
+showing, which is how a scratch agent once closed the base window believing it
+was its own. `window_is_current` in `treewright ls --json` is the row that is
+yours, and a bare close never needs to know.
 
 ## Leave to the machinery
 

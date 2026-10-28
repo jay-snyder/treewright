@@ -162,6 +162,7 @@ options:
 | `@treewright_scratch` | The name a scratch window was opened under. Unset on every other window. |
 | `@treewright_agent_state` | What the agent in it last signaled. Written by `signal`, not at creation — see "Agent state" in [`agents.md`](agents.md). |
 | `@treewright_agent_name` | The name the agent in it was launched under, which messaging of the agent's own reaches it at. Unset when the command gave it none, and taken off by the held-open wrapper with the state — see "Agents reaching each other" in [`agents.md`](agents.md). |
+| `@treewright_yielded` | Set while the agent in it has run `tw yield`: closing it from the base window would lose nothing. Taken back by `signal working`, `signal clear` and the held-open wrapper — see "Yielding a window" in [`agents.md`](agents.md). |
 
 Of these, the worktree is what *identifies* a window. A pane's
 directory moves with every `cd`, and two windows can stand in one directory at
@@ -204,6 +205,32 @@ line — `#{@treewright_repo}` costs nothing to render, where the alternative is
 shelling out to git on every status interval. They keep the full `@treewright_`
 prefix because they are a public, greppable interface, and a cryptic `@tw_` would
 save nothing anyone types by hand.
+
+### Which window a command is running in
+
+The pane is asked, through the `$TMUX_PANE` every pane carries:
+`display-message -p -t "$TMUX_PANE"`, which answers about that pane's own
+window. `tmux.CallersWindow` asks it for the whole window, which is what
+`close`, `yield`, `signal` and the guard read, and `tmux.CurrentWindow` for its
+id alone, which is what `send` and `ls --json` compare against.
+
+Untargeted, `display-message` answers about a different window: the one the
+attached client is looking at. The two agree only while the person happens to be
+looking at the agent asking, and the gap between them is how a scratch agent
+closed the base window. Setting out to close its own window, it ran
+`tmux display-message -p '#{session_name}:#{window_index} #{window_name}'`, was
+told about the window on the screen, and concluded from where it stood — the main
+checkout — that its window was the base window. `tw close base` did what it was
+told.
+
+So nothing that closes a window takes the caller's word for which window is
+its own. A bare `tw close` asks the pane and closes that window, and `close`
+decides from the pane's window what else may be closed — only itself from a
+worktree or scratch window, never the base window from inside any of
+treewright's windows, and from the base window only a window whose agent has
+yielded. The rule and its reasons are under "Closing a window: its own agent,
+or from outside" in
+[`design-notes.md`](design-notes.md).
 
 ## Typing at the window
 

@@ -84,6 +84,15 @@ func cmdSignal(env *Env, args []string) error {
 	// Best-effort from here down, in keeping with the silence above: the window
 	// was there a moment ago, and one that has closed since needs no state.
 	_ = tmux.SetAgentState(w.ID, value)
+	// A yield is current only until the agent takes on something new, and
+	// `working` is the UserPromptSubmit saying it has: whatever it said about
+	// the window answered for the work it had then. That includes the question
+	// asking it to yield, which arrives as a prompt too — so a yield on the
+	// window can only ever be the answer to the latest question. `clear` is the
+	// agent leaving, and nobody is left to answer for the window at all.
+	if state == stateWorking || state == stateClear {
+		_ = tmux.SetYielded(w.ID, false)
+	}
 	if w.Stamped() {
 		// Only a window treewright opened gets its name decorated. One the user
 		// opened by hand on a worktree's directory still carries the state option —

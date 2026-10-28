@@ -24,7 +24,7 @@ treewright() {
 _treewright_completions() {
   local cur="${COMP_WORDS[COMP_CWORD]}"
   if [[ $COMP_CWORD -eq 1 ]]; then
-    COMPREPLY=($(compgen -W "new move resume send cd base scratch restore attach popup signal guard session-start ls rm prune close setup config doctor shell-init tmux-init agent-init refresh version" -- "$cur"))
+    COMPREPLY=($(compgen -W "new move resume send cd base scratch restore attach popup signal guard session-start ls rm prune close yield setup config doctor shell-init tmux-init agent-init refresh version" -- "$cur"))
     return
   fi
   if [[ "$cur" == -* ]]; then

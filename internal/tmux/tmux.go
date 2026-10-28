@@ -36,6 +36,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -145,6 +146,13 @@ type Window struct {
 	// nothing asks — the question is about a session as it stands, and the
 	// answer for a window created a moment ago is one nobody is waiting on.
 	SessionWindows int
+
+	// Yielded says the agent in this window has run `treewright yield`
+	// since it last took on work: that it has nothing in flight that closing
+	// the window would lose. It is the one answer the base window's closes wait
+	// for, and like State it lives on the window, so an agent that dies takes
+	// its answer with it.
+	Yielded bool
 }
 
 // Available reports whether tmux is installed. Every operation here needs it, and
@@ -238,23 +246,27 @@ func ServerRunning() bool {
 // The user options treewright records on every window it opens. Windows treewright did
 // not open have none, and read as empty.
 //
-// Five are read back, and they ride in paneFormat below: the worktree and the
+// Six are read back, and they ride in paneFormat below: the worktree and the
 // scratch name, which between them are what identifies a window; the repository,
 // which scopes a scratch name; the agent state, which is what the agent running
-// in it last said it was doing; and the agent's name, which is how another agent
-// reaches it without typing at its pane. The rest are written for the user's own
-// tmux.conf, where "#{@treewright_slug}" in a status line costs nothing to render
-// and the alternative is a shell-out to git on every status interval.
+// in it last said it was doing; the agent's name, which is how another agent
+// reaches it without typing at its pane; and the yield, which is that agent
+// saying the window may be closed from elsewhere. The rest are written for the
+// user's own tmux.conf, where "#{@treewright_slug}" in a status line costs
+// nothing to render and the alternative is a shell-out to git on every status
+// interval.
 //
 // The agent state lives on the window rather than in a file because a treewright
 // window runs the agent as the window's own command: the agent dying is the
 // window closing is the option evaporating, so a crashed agent can never leave a
 // stale "working" behind and there is nothing to garbage-collect. It is written
-// by `treewright signal`, which the agent's own hooks run.
-// AgentStateOption, AgentNameOption and WaitingMarker are exported for the one
-// consumer outside this package: the held-open wrapper in internal/cli, which
-// clears all three from shell when a window outlives the agent that was
-// signaling in it.
+// by `treewright signal`, which the agent's own hooks run. The yield lives
+// there for the same reason, and is written by `treewright yield`, which only
+// the agent runs.
+// AgentStateOption, AgentNameOption, YieldedOption and WaitingMarker are
+// exported for the one consumer outside this package: the held-open wrapper in
+// internal/cli, which clears all four from shell when a window outlives the
+// agent that was signaling in it.
 const (
 	worktreeOption = "@treewright_worktree"
 	repoOption     = "@treewright_repo"
@@ -270,6 +282,10 @@ const (
 	// name is treewright's to give, where the state is the agent's to report.
 	AgentNameOption = "@treewright_agent_name"
 
+	// YieldedOption is set while the agent in a window has yielded it: said,
+	// from inside it, that closing it would lose nothing. See Window.Yielded.
+	YieldedOption = "@treewright_yielded"
+
 	// WaitingMarker is prefixed to a window's name while its agent is waiting on
 	// the user, so the one state that needs to reach you across the room shows in
 	// any status line with nothing added to tmux.conf. Windows returns names with
@@ -279,16 +295,18 @@ const (
 )
 
 // paneFormat lists a pane as window name, window id, session, the repository
-// and worktree its window was opened for, its scratch name, the agent state and
-// the agent name recorded on it, how many windows its session holds, then path.
+// and worktree its window was opened for, its scratch name, the agent state,
+// the agent name and the yield recorded on it, how many windows its session
+// holds, then path.
 //
 // The fields are tab-separated, and exactly two of them are free text tmux
 // cannot be told to escape: the window name, which rename-window lets a user
 // put anything into — a tab included — and the pane's path. So the two bracket
 // the listing, one at each end, and between them sit only fields that cannot
 // hold a tab: the id and the count are tmux's own spellings of a number, the
-// state is a word from signal's closed vocabulary, and the four stamps are
-// values stamp declines to write when they hold a tab. A fixed left-to-right
+// state is a word from signal's closed vocabulary, the yield is a fixed value
+// or nothing, and the four stamps are values stamp declines to write when they
+// hold a tab. A fixed left-to-right
 // split used to put the name in the middle, where one tab shifted the worktree,
 // the state and the path each a field over; splitPaneLine now anchors on the
 // shape of the fixed fields instead, so a tab at either end stays in the field
@@ -297,12 +315,13 @@ const (
 // The window count is here rather than asked per window because this listing is
 // gathered once for a whole table. See Window.SessionWindows.
 const paneFormat = "#{window_name}\t#{window_id}\t#{session_name}\t#{" + repoOption + "}\t#{" + worktreeOption + "}\t#{" +
-	scratchOption + "}\t#{" + AgentStateOption + "}\t#{" + AgentNameOption + "}\t#{session_windows}\t#{pane_current_path}"
+	scratchOption + "}\t#{" + AgentStateOption + "}\t#{" + AgentNameOption + "}\t#{" + YieldedOption +
+	"}\t#{session_windows}\t#{pane_current_path}"
 
 // fixedFields is how many fields paneFormat puts between the window name and
 // the path, the window id first and the window count last. splitPaneLine
 // anchors on those two, so the count is this many fields less one after the id.
-const fixedFields = 8
+const fixedFields = 9
 
 // Windows maps each pane's working directory to the window holding it, across
 // every session on the server. It is what stops `resume` from opening a second
@@ -491,6 +510,7 @@ func splitPaneLine(line string) (w Window, path string, ok bool) {
 			Scratch:        fields[idx+4],
 			State:          fields[idx+5],
 			Agent:          fields[idx+6],
+			Yielded:        fields[idx+7] != "",
 			SessionWindows: windows,
 		}, strings.Join(fields[idx+fixedFields:], "\t"), true
 	}
@@ -651,6 +671,17 @@ func SetAgentState(id, state string) error {
 	return err
 }
 
+// SetYielded records that the agent in a window has yielded it, or takes the
+// yield back. Taken back means unset, for the reason SetAgentState gives.
+func SetYielded(id string, yielded bool) error {
+	if !yielded {
+		_, err := run("set-window-option", "-q", "-u", "-t", id, YieldedOption)
+		return err
+	}
+	_, err := run("set-window-option", "-t", id, YieldedOption, "1")
+	return err
+}
+
 // SetWaitingMarker puts the attention marker on a window's name, or takes it
 // off. Renaming is unconditional in either direction: Windows strips the marker
 // as it parses, so whether the name on the server carries one right now is the
@@ -778,6 +809,68 @@ func CallersWindow() (Window, bool) {
 	}
 	w, _, ok := splitPaneLine(out)
 	return w, ok
+}
+
+// ReachesCallersServer reports whether a tmux command given these server flags
+// would reach the server the calling pane is on: label is -L's value and
+// socket is -S's, either empty when the command did not pass it. It is false
+// outside tmux, where the caller is on no server.
+//
+// The socket is resolved the way tmux itself resolves one. -S names it
+// outright; -L names a socket in tmux's socket directory, which is
+// $TMUX_TMPDIR — /tmp when that is unset — with tmux-<uid> under it, the
+// directory resolved through its symlinks as tmux resolves it; and with
+// neither, the command reaches the server in $TMUX, which is the caller's own.
+// So `tmux -L default kill-server` is the caller's server when the caller is on
+// the default one, and `tmux -L twscratch kill-server` is somebody else's.
+//
+// A relative -S is taken as written, relative to this process: the caller
+// knows the directory the command runs in, and resolves it first.
+func ReachesCallersServer(label, socket string) bool {
+	own := callersSocket()
+	if own == "" {
+		return false
+	}
+	switch {
+	case socket != "":
+	case label != "":
+		socket = filepath.Join(socketDir(), label)
+	default:
+		return true
+	}
+	return sameSocket(socket, own)
+}
+
+// callersSocket is the socket of the server the calling pane is on: $TMUX up to
+// its first comma, the rest being the server's pid and the session's index.
+func callersSocket() string {
+	socket, _, _ := strings.Cut(os.Getenv("TMUX"), ",")
+	return socket
+}
+
+// socketDir is the directory a labelled server's socket is made in. See
+// ReachesCallersServer.
+func socketDir() string {
+	base := os.Getenv("TMUX_TMPDIR")
+	if base == "" {
+		base = "/tmp"
+	}
+	return filepath.Join(base, "tmux-"+strconv.Itoa(os.Getuid()))
+}
+
+// sameSocket compares two socket paths by the directory each is in, resolved,
+// and the name. The directory rather than the whole path because a socket that
+// has not been made yet — a scratch server nobody has started — has no path to
+// resolve, and on macOS /tmp is itself a symlink to /private/tmp.
+func sameSocket(a, b string) bool {
+	resolved := func(p string) string {
+		p = filepath.Clean(p)
+		if dir, err := filepath.EvalSymlinks(filepath.Dir(p)); err == nil {
+			return filepath.Join(dir, filepath.Base(p))
+		}
+		return p
+	}
+	return resolved(a) == resolved(b)
 }
 
 // Focus brings a window to the foreground, following it across sessions.

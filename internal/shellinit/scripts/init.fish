@@ -58,6 +58,7 @@ complete -c treewright -n __fish_use_subcommand -a ls            -d 'list worktr
 complete -c treewright -n __fish_use_subcommand -a rm            -d 'tear down a worktree and its branch'
 complete -c treewright -n __fish_use_subcommand -a prune         -d 'remove every merged, clean worktree'
 complete -c treewright -n __fish_use_subcommand -a close         -d 'close the tmux window open on a worktree'
+complete -c treewright -n __fish_use_subcommand -a yield         -d 'mark the window you are in as safe for the base window to close'
 complete -c treewright -n __fish_use_subcommand -a setup         -d 'write a config for the repository you are standing in'
 complete -c treewright -n __fish_use_subcommand -a config        -d 'print the settings in force, defaults included'
 complete -c treewright -n __fish_use_subcommand -a doctor        -d 'check the installation and every registered config'

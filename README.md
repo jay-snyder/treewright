@@ -379,6 +379,11 @@ Claude agent can message another directly instead of typing into its window.
   exists, so treewright offers to close it for you — `tw close <slug>` does it
   later if you decline. If that window is the last one in the session, it says
   so first, because closing it would detach you.
+- An agent closes only its own window. Inside a worktree or scratch window,
+  `tw close` with no name closes that window and nothing else. The base window
+  is never closed from inside treewright's windows, and it closes another
+  window only once that window's agent has run `tw yield` to say nothing would
+  be lost. From a plain shell you can close any of them.
 
 ## Upgrading
 

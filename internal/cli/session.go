@@ -303,10 +303,14 @@ func runStep(command string) string {
 // gone. The agent's name goes with them, since it is an address and nobody is
 // at it any more: left on the window it would send the next message to a name
 // no session answers to, where without it the reader is pointed at `send`,
-// which recognizes a held-open window and says so. All three are cleared
-// best-effort, straight through tmux rather than through
-// `treewright signal`, so the script stays runnable when the binary that wrote it
-// has since moved off PATH. Inside the pane, $TMUX names the right server —
+// which recognizes a held-open window and says so. Its yield goes too, and for
+// a sharper reason: a yield is the agent answering for what is in the window,
+// and a window holding a dead agent's output is one nobody has answered for —
+// closing it from the base window is exactly what that output must not be lost
+// to. All four are cleared best-effort, straight through tmux rather than
+// through `treewright signal`, so the script stays runnable when the binary
+// that wrote it has since moved off PATH. Inside the pane, $TMUX names the
+// right server —
 // including under TREEWRIGHT_TMUX_LABEL — and $TMUX_PANE targets the pane's own
 // window, which display-message untargeted would not.
 func heldOpenTail() string {
@@ -314,6 +318,7 @@ func heldOpenTail() string {
 		`if [ -n "$TMUX_PANE" ]; then` + "\n" +
 		`  tmux set-window-option -q -u -t "$TMUX_PANE" ` + tmux.AgentStateOption + " 2>/dev/null || true\n" +
 		`  tmux set-window-option -q -u -t "$TMUX_PANE" ` + tmux.AgentNameOption + " 2>/dev/null || true\n" +
+		`  tmux set-window-option -q -u -t "$TMUX_PANE" ` + tmux.YieldedOption + " 2>/dev/null || true\n" +
 		`  tw_name=$(tmux display-message -p -t "$TMUX_PANE" '#{window_name}' 2>/dev/null) || tw_name=''` + "\n" +
 		`  case "$tw_name" in ` + shellinit.Quote(tmux.WaitingMarker) + `*) tmux rename-window -t "$TMUX_PANE" "${tw_name#?}" 2>/dev/null || true ;; esac` + "\n" +
 		"fi\n" +

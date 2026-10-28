@@ -1047,6 +1047,7 @@ stdout carries the answer and nothing else, so any command can be piped:
 | `agent-init` | the plugin directory it installed into, or the plugin's files with `--print` — with what it wrote, and where else it could go, on stderr |
 | `send` | nothing — there is no answer, only something done; what the window was showing and what was typed go to stderr |
 | `close` | nothing — there is no answer, only a window that is gone; what it closed and what that cost go to stderr |
+| `yield` | nothing — the answer is the mark on the window, which `ls --json` reports as `window_yielded`; what it marked goes to stderr |
 | `restore` | nothing — there is no answer, only a session that is back; what it could not open, and the way in when it stayed out, go to stderr |
 | `scratch` | nothing — the answer is a window, and the name you gave it is how everything else reaches it; where it opened goes to stderr, and under `--reuse` so does which of its three cases it met |
 | `signal` | nothing — the answer is the stamp on the window, and out of scope it is silent on stderr too |
@@ -1702,7 +1703,61 @@ window can detach the client that would have read the report, and closing the
 caller's own window kills the pane treewright is running in — there is no
 afterwards to report from. Both are said rather than refused: the second is a
 real thing to want, and the agent guide asks for exactly it as the last step of
-a teardown.
+a teardown, spelled as a bare `close`.
+
+### Closing a window: its own agent, or from outside
+
+**A window is closed only by its own agent, or from outside treewright's
+windows.** Which windows a `close` may reach is decided by the window the
+command is running in, found from the pane:
+
+| Running in | May close |
+|---|---|
+| a worktree or scratch window | only that window — `close` with no name does it |
+| the base window | another window, once that window's agent has run `yield`; never itself |
+| outside treewright's windows (a plain shell, no tmux, a window treewright did not open) | anything, as before |
+
+The base window is never closed from inside any of treewright's windows; a
+person closes it from a shell outside them, or by quitting its agent. Every path
+that closes a window — `close`, `rm --yes`, and `rm`'s and `prune`'s question —
+goes through one check, `closer.refusal` in `close.go`, and `rm --yes` asks it
+*before* removing anything, since `--yes` was a request to close the window and
+a refusal after the removal would leave the half that cannot be undone done.
+The y/N is the one place the yield is not needed: a person answering it is the
+confirmation the yield stands in for. See "Yielding a window" in
+[`agents.md`](agents.md) for the yield itself.
+
+**Why "said rather than refused" lost.** `close` used to take any window, with the
+base window's cost — it usually ends the repository's session — said rather than
+refused, on `warnIfAgentWorking`'s argument: the caller asked, and treewright is
+in no position to judge. That argument assumes the caller knows which window it
+is pointing at. On 2026-10-28 a scratch agent in the main checkout, done
+reviewing a pull request, set out to close its own window. It ran
+`tmux display-message -p '#{session_name}:#{window_index} #{window_name}'` with no
+`-t "$TMUX_PANE"`, which answers about the window the attached client is showing
+rather than the agent's own; concluded from where it stood that it was the base
+window; and ran `close --repo joy101 base`, described as closing "this base
+checkout's tmux window". treewright closed the base window, as documented, under
+the operator who was working in it.
+
+A warning could not have stopped that, and neither could better prose. The agent
+was confident and wrong, and a confident caller reads a warning as a cost it has
+already accepted. What failed was the caller's idea of which window was its own,
+so the decision moved to the one party that cannot be wrong about it: the pane.
+An agent closing itself never names a window, which is the step that went wrong,
+and nothing reachable from inside an agent's window can close a window that is
+not the agent's own without that window's agent saying so. A stopgap
+PreToolUse hook enforced the base-window half from outside the binary while
+this was built; with the rule here, it can go.
+
+**Still no `--force`.** The reason `warnIfAgentWorking` gives for warning rather
+than refusing — a refusal needs a flag past it, and that flag gets passed by
+reflex — is the reason there is no flag past these refusals: the case they exist
+for is the caller sure of itself, which is the caller that would pass it. What
+is left for a person is the shell outside treewright's windows, where the rule
+does not reach. The guard refuses an agent's raw `tmux kill-window` and its
+relatives on the agent's own server for the same reason; see "Enforcing the
+handoff" in [`agents.md`](agents.md).
 
 **An agent still working is warned about, wherever a window is closed.** The
 agent is the window's command, so there is no detaching from this and coming
