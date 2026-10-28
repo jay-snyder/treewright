@@ -386,14 +386,37 @@ nothing to print would send the shell home. So the two callers treat the same
 cancellation differently, deliberately.
 
 **The keys.** Being unbound is the smaller half of choosing one; the larger half
-is what a missed shift does, since these get reached for in a hurry. `t` is
-clock-mode and `n` is next-window, both harmless. The first version bound
-`prefix + W`, for the mnemonic with tmux's own `w` window picker — but a great
-many configs rebind lowercase `w` to `kill-window`, and there a missed shift
-destroys the very window the binding exists to reach. Hence `T` and `N`, and
-hence the flags that move them.
+is what a missed shift does, since these get reached for in a hurry. `n` is
+next-window. `g` is unbound before tmux 3.8, and from 3.8 it moves a floating
+pane: it waits for one more key, and on a pane that is not floating it refuses
+that key with "pane is not floating" — and a treewright window's pane is not
+one. Both slips are harmless, and both are over at the next keystroke. The first
+version bound `prefix + W`, for the mnemonic with tmux's own `w` window picker —
+but a great many configs rebind lowercase `w` to `kill-window`, and there a
+missed shift destroys the very window the binding exists to reach. Hence the
+flags that move them.
 
-Keys are validated as letters, digits, dashes, and underscores, which covers `G`,
+**Why `G` and not `T`.** `T` was the default after `W`, its twin being
+clock-mode, until tmux 3.8 bound `prefix + T` to set the pane title. Loading the
+snippet replaced that binding without a word, which is the one thing
+`TestBindingsDoNotOverwriteTmuxsOwn` is there to stop, and the test failed on
+every machine with 3.8. `G` is free in 3.8 and in tmux's master branch, whose own
+uppercase prefix keys are now `C`, `D`, `E`, `L`, `M` and `T`; no plugin in
+common use claims it (tmux-sessionist takes lowercase `g`, tpm takes `I` and
+`U`); and it reads as "go". Turned down: `O`, whose twin is select-pane, so a
+missed shift moves focus; `S`, which tmux-sessionist binds; and keeping `T` with
+the test loosened, which costs every 3.8 user a stock binding without telling
+them.
+
+No running server moves with the default. `refresh` reloads the bindings onto
+the keys a server already holds them on, so a server on `T` stays on `T`. A
+`tmux.conf` line that names no key picks up `G` at the next server start, where
+`T` goes back to being tmux's pane-title prompt; `--resume-key T` on that line
+keeps the old key. Sourcing that `tmux.conf` into a running server binds `G`
+beside `T` rather than in its place, since nothing unbinds the old key, and both
+open the picker until the server restarts.
+
+Keys are validated as letters, digits, dashes, and underscores, which covers `V`,
 `C-n`, `M-Left`, and `F5`. Anything with punctuation tmux reads as config syntax
 is refused; writing that binding by hand in the printed file is the documented
 way to have it.

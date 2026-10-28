@@ -36,18 +36,28 @@ type Keys struct {
 
 // DefaultKeys are what the snippet binds when the caller asks for nothing else.
 //
-// Both are unbound in stock tmux, whose own uppercase keys are C, D, E, L and M.
-// But being free is the smaller half of the test: the larger half is what a
-// missed shift does, because these are keys reached for in a hurry. Here the
-// twins are t, clock-mode, and n, next-window — both harmless and both dismissed
-// by carrying on.
+// Both are unbound in stock tmux, whose own uppercase keys are C, D, E, L, M and,
+// since 3.8, T. But being free is the smaller half of the test: the larger half is
+// what a missed shift does, because these are keys reached for in a hurry. Here
+// the twins are g and n. n is next-window. g is unbound before tmux 3.8 and from
+// it waits for one key to place a floating pane by, refusing that key on a pane
+// that is not floating, which a treewright window's is not. Both are harmless and
+// both are dismissed by carrying on.
 //
 // W was the first choice, for the mnemonic with tmux's own w window picker, and
 // it is the reason these are configurable at all. A great many configurations
 // rebind lowercase w to kill-window, and there the slip destroys the very window
 // the binding exists to reach — a treewright worktree being a window with an agent
 // running in it and nothing else.
-func DefaultKeys() Keys { return Keys{Resume: "T", New: "N"} }
+//
+// T came next, its twin being clock-mode, and lasted until tmux 3.8 bound
+// prefix + T to set the pane title: loading the snippet replaced that binding
+// without a word, which is the one thing TestBindingsDoNotOverwriteTmuxsOwn is
+// there to stop. G took its place, being free in 3.8 and in tmux's master branch
+// and reading as "go". Nobody's server moved with it: refresh puts the bindings
+// back on the keys a server already holds them on, so only a tmux.conf line that
+// names no key picks G up, at the server's next start.
+func DefaultKeys() Keys { return Keys{Resume: "G", New: "N"} }
 
 // Validate rejects a key that would not survive being written into a config file.
 //
@@ -161,7 +171,7 @@ const header = `# treewright tmux integration. Load it from ~/.tmux.conf with ei
 # To move the keys, pass them through rather than editing after the fact, so the
 # two ways of loading this stay identical:
 #
-#     treewright tmux-init --resume-key G --new-key C-n
+#     treewright tmux-init --resume-key V --new-key C-n
 #
 # An empty key omits its binding: --new-key "" binds only the first.
 `

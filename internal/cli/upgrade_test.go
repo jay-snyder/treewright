@@ -342,13 +342,13 @@ func TestDoctorTellsALoadedTmuxIntegrationFromACurrentOne(t *testing.T) {
 // TestRefreshReloadsTheBindingsOnTheKeysTheyAreOn is the hazard in reloading at
 // all. The keys are flags, set at the tmux.conf line that loads the snippet, so
 // a reload that quietly bound the defaults as well would hand back keys the user
-// deliberately moved away from — and take whatever they had put on T and N.
+// deliberately moved away from — and take whatever they had put on G and N.
 func TestRefreshReloadsTheBindingsOnTheKeysTheyAreOn(t *testing.T) {
 	requireTmux(t)
 	f := newFixture(t, "command = 'sleep 300'\n")
 	startSession(t, "proj", "main", f.MainDir)
 
-	if r := f.exec("tmux-init", "--apply", "--resume-key", "G", "--new-key", "C-n"); r.err != nil {
+	if r := f.exec("tmux-init", "--apply", "--resume-key", "V", "--new-key", "C-n"); r.err != nil {
 		t.Fatalf("tmux-init --apply: %v\n%s", r.err, r.both())
 	}
 	// Wound back to a stamp no treewright ever wrote, so the reload has something
@@ -361,7 +361,7 @@ func TestRefreshReloadsTheBindingsOnTheKeysTheyAreOn(t *testing.T) {
 	if r.err != nil {
 		t.Fatalf("refresh: %v\n%s", r.err, r.both())
 	}
-	if !strings.Contains(flat(r.stderr), "switch worktree G") {
+	if !strings.Contains(flat(r.stderr), "switch worktree V") {
 		t.Errorf("stderr = %q, want the keys it put the bindings back on", r.stderr)
 	}
 
@@ -369,11 +369,15 @@ func TestRefreshReloadsTheBindingsOnTheKeysTheyAreOn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list the key bindings: %v\n%s", err, keys)
 	}
+	// The defaults are read rather than spelled out, so that moving them cannot
+	// leave this looking for a key nothing would bind — which is what a
+	// spelled-out T became when the default moved to G.
+	defaults := tmuxinit.DefaultKeys()
 	for line := range strings.SplitSeq(keys, "\n") {
 		if !strings.Contains(line, "treewright") {
 			continue
 		}
-		if strings.Contains(line, "-T prefix T ") || strings.Contains(line, "-T prefix N ") {
+		if strings.Contains(line, "-T prefix "+defaults.Resume+" ") || strings.Contains(line, "-T prefix "+defaults.New+" ") {
 			t.Errorf("refresh bound a default key over the user's own choice: %q", line)
 		}
 	}
@@ -436,19 +440,21 @@ func TestRefreshReloadsBindingsFromAnotherTreewright(t *testing.T) {
 			name: "older",
 			load: func(t *testing.T, f *fixture) {
 				t.Helper()
-				if r := f.exec("tmux-init", "--apply", "--resume-key", "G"); r.err != nil {
+				if r := f.exec("tmux-init", "--apply", "--resume-key", "V"); r.err != nil {
 					t.Fatalf("tmux-init --apply: %v\n%s", r.err, r.both())
 				}
 				if out, err := tmuxctl(t, "set", "-g", tmuxinit.VersionOption, "000000000000"); err != nil {
 					t.Fatalf("wind the stamp back: %v\n%s", err, out)
 				}
 			},
-			keys: "switch worktree G start one N",
+			keys: "switch worktree V start one N",
 		},
 		{
 			name: "unstamped",
 			load: func(t *testing.T, _ *fixture) {
 				t.Helper()
+				// T, the default before tmux 3.8 took it: a server that holds it
+				// keeps it, which is how that move reached nobody's running server.
 				if out, err := tmuxctl(t, "bind-key", "T", "run-shell", "-b", "treewright popup resume"); err != nil {
 					t.Fatalf("bind an older treewright's key: %v\n%s", err, out)
 				}
