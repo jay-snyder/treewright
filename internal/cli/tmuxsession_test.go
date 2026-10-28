@@ -91,6 +91,7 @@ func TestNewOpensItsWindowInTheRepoSession(t *testing.T) {
 		t.Errorf("windows in session proj = %v, want just eng-142", got)
 	}
 	// And the window is in the worktree, not wherever treewright was run.
+	waitForDirectory(t, windowIDNamed(t, "proj", "eng-142"), "eng-142", f.DirFor("eng-142-white-screen"))
 	if got := panesOn(t, f.DirFor("eng-142-white-screen")); got != 1 {
 		t.Errorf("%d panes in the new worktree, want 1", got)
 	}
@@ -283,6 +284,7 @@ func TestBaseSelectsTheOneBaseWindow(t *testing.T) {
 	if got := windowsIn(t, "proj"); len(got) != 1 || got[0] != "main" {
 		t.Errorf("windows in session proj = %v, want one main", got)
 	}
+	waitForDirectory(t, windowIDNamed(t, "proj", "main"), "main", f.MainDir)
 	if got := panesOn(t, f.MainDir); got != 1 {
 		t.Errorf("%d panes in the main checkout, want 1", got)
 	}
@@ -339,6 +341,7 @@ func TestBaseFromInsideTheBaseWindowStaysWhereItIs(t *testing.T) {
 	if got := windowsIn(t, "proj"); len(got) != 1 || got[0] != "main" {
 		t.Errorf("windows in session proj = %v, want the one base window", got)
 	}
+	waitForDirectory(t, windowIDNamed(t, "proj", "main"), "main", f.MainDir)
 	if got := panesOn(t, f.MainDir); got != 1 {
 		t.Errorf("%d panes in the main checkout, want 1", got)
 	}
