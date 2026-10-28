@@ -91,9 +91,11 @@ func TestScriptLoadsIntoARealServer(t *testing.T) {
 	}
 }
 
-// TestBindingsDoNotOverwriteTmuxsOwn guards the choice of keys. tmux binds five
-// uppercase keys of its own — C, D, E, L and M — and taking one of them would
-// silently cost the user a default they may rely on.
+// TestBindingsDoNotOverwriteTmuxsOwn guards the choice of keys. tmux binds six
+// uppercase keys of its own — C, D, E, L, M and, since 3.8, T — and taking one of
+// them would silently cost the user a default they may rely on. It is also how
+// that sixth one was noticed: T was treewright's default until this failed on a
+// machine with tmux 3.8.
 func TestBindingsDoNotOverwriteTmuxsOwn(t *testing.T) {
 	tmux := server(t)
 
@@ -149,7 +151,8 @@ func TestScriptDocumentsWhatItBinds(t *testing.T) {
 // the picker — had a lowercase twin that a great many configurations rebind to
 // kill-window, which in a treewright worktree destroys the running agent.
 //
-// tmux's own lowercase bindings for t and n are clock-mode and next-window. This
+// tmux's own lowercase bindings for g and n are, from 3.8, moving a floating pane
+// (which refuses on any other) and next-window; before 3.8, g is unbound. This
 // pins the choice against a future edit that reintroduces the hazard by reaching
 // for a nicer mnemonic.
 func TestDefaultKeysSurviveAMissedShift(t *testing.T) {
@@ -172,19 +175,24 @@ func TestDefaultKeysSurviveAMissedShift(t *testing.T) {
 }
 
 func TestScriptHonorsCustomKeys(t *testing.T) {
-	script := Script(Keys{Resume: "G", New: "C-n"})
+	script := Script(Keys{Resume: "V", New: "C-n"})
 
-	if !strings.Contains(script, "bind-key G run-shell") {
+	if !strings.Contains(script, "bind-key V run-shell") {
 		t.Errorf("the resume binding does not use the key asked for:\n%s", script)
 	}
 	if !strings.Contains(script, "bind-key C-n command-prompt") {
 		t.Errorf("the new-worktree binding does not use the key asked for:\n%s", script)
 	}
 	// The prose names the keys too, since the file is meant to be read.
-	if !strings.Contains(script, "prefix + G") || !strings.Contains(script, "prefix + C-n") {
+	if !strings.Contains(script, "prefix + V") || !strings.Contains(script, "prefix + C-n") {
 		t.Errorf("the comments still describe the default keys:\n%s", script)
 	}
-	if strings.Contains(script, "bind-key T ") || strings.Contains(script, "bind-key N ") {
+	// Read from DefaultKeys rather than spelled out: a spelled-out T outlived the
+	// default's move to G, and a check for a key nothing binds passes whatever the
+	// script does. Should the default ever land on V, this fails rather than goes
+	// quiet.
+	defaults := DefaultKeys()
+	if strings.Contains(script, "bind-key "+defaults.Resume+" ") || strings.Contains(script, "bind-key "+defaults.New+" ") {
 		t.Errorf("a default binding survived being overridden:\n%s", script)
 	}
 }

@@ -188,14 +188,14 @@ func TestTmuxInitTakesTheKeysAsFlags(t *testing.T) {
 	f := newFixture(t, "")
 
 	for _, spelling := range [][]string{
-		{"tmux-init", "--resume-key", "G", "--new-key", "C-n"},
-		{"tmux-init", "--resume-key=G", "--new-key=C-n"},
+		{"tmux-init", "--resume-key", "V", "--new-key", "C-n"},
+		{"tmux-init", "--resume-key=V", "--new-key=C-n"},
 	} {
 		r := f.exec(spelling...)
 		if r.err != nil {
 			t.Fatalf("%v: %v\n%s", spelling, r.err, r.both())
 		}
-		if !strings.Contains(r.stdout, "bind-key G run-shell") {
+		if !strings.Contains(r.stdout, "bind-key V run-shell") {
 			t.Errorf("%v did not bind the key asked for:\n%s", spelling, r.stdout)
 		}
 		if !strings.Contains(r.stdout, "bind-key C-n command-prompt") {
@@ -236,7 +236,7 @@ func TestTmuxInitApplyHonorsCustomKeys(t *testing.T) {
 	f := newFixture(t, "command = 'sleep 300'\n")
 	startSession(t, "proj", "main", f.MainDir)
 
-	if r := f.exec("tmux-init", "--apply", "--resume-key", "G", "--new-key", ""); r.err != nil {
+	if r := f.exec("tmux-init", "--apply", "--resume-key", "V", "--new-key", ""); r.err != nil {
 		t.Fatalf("tmux-init --apply: %v\n%s", r.err, r.both())
 	}
 
@@ -244,8 +244,8 @@ func TestTmuxInitApplyHonorsCustomKeys(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list the key bindings: %v\n%s", err, keys)
 	}
-	if !strings.Contains(keys, "bind-key    -T prefix G") {
-		t.Errorf("G is not bound after --apply:\n%s", keys)
+	if !strings.Contains(keys, "bind-key    -T prefix V") {
+		t.Errorf("V is not bound after --apply:\n%s", keys)
 	}
 	if strings.Contains(keys, "treewright new") {
 		t.Errorf("an empty --new-key still bound something:\n%s", keys)

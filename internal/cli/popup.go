@@ -213,7 +213,7 @@ func noWorktreesMessage(argv0, repo string) string {
 // does.
 //
 // Asked of tmux rather than assumed, because the keys are the user's: tmux-init
-// binds T and N by default, takes --resume-key and --new-key to move them, and a
+// binds G and N by default, takes --resume-key and --new-key to move them, and a
 // hand-written tmux.conf answers to nobody. A hint naming the wrong key is worse
 // than no hint.
 func newWorktreeKeys() string {

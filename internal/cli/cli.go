@@ -834,17 +834,17 @@ out of a directory it just deleted, and registers tab completion.`,
     treewright tmux-init > ~/.config/treewright/treewright.tmux
     source-file ~/.config/treewright/treewright.tmux
 
-It binds prefix + T to switch worktrees and prefix + N to start one, both by
+It binds prefix + G to switch worktrees and prefix + N to start one, both by
 opening treewright in a popup — which is the only way to reach it from a window
 whose pane is the agent itself and has no shell to type into. It also turns
 terminal titles on, and documents the window options treewright records for a
 status line to read.
 
 Both keys are free in stock tmux, and their lowercase twins are harmless if you
-miss the shift: t is clock-mode and n is next-window. Where that is not true of
-your own config, move them:
+miss the shift: g does nothing to an ordinary pane and n is next-window. Where
+that is not true of your own config, move them:
 
-    treewright tmux-init --resume-key G --new-key C-n
+    treewright tmux-init --resume-key V --new-key C-n
 
 An empty key omits its binding, so --new-key "" binds only the picker. Anything
 more than the keys — the popup size, a binding of your own — is what printing to
@@ -855,7 +855,7 @@ one-line form above; printing is the default, since these are key bindings and
 worth reading first.`,
 			flags: []flagDoc{
 				{"--apply", "load it into the running tmux server instead of printing it"},
-				{"--resume-key", "prefix key that switches worktrees (default T, empty to omit)"},
+				{"--resume-key", "prefix key that switches worktrees (default G, empty to omit)"},
 				{"--new-key", "prefix key that starts a worktree (default N, empty to omit)"},
 			},
 			run: cmdTmuxInit,
