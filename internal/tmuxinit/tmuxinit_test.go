@@ -322,3 +322,86 @@ func TestTheFingerprintIsStableAcrossRuns(t *testing.T) {
 		t.Errorf("two calls gave %q and %q", first, second)
 	}
 }
+
+// TestThePluginKeyIsBoundOnlyWhenGiven: a plugin is opted into, so an existing
+// user's snippet — and everything refresh reloads from it — binds nothing new.
+func TestThePluginKeyIsBoundOnlyWhenGiven(t *testing.T) {
+	if strings.Contains(Script(DefaultKeys()), "reviews") {
+		t.Errorf("the default snippet mentions the reviews plugin")
+	}
+	if DefaultKeys().Reviews != "" {
+		t.Errorf("the reviews key has a default: %q", DefaultKeys().Reviews)
+	}
+	script := Script(Keys{Resume: "G", New: "N", Reviews: "R"})
+	if !strings.Contains(script, `bind-key R run-shell -b 'treewright popup -c "#{client_tty}" -d "#{pane_current_path}" reviews'`) {
+		t.Errorf("the reviews key is not bound to the picker:\n%s", script)
+	}
+	if (Keys{Reviews: "a b"}).Validate() == nil {
+		t.Errorf("a reviews key with a space in it was accepted")
+	}
+}
+
+// TestThePillAndItsClickArePrintedNeverLoaded: status-right is the person's own
+// format, and the click binding replaces one of tmux's own, so both are lines in
+// the snippet's comments for a person to place — and loading the snippet leaves
+// tmux's MouseDown1Status exactly as it was.
+func TestThePillAndItsClickArePrintedNeverLoaded(t *testing.T) {
+	script := Script(Keys{Reviews: "R"})
+	for _, want := range []string{
+		`#     set -g status-right "#(treewright reviews segment -d '#{pane_current_path}')`,
+		`#     bind-key -T root MouseDown1Status if-shell -F '#{m:tw-pr-*,#{mouse_status_range}}'`,
+	} {
+		if !strings.Contains(script, want) {
+			t.Errorf("the snippet does not print %q", want)
+		}
+	}
+	for line := range strings.SplitSeq(script, "\n") {
+		if strings.HasPrefix(line, "set") && strings.Contains(line, "status-right") || strings.HasPrefix(line, "bind-key -T root") {
+			t.Errorf("the snippet applies a line it should only print: %s", line)
+		}
+	}
+
+	tmux := server(t)
+	before, _ := tmux("list-keys", "-T", "root", "MouseDown1Status")
+	path := filepath.Join(t.TempDir(), "treewright.tmux")
+	if err := os.WriteFile(path, []byte(script), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := tmux("source-file", path); err != nil {
+		t.Fatalf("tmux rejected the snippet with the reviews key: %v\n%s", err, out)
+	}
+	after, _ := tmux("list-keys", "-T", "root", "MouseDown1Status")
+	if before != after {
+		t.Errorf("loading the snippet changed MouseDown1Status:\n  before %s\n  after  %s", before, after)
+	}
+	keys, _ := tmux("list-keys", "-T", "prefix", "R")
+	if !strings.Contains(keys, "reviews") {
+		t.Errorf("prefix + R = %q, want the reviews picker", keys)
+	}
+}
+
+// TestThePrintedClickBindingParses: a line printed for a person to place is a
+// line tmux has to accept once they do, and a mistake in its nested quoting
+// would only surface in their tmux.conf.
+func TestThePrintedClickBindingParses(t *testing.T) {
+	tmux := server(t)
+	var line string
+	for l := range strings.SplitSeq(Script(Keys{Reviews: "R"}), "\n") {
+		if strings.Contains(l, "MouseDown1Status") {
+			line = strings.TrimPrefix(l, "#     ")
+		}
+	}
+	path := filepath.Join(t.TempDir(), "click.tmux")
+	if err := os.WriteFile(path, []byte(line+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := tmux("source-file", path); err != nil {
+		t.Fatalf("tmux rejected the printed click binding: %v\n%s\n%s", err, out, line)
+	}
+	bound, _ := tmux("list-keys", "-T", "root", "MouseDown1Status")
+	for _, want := range []string{"tw-pr-", "treewright reviews click", "switch-client"} {
+		if !strings.Contains(bound, want) {
+			t.Errorf("MouseDown1Status = %q, want it to mention %q", bound, want)
+		}
+	}
+}

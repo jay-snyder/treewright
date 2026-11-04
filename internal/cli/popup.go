@@ -135,6 +135,9 @@ func sizeFor(env *Env, command string) (width, height int) {
 		defaultHeight = 12
 	)
 	cmd := lookup(command)
+	if cmd != nil && cmd.name == reviewsCommand {
+		return reviewsPopupSize()
+	}
 	if cmd == nil || (cmd.name != "resume" && cmd.name != "cd") {
 		return defaultWidth, defaultHeight
 	}

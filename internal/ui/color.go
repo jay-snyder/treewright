@@ -60,3 +60,17 @@ func ColorEnabled(w io.Writer) bool {
 	}
 	return term.IsTerminal(int(f.Fd()))
 }
+
+// Width is how many columns the terminal behind w has, or 0 when w is not a
+// terminal — a pipe has no width, and nothing should be cut to fit one.
+func Width(w io.Writer) int {
+	f, ok := w.(*os.File)
+	if !ok || !term.IsTerminal(int(f.Fd())) {
+		return 0
+	}
+	width, _, err := term.GetSize(int(f.Fd()))
+	if err != nil {
+		return 0
+	}
+	return width
+}

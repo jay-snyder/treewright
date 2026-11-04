@@ -339,6 +339,12 @@ func (r Repo) HasRemote(name string) bool {
 	return r.runOK("remote", "get-url", name)
 }
 
+// RemoteURL is where a remote points, as configured. A worktree answers with
+// its main checkout's, remotes being shared by every worktree of a repository.
+func (r Repo) RemoteURL(name string) (string, error) {
+	return r.run("remote", "get-url", name)
+}
+
 // IgnoredFiles lists paths git is ignoring, relative to the main checkout.
 //
 // --directory collapses a wholly ignored directory into a single entry ending in

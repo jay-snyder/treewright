@@ -365,3 +365,31 @@ func TestDoctorWarnsAboutFeaturesWithNothingToRunThem(t *testing.T) {
 		}
 	})
 }
+
+// TestSetupRefreshKeepsTheReviewPrompt holds the one plugin key to the rule the
+// rest are held to: written back when the file set it, and left a commented
+// default when it did not, so the default can still move.
+func TestSetupRefreshKeepsTheReviewPrompt(t *testing.T) {
+	f := newFixture(t, "review_prompt = '/review {number}'\n")
+	f.mustRun("setup", "--refresh")
+	body, err := os.ReadFile(filepath.Join(f.registry, "proj.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "\nreview_prompt = \"/review {number}\"\n") {
+		t.Errorf("the refreshed config lost review_prompt:\n%s", body)
+	}
+	if out := f.mustRun("config"); !strings.Contains(out, "/review {number}") {
+		t.Errorf("config does not report the review prompt:\n%s", out)
+	}
+
+	f.setConfig("main_dir = '" + f.MainDir + "'\n")
+	f.mustRun("setup", "--refresh")
+	body, err = os.ReadFile(filepath.Join(f.registry, "proj.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "\n# review_prompt = \"review pull request #{number}\"\n") {
+		t.Errorf("an unset review_prompt did not come back as the commented default:\n%s", body)
+	}
+}

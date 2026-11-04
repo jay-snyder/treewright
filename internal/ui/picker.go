@@ -174,3 +174,31 @@ func Pick(w io.Writer, header string, items []string) (int, error) {
 	}
 	return pick(w, header, items, nextKey)
 }
+
+// Wait shows prompt on w and returns at the next keypress, for a message that
+// has to be read before whatever is showing it goes away — a tmux popup that
+// closes the moment its command exits.
+//
+// Any key will do, which is why this is not a picker of one: there is nothing
+// to choose, and a prompt that ignored all but Escape would read as stuck. With
+// no terminal there is nobody to wait for, and it returns at once.
+func Wait(w io.Writer, prompt string) {
+	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
+	if err != nil {
+		return
+	}
+	defer tty.Close()
+	fd := int(tty.Fd())
+	if !term.IsTerminal(fd) {
+		return
+	}
+	state, err := term.MakeRaw(fd)
+	if err != nil {
+		return
+	}
+	defer func() { _ = term.Restore(fd, state) }()
+	fmt.Fprint(w, prompt)
+	one := make([]byte, 1)
+	_, _ = tty.Read(one)
+	fmt.Fprint(w, "\r\n")
+}

@@ -359,6 +359,33 @@ Every agent treewright starts is named after the repo and the work —
 Claude agent can message another directly instead of typing into its window.
 `tw ls --json` lists each agent's name, and the plugin teaches Claude to use it.
 
+## Pull requests waiting on you
+
+This part is optional, and nothing in it runs until you ask for it. It needs
+`gh`, the GitHub CLI, logged in.
+
+`tw reviews` lists the pull requests waiting on your review in the repo you're
+standing in, newest first, with your own open ones mixed in. Pick one and an
+agent reviews it in a window of its own, called `review-<number>`. If the author
+asks you again later, picking it again takes you back to the same conversation.
+
+To get the list on a key, add the key to your `tmux-init` line:
+
+```tmux
+run-shell 'treewright tmux-init --apply --reviews-key R'
+```
+
+`tw help reviews` has two more lines you can paste in: one puts the waiting
+pull request numbers in your status line, and one opens a number in the browser
+when you click it.
+
+What the agent is told is `review_prompt` in the repo's config. The default is
+plain words. If your agent has its own command for reviews, use that:
+
+```toml
+review_prompt = "/review {number}"
+```
+
 ## It won't let you lose work
 
 - `tw rm` refuses if the worktree is dirty or has commits that aren't on origin.
@@ -421,8 +448,8 @@ touches the network, and only when you ask it to.
 
 ## Uninstalling
 
-Short list, on purpose: two directories named after treewright, and nothing else
-outside a repository. Everything else is a line you pasted in yourself.
+Short list, on purpose: a few directories named after treewright, and nothing
+else outside a repository. Everything else is a line you pasted in yourself.
 
 **Take the worktrees back first, while treewright is still here to do it** —
 afterwards they're ordinary git worktrees, removed one at a time by hand:
@@ -434,6 +461,7 @@ brew uninstall --cask treewright      # or: rm $(go env GOPATH)/bin/treewright
 rm -r ~/.config/treewright            # the registry
 rm -r ~/.claude/skills/treewright     # the agent plugin, if you installed it
                                       # ($CLAUDE_CONFIG_DIR/skills/… if you set it)
+rm -r ~/.cache/treewright             # tw reviews' cache, if you used it
 ```
 
 Then delete the `shell-init` line from your shell startup file and the

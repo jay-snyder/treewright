@@ -945,3 +945,44 @@ func TestFeaturesAreOffUnlessNamed(t *testing.T) {
 		t.Error("a file that never mentions features reads as having set it")
 	}
 }
+
+// review_prompt defaults to plain words, takes a repository's own, and is
+// refused at load when it could not do its job: with no {number} every pull
+// request gets the same instruction, and a line break is refused by the
+// `scratch --reuse` it goes through — better heard here, naming the file, than
+// at the moment of a pick.
+func TestReviewPromptDefaultsAndIsCheckedAtLoad(t *testing.T) {
+	dir := registry(t, map[string]string{
+		"unset":    "main_dir = '/tmp/repo'\n",
+		"own":      "main_dir = '/tmp/repo'\nreview_prompt = '/review {number} and {number} again'\n",
+		"nonumber": "main_dir = '/tmp/repo'\nreview_prompt = 'review the pull request'\n",
+		"empty":    "main_dir = '/tmp/repo'\nreview_prompt = ''\n",
+		"twolines": "main_dir = '/tmp/repo'\nreview_prompt = \"review #{number}\\nthoroughly\"\n",
+	})
+
+	unset, err := Load(filepath.Join(dir, "unset.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := unset.ReviewPromptFor(42); got != "review pull request #42" {
+		t.Errorf("default review prompt for 42 = %q", got)
+	}
+	own, err := Load(filepath.Join(dir, "own.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := own.ReviewPromptFor(7); got != "/review 7 and 7 again" {
+		t.Errorf("own review prompt for 7 = %q", got)
+	}
+
+	for name, want := range map[string]string{
+		"nonumber": "has no {number} in it",
+		"empty":    "has no {number} in it",
+		"twolines": "has a line break in it",
+	} {
+		_, err := Load(filepath.Join(dir, name+".toml"))
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: Load = %v, want an error saying %q", name, err, want)
+		}
+	}
+}

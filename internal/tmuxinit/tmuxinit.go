@@ -32,6 +32,13 @@ import (
 type Keys struct {
 	Resume string // switch to another worktree
 	New    string // start one
+
+	// Reviews opens the reviews plugin's picker. Unlike the two above it has no
+	// default and is bound only when given: a plugin is opted into, and a
+	// default key would have every existing user's next refresh, or next server
+	// start, take a key they never gave up for a tool they never asked for. See
+	// "Opt in through machinery that already exists" in docs/plugins.md.
+	Reviews string
 }
 
 // DefaultKeys are what the snippet binds when the caller asks for nothing else.
@@ -75,6 +82,7 @@ func (k Keys) Validate() error {
 	for _, named := range []struct{ flag, value string }{
 		{"--resume-key", k.Resume},
 		{"--new-key", k.New},
+		{"--reviews-key", k.Reviews},
 	} {
 		if named.value == "" {
 			continue // asked for deliberately: bind nothing to this one
@@ -107,6 +115,10 @@ func Script(k Keys) string {
 		if k.New != "" {
 			b.WriteString(fill(newBinding, k.New))
 		}
+	}
+
+	if k.Reviews != "" {
+		b.WriteString(fill(reviewsSection, k.Reviews))
 	}
 
 	b.WriteString(titles)
@@ -142,7 +154,7 @@ const VersionOption = "@treewright_tmux_init"
 // choice, made at the tmux.conf line, and a fingerprint that moved with it would
 // report a custom binding as an old one forever.
 func Version() string {
-	sum := sha256.Sum256([]byte(header + reachHeader + resumeBinding + newBinding + titles + recorded + stamp))
+	sum := sha256.Sum256([]byte(header + reachHeader + resumeBinding + newBinding + reviewsSection + titles + recorded + stamp))
 	// Twelve hex characters, as internal/shellinit does for the same purpose: the
 	// value goes in a line a person reads, and 48 bits is far more than enough to
 	// separate one release's snippet from another's.
@@ -228,6 +240,40 @@ bind-key {{key}} run-shell -b 'treewright popup -c "#{client_tty}" -d "#{pane_cu
 const newBinding = `
 # prefix + {{key}} — start one. tmux asks for the slug; treewright does the rest.
 bind-key {{key}} command-prompt -p "new worktree:" 'run-shell -b "treewright popup -c #{client_tty} -d \"#{pane_current_path}\" new %1"'
+`
+
+// The reviews plugin's section: one binding, and two lines printed as comments
+// for a person to place, never loaded.
+//
+// The binding is the worktree picker's, pointed at another command, and every
+// detail of it is load-bearing for the same reasons — see the comment above
+// reachHeader. The comments are what docs/plugins.md calls printed for a person
+// to place. status-right is the person's own format, and a set -g here would
+// replace theirs wholesale. The click binding takes MouseDown1Status, which
+// stock tmux binds to switch-client -t =: loaded from here it would replace a
+// binding of tmux's own without a word, the one thing
+// TestBindingsDoNotOverwriteTmuxsOwn is there to stop, so it is printed with
+// tmux's own binding kept as its second branch.
+//
+// The segment is quoted for the shell because a checkout path can hold a
+// space; tmux expands #{pane_current_path} inside #() before the shell sees it.
+const reviewsSection = `
+# --- pull requests waiting on your review -------------------------------------
+#
+# The reviews plugin. Needs gh, the GitHub CLI, logged in.
+
+# prefix + {{key}} — pick one and review it in an agent window of its own.
+bind-key {{key}} run-shell -b 'treewright popup -c "#{client_tty}" -d "#{pane_current_path}" reviews'
+
+# The status-line pill is yours to place, at the front of your own status-right.
+# It is empty while nothing is waiting, and --style and --label restyle it:
+#
+#     set -g status-right "#(treewright reviews segment -d '#{pane_current_path}')<your status-right>"
+#
+# Clicking a number in it opens that pull request, through a binding that keeps
+# tmux's own for every other click on the status line:
+#
+#     bind-key -T root MouseDown1Status if-shell -F '#{m:tw-pr-*,#{mouse_status_range}}' { run-shell -b 'treewright reviews click -d "#{pane_current_path}" "#{mouse_status_range}"' } { switch-client -t = }
 `
 
 const titles = `

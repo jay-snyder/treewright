@@ -457,6 +457,16 @@ keeps the old key. Sourcing that `tmux.conf` into a running server binds `G`
 beside `T` rather than in its place, since nothing unbinds the old key, and both
 open the picker until the server restarts.
 
+**A plugin's key has no default.** `--reviews-key` binds the reviews plugin's
+picker, through `tw popup reviews` for every reason above, and only when it is
+given a key: a plugin is opted into, and a default would have the next `refresh`
+on every existing server take a key nobody gave up. `refresh` carries it like the
+other two — onto the key a server already holds it on, and onto none where it was
+never bound. The plugin's status-line pill and its click binding are printed in
+the snippet's comments rather than loaded, the first because `status-right` is
+yours and the second because it replaces a binding of tmux's own. See
+[`plugins.md`](plugins.md).
+
 Keys are validated as letters, digits, dashes, and underscores, which covers `V`,
 `C-n`, `M-Left`, and `F5`. Anything with punctuation tmux reads as config syntax
 is refused; writing that binding by hand in the printed file is the documented
