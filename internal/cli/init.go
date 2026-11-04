@@ -53,7 +53,7 @@ func cmdTmuxInit(env *Env, args []string) error {
 	keys := tmuxinit.DefaultKeys()
 	if _, err := parseArgs("tmux-init", args,
 		map[string]*bool{"--apply": &apply},
-		map[string]*string{"--resume-key": &keys.Resume, "--new-key": &keys.New},
+		map[string]*string{"--resume-key": &keys.Resume, "--new-key": &keys.New, "--reviews-key": &keys.Reviews},
 		0); err != nil {
 		return err
 	}
@@ -333,6 +333,13 @@ func cmdComplete(env *Env, args []string) error {
 	case "agents":
 		for _, name := range agentinit.Names() {
 			fmt.Fprintln(env.Stdout, name)
+		}
+	// What `reviews` completes: its sub-commands, which are pasted into a
+	// tmux.conf more often than typed, and are listed here so no shim spells
+	// out a vocabulary internal/cli owns.
+	case reviewsCommand:
+		for _, sub := range reviewsSubcommands {
+			fmt.Fprintln(env.Stdout, sub)
 		}
 	case "flags":
 		// Derived from the same table that renders help, so a flag can never be

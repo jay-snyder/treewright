@@ -10,7 +10,7 @@ companions:
 - **`README.md`** — the user-facing tour: pitch, install, quickstart, command and
   config reference. Deliberately short and non-technical. When user-visible
   behavior changes, it changes with it — but keep new rationale out of it.
-- **`docs/`** — why the behavior is what it is, in four files. Read the relevant
+- **`docs/`** — why the behavior is what it is, in five files. Read the relevant
   section before changing behavior in that area; add to it when you decide
   something a future reader would otherwise re-litigate.
   - **`design-notes.md`** — the base checkout, scratch windows, worktree and
@@ -22,6 +22,10 @@ companions:
     sizing and the key bindings.
   - **`agents.md`** — the agent-state protocol, agent modules and the plugin
     they install, the kickoff prompt.
+  - **`plugins.md`** — what a treewright plugin is and the six rules it is held
+    to (run from the binary, ask treewright, opt in through existing machinery,
+    tmux through the package, no incidental dependencies, script versus Go), and
+    `reviews`, the first plugin.
   - **`compatibility.md`** — which surfaces are contracts and which are not, what
     0.x promises and what 1.0 would freeze, how a break is made and announced.
 
@@ -191,11 +195,13 @@ and without the step a Mac gets a binary that exits 137 and prints nothing. See
 | `internal/cli/signal.go` | `signal`: the agent-state protocol's one verb, run by agent hooks. |
 | `internal/cli/guard.go` | `guard`: the PreToolUse decision, run by agent hooks — which tool calls may change another worktree, and the shell reader that answers it — and the raw tmux kills it refuses on the caller's own server. |
 | `internal/cli/features.go` | `session-start`: the one verb every optional behavior runs behind, run by agent hooks — and what each of them does. |
+| `internal/cli/reviews.go` | `reviews`, the first plugin: the picker and its handoff to `scratch --reuse`, the status-line `segment`, the `click`, the `refresh` and the background start of one, and its `doctor` section. |
 | `internal/cli/eval.go` | The eval-file protocol. |
 | `internal/cli/init.go` | `shell-init`, `tmux-init`, `agent-init`, `__complete`. |
 | `internal/cli/version.go` | What `version` reports: the ldflags stamp, else the build info — and `--check`. |
 | `internal/config` | TOML loading, defaults, and which config applies. |
 | `internal/feature` | The optional behaviors' vocabulary: name, moment, summary, and the prose a generated config explains them with. |
+| `internal/plugin/reviews` | What the `reviews` plugin knows that is not about treewright: the `gh` queries, the cache and its lock, a remote URL's `owner/name`, ages, and the pill's tmux format. |
 | `internal/refname` | git's branch-name rules, restated for slugs and prefixes. |
 | `internal/git` | Every git call, including merged/unpushed/dirty logic. |
 | `internal/tmux` | Every tmux call, window identity, popups. |
@@ -430,7 +436,9 @@ on a window that was already open and its command never ran.
 **treewright writes its own registry, its own plugin directory, and nothing
 else.** The whole list is `<config dir>/<name>.toml`,
 `.git/treewright/post-create-*`, `.git/treewright/move-*.patch` and
-`.git/treewright/sessions/*` inside the repo, the worktrees, and
+`.git/treewright/sessions/*` inside the repo, the worktrees, a plugin's own
+cache or state under `$XDG_CACHE_HOME/treewright/<plugin>/` or
+`$XDG_STATE_HOME/treewright/<plugin>/` (today only `reviews`' cache), and
 `~/.claude/skills/treewright/` —
 `<main_dir>/.claude/skills/treewright/` when `agent-init --local` names it, and
 `$CLAUDE_CONFIG_DIR/skills/treewright/` when the agent's own variable moves that
@@ -755,6 +763,23 @@ release version says so instead of guessing, and that test runs *before* any
 request, which is also what keeps the suite off the network — see
 `stubReleaseAPI` in `upgrade_test.go` for the tests that do exercise it.
 
+**A plugin is a command in the binary, opted into through what already
+exists.** `plugin: true` in the command table lists it under its own heading in
+`tw help`; nothing of it is copied anywhere. Its key is a `tmux-init` flag with
+**no default** — `refresh` carries `--reviews-key` onto the key a server already
+holds it on, through `tmux.BoundKeys`, and binds it nowhere it was not — and its
+status-line pieces are **printed for a person to place, never set**: the click
+binding takes `MouseDown1Status`, which stock tmux binds. Its network work runs
+only on its own commands' paths: `reviews segment` starts a background refresh
+because a person put it in their status line, and **no core command, hook or
+`doctor` ever asks GitHub anything** — doctor reads gh's login with `gh auth
+token`, which is local, and the last refresh's outcome from disk. Its state lives
+under `$XDG_CACHE_HOME/treewright/<plugin>/`, and doctor reports on a plugin only
+once that directory exists. **Which repository a pane is in is resolved exactly**
+(`configAt`), never through `resolveConfig`'s single-config fallback, which would
+draw one repository's pill from every directory on the machine. See
+`docs/plugins.md`.
+
 **The config's `version` key counts generator revisions, not releases**
 (`config.FormatVersion`). A file without one is an old config and never an error:
 every config in the wild predates the key. `setup --refresh` is the only thing
@@ -890,8 +915,15 @@ real git repo with a bare origin, a config registry pointing at it, an inert
 by default, so without it a test of the plugin would rewrite the maintainer's own
 wiring. `CLAUDE_CONFIG_DIR` is emptied for the same reason and is not covered by
 `HOME`: it is usually absolute, so on the machine of anyone who has moved that
-directory the suite would install into their real one. Never call bare `tmux` in
-a test — go through the package, which honors `TREEWRIGHT_TMUX_LABEL`.
+directory the suite would install into their real one. `XDG_CACHE_HOME` is
+pointed at a temp directory for the reviews plugin's cache, on the same
+argument, and a **failing `gh`** sits beside the `claude` stub so no test can
+ask GitHub anything as whoever runs the suite — `stubGH` in `reviews_test.go`
+puts one that answers ahead of it. A background refresh re-runs
+`os.Executable()`, which under `go test` is the test binary, and `TestMain` in
+`main_test.go` turns that run into treewright rather than a second copy of the
+suite. Never call bare `tmux` in a test — go through the package, which honors
+`TREEWRIGHT_TMUX_LABEL`.
 
 Fixture helpers: `exec` (streams kept apart), `run`/`mustRun` (combined),
 `runWithEvalFile` (returns what treewright asked the shell to run), `statusOf`.

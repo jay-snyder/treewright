@@ -202,3 +202,25 @@ func TestColorEnabled(t *testing.T) {
 		t.Error("color enabled with NO_COLOR set")
 	}
 }
+
+// TestALinkedCellIsAHyperlinkOnlyWhereEscapesAre: OSC 8 is an escape sequence
+// like color, so it is written where color is and nowhere else — and padding is
+// measured from the text, so a link moves no column.
+func TestALinkedCellIsAHyperlinkOnlyWhereEscapesAre(t *testing.T) {
+	table := Table{Headers: []string{"TITLE", "N"}}
+	table.Add(Linked("Retry the webhook", "https://github.com/acme/storefront/pull/418"), Text("1"))
+	table.Add(Text("Short"), Text("2"))
+
+	_, plain := table.Lines(false)
+	if strings.Contains(plain[0], "\x1b") {
+		t.Errorf("plain row = %q, want no escape sequence", plain[0])
+	}
+	_, linked := table.Lines(true)
+	want := "\x1b]8;;https://github.com/acme/storefront/pull/418\x1b\\Retry the webhook\x1b]8;;\x1b\\  1"
+	if linked[0] != want {
+		t.Errorf("linked row = %q, want %q", linked[0], want)
+	}
+	if linked[1] != plain[1] {
+		t.Errorf("an unlinked row changed when links were on: %q", linked[1])
+	}
+}

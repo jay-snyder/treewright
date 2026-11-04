@@ -16,6 +16,7 @@ import (
 	"regexp"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/BurntSushi/toml"
@@ -60,7 +61,22 @@ const (
 	// pattern to your own scheme, or — for work that has no ticket behind it at
 	// all — set ticket_pattern = "" and let the slug name the window.
 	DefaultTicketPattern = `(?i)^([a-z]+-[0-9]+)(?:-|$)`
+
+	// DefaultReviewPrompt is what the reviews plugin types to start a review of
+	// pull request {number}, when a repository says nothing else.
+	//
+	// Plain words, because the default has to make sense to whatever agent a
+	// repository runs, and every agent can read a sentence. A repository whose
+	// agent has a command for reviewing sets its own — that is a fact about the
+	// repository's tooling, which is why this is a per-repository key and not a
+	// flag on a status line. See docs/plugins.md.
+	DefaultReviewPrompt = "review pull request #{number}"
 )
+
+// ReviewNumber is the placeholder review_prompt carries for the pull request's
+// number. Named once because Load requires it and ReviewPromptFor fills it,
+// and the two have to agree on its spelling.
+const ReviewNumber = "{number}"
 
 // FormatVersion is the revision of this file format, written into every config
 // `setup` generates and read back by `doctor`.
@@ -182,6 +198,19 @@ type Config struct {
 	// TicketPattern is a regular expression whose first submatch names the tmux
 	// window when it matches a slug. Defaults to DefaultTicketPattern.
 	TicketPattern string `toml:"ticket_pattern"`
+
+	// ReviewPrompt is the instruction the reviews plugin hands a review window's
+	// agent, with {number} standing for the pull request. Defaults to
+	// DefaultReviewPrompt. Read through ReviewPromptFor.
+	//
+	// It has to carry {number}, or every pull request would be handed the same
+	// instruction, and it has to be one line, because the picker hands it over
+	// through `scratch --reuse`, which may type it at an open window where Enter
+	// submits. Both are refused here rather than at the moment of a pick, the
+	// config being the earlier place to hear it and the one that names the file.
+	// An empty value is refused for the first reason: there is no instruction
+	// in it to give.
+	ReviewPrompt string `toml:"review_prompt"`
 
 	// TmuxSession names the session holding this repository's windows. It
 	// defaults to the config's own name, and exists for the two cases the
@@ -433,6 +462,20 @@ func Load(path string) (*Config, error) {
 	if _, err := regexp.Compile(c.TicketPattern); err != nil {
 		return nil, fmt.Errorf("%s: ticket_pattern is not a valid regexp: %w", filepath.Base(path), err)
 	}
+	if !c.Explicit("review_prompt") {
+		c.ReviewPrompt = DefaultReviewPrompt
+	}
+	switch {
+	case !strings.Contains(c.ReviewPrompt, ReviewNumber):
+		return nil, fmt.Errorf("%s: review_prompt has no %s in it\n"+
+			"every pull request would be handed the same instruction\n"+
+			"write %s where the number goes, or remove the key for %q",
+			filepath.Base(path), ReviewNumber, ReviewNumber, DefaultReviewPrompt)
+	case strings.ContainsAny(c.ReviewPrompt, "\n\r"):
+		return nil, fmt.Errorf("%s: review_prompt has a line break in it\n"+
+			"it may be typed at an open window, where Enter submits the first line alone\n"+
+			"keep it to one line", filepath.Base(path))
+	}
 	return &c, nil
 }
 
@@ -537,6 +580,11 @@ func (c *Config) AgentFilled(key string) bool { return c.agentFilled[key] }
 // hand — and the first one to fall behind would be a feature a config could
 // name, that Load would accept, and that nothing would ever run.
 func (c *Config) Enabled(name string) bool { return slices.Contains(c.Features, name) }
+
+// ReviewPromptFor is review_prompt with the pull request's number in it.
+func (c *Config) ReviewPromptFor(number int) string {
+	return strings.ReplaceAll(c.ReviewPrompt, ReviewNumber, strconv.Itoa(number))
+}
 
 // DirFor returns the worktree directory a slug maps to.
 func (c *Config) DirFor(slug string) string { return c.MainDir + "-" + slug }

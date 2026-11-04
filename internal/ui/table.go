@@ -11,7 +11,16 @@ import (
 type Cell struct {
 	Text  string
 	Color Color
+
+	// Link makes the cell's text a hyperlink to this URL, in a terminal that
+	// draws OSC 8 links — and is ignored by one that does not, the text being
+	// the same either way. Written only where color is: the sequence is an
+	// escape like any other, and has no more business in a file or a pipe.
+	Link string
 }
+
+// Linked makes a cell whose text links to url.
+func Linked(s, url string) Cell { return Cell{Text: s, Link: url} }
 
 // Text makes an unstyled cell.
 func Text(s string) Cell { return Cell{Text: s} }
@@ -140,7 +149,7 @@ func renderRow(cells []Cell, widths []int, color bool) string {
 				b.WriteString(gutter)
 			}
 			text := cellLine(cell.Text, line)
-			b.WriteString(cell.Color.Apply(text, color))
+			b.WriteString(hyperlink(cell.Color.Apply(text, color), cell.Link, color && text != ""))
 			if i < len(cells)-1 && i < len(widths) {
 				if pad := widths[i] - utf8.RuneCountInString(text); pad > 0 {
 					b.WriteString(strings.Repeat(" ", pad))
@@ -160,4 +169,14 @@ func cellLine(text string, n int) string {
 		}
 	}
 	return ""
+}
+
+// hyperlink wraps styled text in an OSC 8 link to url when on is set. Padding
+// is measured from the plain text, as it is for color, so a link costs the
+// layout nothing.
+func hyperlink(styled, url string, on bool) string {
+	if !on || url == "" {
+		return styled
+	}
+	return "\x1b]8;;" + url + "\x1b\\" + styled + "\x1b]8;;\x1b\\"
 }

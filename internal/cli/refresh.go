@@ -212,11 +212,12 @@ func refreshTmuxBindings(env *Env) {
 		return
 	}
 
-	// Both keys as the server holds them, empty included: an empty one is a
-	// binding somebody omitted with --new-key "", and putting it back would be
-	// this command undoing a choice rather than refreshing one.
-	resume, create := tmux.BoundKeys()
-	keys := tmuxinit.Keys{Resume: resume, New: create}
+	// Every key as the server holds it, empty included: an empty one is a
+	// binding somebody omitted with --new-key "", or a plugin nobody bound, and
+	// putting it back would be this command undoing a choice — or, for the
+	// plugin's key, making one — rather than refreshing one.
+	resume, create, reviews := tmux.BoundKeys()
+	keys := tmuxinit.Keys{Resume: resume, New: create, Reviews: reviews}
 	if err := tmux.Source(tmuxinit.Script(keys)); err != nil {
 		env.warnf("could not reload the tmux key bindings\n%v", err)
 		return
@@ -260,6 +261,12 @@ func describeKeys(keys tmuxinit.Keys) string {
 			key = "(not bound)"
 		}
 		lines = append(lines, fmt.Sprintf("%-*s  %s", width, k.what, key))
+	}
+	// Named only when bound. The plugin's key is opted into, so "(not bound)"
+	// here would be reporting on a choice nobody was asked to make — every
+	// refresh, for everyone who never wanted the plugin.
+	if keys.Reviews != "" {
+		lines = append(lines, fmt.Sprintf("%-*s  %s", width, "pull requests", keys.Reviews))
 	}
 	return strings.Join(lines, "\n")
 }

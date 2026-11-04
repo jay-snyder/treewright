@@ -1136,3 +1136,39 @@ func TestAnUnknownSettingMentionsVersionSkew(t *testing.T) {
 		t.Errorf("error = %q, want version skew offered as the other reading", combined)
 	}
 }
+
+// TestRefreshCarriesThePluginKeyOnlyWhereItWasBound: a server that bound the
+// reviews picker keeps it on the key it chose, and one that never did is not
+// given one — refresh installs nothing new, and a plugin is the plainest case
+// of something new.
+func TestRefreshCarriesThePluginKeyOnlyWhereItWasBound(t *testing.T) {
+	requireTmux(t)
+	f := newFixture(t, "command = 'sleep 300'\n")
+	startSession(t, "proj", "main", f.MainDir)
+	windBack := func() {
+		t.Helper()
+		if out, err := tmuxctl(t, "set", "-g", tmuxinit.VersionOption, "000000000000"); err != nil {
+			t.Fatalf("wind the stamp back: %v\n%s", err, out)
+		}
+	}
+
+	f.mustRun("tmux-init", "--apply")
+	windBack()
+	r := f.exec("refresh")
+	if strings.Contains(flat(r.stderr), "pull requests") {
+		t.Errorf("stderr = %q, want no mention of a plugin nobody bound", r.stderr)
+	}
+	if keys, _ := tmuxctl(t, "list-keys", "-T", "prefix"); strings.Contains(keys, "reviews") {
+		t.Errorf("refresh bound the reviews picker on a server that never had it:\n%s", keys)
+	}
+
+	f.mustRun("tmux-init", "--apply", "--reviews-key", "M-r")
+	windBack()
+	r = f.exec("refresh")
+	if !strings.Contains(flat(r.stderr), "pull requests M-r") {
+		t.Errorf("stderr = %q, want the reviews key named among the ones put back", r.stderr)
+	}
+	if keys, _ := tmuxctl(t, "list-keys", "-T", "prefix", "M-r"); !strings.Contains(keys, "reviews") {
+		t.Errorf("prefix + M-r = %q, want the reviews picker still there", keys)
+	}
+}

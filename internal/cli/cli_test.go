@@ -44,6 +44,10 @@ func newFixture(t *testing.T, extraConfig string) *fixture {
 	// rather than pointed at the temp home, so the default placement is what the
 	// suite exercises; the test that covers a moved directory sets it itself.
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	// The reviews plugin's cache goes under XDG_CACHE_HOME when it is set, which
+	// HOME does not cover either: on the machine of anyone who sets it, these
+	// tests would read and rewrite that person's real review queue.
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 
 	repo := gittest.New(t)
 	f := &fixture{Repo: repo, t: t, registry: filepath.Join(repo.Root, "conf")}
@@ -80,11 +84,20 @@ func newFixture(t *testing.T, extraConfig string) *fixture {
 // one would spawn a coding agent to find out — and only on a machine that has one
 // installed, which is the worst of both worlds. With it, every machine behaves the
 // same: the window opens, the command exits, the window closes.
+//
+// A gh goes beside it, failing, for the same reason in a sharper form: the
+// reviews plugin runs gh, and the real one would ask GitHub — as whoever is
+// logged in on the machine running the suite. A test that wants answers puts a
+// gh of its own ahead of this one with stubGH.
 func stubDefaultCommand(t *testing.T) {
 	t.Helper()
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "claude"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
 		t.Fatalf("write the claude stub: %v", err)
+	}
+	inert := "#!/bin/sh\necho 'gh is stubbed out in this test' >&2\nexit 1\n"
+	if err := os.WriteFile(filepath.Join(dir, "gh"), []byte(inert), 0o755); err != nil {
+		t.Fatalf("write the gh stub: %v", err)
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }

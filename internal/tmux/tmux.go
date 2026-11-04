@@ -967,8 +967,9 @@ func ServerOption(name string) string {
 	return value
 }
 
-// BoundKeys reports which prefix keys currently run treewright's two popups, as
-// the server holds them, with "" for either that nothing is bound to.
+// BoundKeys reports which prefix keys currently run treewright's popups — the
+// worktree picker, the new-worktree prompt and the reviews plugin's picker — as
+// the server holds them, with "" for any that nothing is bound to.
 //
 // It exists so that reloading the integration can put the bindings back on the
 // keys they are on rather than on the defaults. A user who moved them with
@@ -978,16 +979,19 @@ func ServerOption(name string) string {
 //
 // The same caveat as ServerOption: ask only once a server is up, since list-keys
 // starts one.
-func BoundKeys() (resume, create string) {
+func BoundKeys() (resume, create, reviews string) {
 	out, err := run("list-keys", "-T", "prefix")
 	if err != nil {
-		return "", ""
+		return "", "", ""
 	}
 	// The same match popup.go uses to name a key in a hint. " new " and " resume"
 	// each appear in one binding's command and in neither's surroundings: the
 	// prompt in the new binding spells "new worktree:" against a quote rather
-	// than a space.
-	return parseBoundKey(out, "treewright", " resume"), parseBoundKey(out, "treewright", " new ")
+	// than a space. " reviews" ends the plugin's binding the way " resume" ends
+	// the picker's, and appears in neither of the other two.
+	return parseBoundKey(out, "treewright", " resume"),
+		parseBoundKey(out, "treewright", " new "),
+		parseBoundKey(out, "treewright", " reviews")
 }
 
 // Prefix is the key that introduces a tmux binding, as tmux spells it — "C-b"

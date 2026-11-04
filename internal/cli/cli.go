@@ -121,7 +121,14 @@ type command struct {
 	long    string   // optional detail paragraphs
 	flags   []flagDoc
 	hidden  bool // kept out of help and completion
-	run     func(*Env, []string) error
+
+	// plugin marks an opt-in plugin rather than part of the worktree tool. It
+	// is dispatched, documented and completed like any other command, and
+	// listed in help under a heading of its own, after the core commands — so
+	// the first screen of help is still the worktree tool, and a plugin reads
+	// as something that can be ignored. See docs/plugins.md.
+	plugin bool
+	run    func(*Env, []string) error
 }
 
 // argRepo is how an optional repo name is spelled in a usage line. Named once
@@ -885,7 +892,7 @@ out of a directory it just deleted, and registers tab completion.`,
 		},
 		{
 			name:    "tmux-init",
-			args:    "[--apply] [--resume-key <key>] [--new-key <key>]",
+			args:    "[--apply] [--{resume,new,reviews}-key <key>]",
 			summary: "print the tmux integration: popup key bindings and titles",
 			long: `Prints tmux configuration to load from your tmux.conf:
 
@@ -910,6 +917,12 @@ An empty key omits its binding, so --new-key "" binds only the picker. Anything
 more than the keys — the popup size, a binding of your own — is what printing to
 a file is for.
 
+--reviews-key binds the reviews plugin's picker, and is the one key with no
+default: nothing about a plugin is bound until you ask for it. Given, the
+snippet also prints the plugin's status-line pill and its click binding as
+comments, for you to place in your own tmux.conf — treewright never sets your
+status line. See "treewright help reviews".
+
 --apply loads the same text into the running server, flags included, for the
 one-line form above; printing is the default, since these are key bindings and
 worth reading first.`,
@@ -917,6 +930,7 @@ worth reading first.`,
 				{"--apply", "load it into the running tmux server instead of printing it"},
 				{"--resume-key", "prefix key that switches worktrees (default G, empty to omit)"},
 				{"--new-key", "prefix key that starts a worktree (default N, empty to omit)"},
+				{"--reviews-key", "prefix key that picks a pull request to review (no default)"},
 			},
 			run: cmdTmuxInit,
 		},
@@ -1007,6 +1021,63 @@ it has always been.`,
 				{"--check", "ask whether a newer treewright has been released"},
 			},
 			run: cmdVersion,
+		},
+		{
+			name:    reviewsCommand,
+			args:    "[segment|click|refresh] [-d <dir>] " + argRepoFlag,
+			summary: "pick a pull request waiting on you and review it in its own window",
+			plugin:  true,
+			long: `A plugin: the GitHub pull requests waiting on your review, in the
+repository you are standing in. Needs gh, the GitHub CLI, logged in. Nothing
+here runs unless you place it or type it.
+
+With no sub-command it lists them, newest first: requests for your review,
+requests you have reviewed without approving, and your own open pull requests,
+each with its age and what it is to you. Choosing one opens a review in a
+scratch window of that pull request's own, review-<number> — opened the first
+time, reached again after that, reopened on its conversation after a restart —
+as "treewright scratch --reuse" would. What the agent is told is the
+repository's review_prompt, with {number} filled in; the default is plain
+words any agent can act on, and a repository whose agent has a command of its
+own for reviewing sets it in its config.
+
+The list is read from a cache that holds every repository you have pull
+requests in, under ~/.cache/treewright/reviews/, and that is refreshed in the
+background whenever it is more than five minutes old and something is reading
+it. Only this plugin's own commands ever ask GitHub anything.
+
+The parts tmux runs:
+
+  segment   prints the status-line pill for the repository a pane is in: the
+            numbers of the fresh requests waiting on you, each one clickable,
+            and nothing at all while nothing is waiting. --style takes a tmux
+            style for it (default reverse) and --label the word in front of
+            the numbers (default PR). Put it in your own status-right:
+
+            set -g status-right "#(treewright reviews segment -d '#{pane_current_path}')<yours>"
+
+  click     opens the pull request a clicked number names. Bound to the
+            status line's mouse key, keeping tmux's own binding for every other
+            click:
+
+            bind-key -T root MouseDown1Status if-shell -F '#{m:tw-pr-*,#{mouse_status_range}}' { run-shell -b 'treewright reviews click -d "#{pane_current_path}" "#{mouse_status_range}"' } { switch-client -t = }
+
+  refresh   asks GitHub now and rewrites the cache, saying what failed if
+            anything did.
+
+"treewright tmux-init --reviews-key R" binds the list to prefix + R, in a popup,
+and prints both of those lines for you to place.
+
+--dir names the directory a pane is in, which is how tmux says which
+repository it means; --repo names one by its config instead. Nothing is
+printed to stdout but segment's pill.`,
+			flags: []flagDoc{
+				{"-d, --dir", "directory whose repository this is about (a pane's path, e.g. #{pane_current_path})"},
+				{"--style", "segment: tmux style for the pill (default reverse)"},
+				{"--label", "segment: what the pill says in front of the numbers (default PR)"},
+				repoFlagDoc,
+			},
+			run: cmdReviews,
 		},
 		{
 			name:    "__complete",
@@ -1183,6 +1254,9 @@ func writeOverview(w io.Writer, argv0 string) {
 	// arguments contribute a trailing space to the width — a phantom column that
 	// indented every summary in the list by one, for a character none of them
 	// carried.
+	//
+	// One width across both lists, core and plugins, so the summaries make one
+	// column down the whole overview rather than stepping in at the heading.
 	width := 0
 	for _, c := range commands {
 		if c.hidden {
@@ -1190,12 +1264,17 @@ func writeOverview(w io.Writer, argv0 string) {
 		}
 		width = max(width, len(usageSpec(c)))
 	}
-	for _, c := range commands {
-		if c.hidden {
-			continue
+	list := func(plugins bool) {
+		for _, c := range commands {
+			if c.hidden || c.plugin != plugins {
+				continue
+			}
+			fmt.Fprintf(w, "  %-*s  %s\n", width, usageSpec(c), c.summary)
 		}
-		fmt.Fprintf(w, "  %-*s  %s\n", width, usageSpec(c), c.summary)
 	}
+	list(false)
+	fmt.Fprintf(w, "\nplugins, each switched on by placing it or typing it:\n")
+	list(true)
 
 	fmt.Fprintf(w, "\nrun \"%s help <command>\" for detail on one command,\n", argv0)
 	fmt.Fprintf(w, "or \"%s setup\" inside a repository to register it.\n", argv0)

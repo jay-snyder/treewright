@@ -264,6 +264,11 @@ func settingsFrom(cfg *config.Config) configSettings {
 	if cfg.Explicit("tmux_session") {
 		s.tmuxSession = cfg.TmuxSession
 	}
+	// Explicit only, like base_branch: Load has filled the default in, and
+	// writing it back would pin this repository to today's default wording.
+	if cfg.Explicit("review_prompt") {
+		s.reviewPrompt = cfg.ReviewPrompt
+	}
 	return s
 }
 
@@ -506,6 +511,12 @@ type configSettings struct {
 	// file says exactly what it said before, in the spelling the generator uses
 	// for "nothing here yet".
 	features []string
+
+	// reviewPrompt is the reviews plugin's one per-repository key. Empty means
+	// the file did not set it, and unlike the command keys an empty value can
+	// never be a setting of its own here — Load refuses one, there being no
+	// {number} in it.
+	reviewPrompt string
 }
 
 // renderConfig writes the config file's text. prefixFromOrigin says which of
@@ -740,6 +751,14 @@ func renderConfig(s configSettings) string {
 	// an absent key are the same session.
 	writeSetting(&b, "tmux_session", 0, s.tmuxSession, s.name, s.tmuxSession != "")
 
+	// Last, being the one key that belongs to a plugin rather than to the
+	// worktree tool: a reader who never uses the plugin can stop before it.
+	fmt.Fprintf(&b, "\n# What the reviews plugin (\"treewright reviews\") types to start a review in\n")
+	fmt.Fprintf(&b, "# a window of its own, %s being the pull request's number. Plain words by\n", config.ReviewNumber)
+	fmt.Fprintf(&b, "# default, which any agent can act on; set it if this repository's agent\n")
+	fmt.Fprintf(&b, "# has a command of its own for reviewing.\n")
+	writeSetting(&b, "review_prompt", 0, s.reviewPrompt, config.DefaultReviewPrompt, s.reviewPrompt != "")
+
 	return b.String()
 }
 
@@ -973,6 +992,7 @@ func cmdConfig(env *Env, args []string) error {
 	// is which session their windows land in, which is the config's name until
 	// tmux_session says otherwise.
 	addSetting("tmux_session", sessionFor(cfg), cfg.Explicit("tmux_session"))
+	addSetting("review_prompt", cfg.ReviewPrompt, cfg.Explicit("review_prompt"))
 
 	table.Render(env.Stdout, ui.ColorEnabled(env.Stdout))
 	return nil

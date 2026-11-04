@@ -7,14 +7,17 @@ the alternatives that were tried, and what made them lose.
 Most of it also lives as comments next to the code it explains. Where the two
 disagree, the code comment is the one being maintained.
 
-Two subsystems are large enough, and separate enough, to be read on their own:
+Three subsystems are large enough, and separate enough, to be read on their own:
 
 - **[`tmux.md`](tmux.md)** — sessions, window identity, terminal titles, and the
   key bindings that reach treewright from a window running an agent.
 - **[`agents.md`](agents.md)** — the agent-state protocol, the agent modules and
   the plugin they install, and the kickoff prompt.
+- **[`plugins.md`](plugins.md)** — the opt-in tools that are part of the binary
+  without being part of the worktree tool, the rules every one is held to, and
+  `reviews`, the first of them.
 
-A fourth file is not a subsystem but a commitment about all of them:
+A fifth file is not a subsystem but a commitment about all of them:
 **[`compatibility.md`](compatibility.md)** — which of the surfaces described
 here are contracts, what a version number promises about them, and how a break
 is made when one is needed. Where the two disagree, this file is the definition
@@ -1052,6 +1055,9 @@ stdout carries the answer and nothing else, so any command can be piped:
 | `scratch` | nothing — the answer is a window, and the name you gave it is how everything else reaches it; where it opened goes to stderr, and under `--reuse` so does which of its three cases it met |
 | `signal` | nothing — the answer is the stamp on the window, and out of scope it is silent on stderr too |
 | `guard` | nothing — the answer is the exit code, that being what a PreToolUse hook reads, and the refusal it carries goes to stderr for the agent |
+| `reviews` | nothing — the list is a prompt, so it is on stderr, and the answer is the window a review opens in |
+| `reviews segment` | the status-line pill as a tmux format, with no newline, or nothing at all while nothing is waiting — the reader is tmux, which draws whatever it is given |
+| `reviews click`, `reviews refresh` | nothing — a click's answer is a browser tab and a refresh's is the cache it left behind; what a refresh found, or what failed, goes to stderr |
 | `session-start` | what each optional feature did, one message per feature — the reader is the agent, whose SessionStart hook adds a hook's stdout to the session as context, and with nothing to report it prints nothing at all; recording which conversation the session is prints nothing ever |
 
 Progress, warnings, prompts, and errors go to stderr, prefixed `warning:` or
@@ -1826,6 +1832,7 @@ What it writes, in full:
 | `<main_dir>/.git/treewright/move-*.patch` | The uncommitted work `move` is carrying, written before anything is created and deleted once it has landed. What is left behind is left after a failure, deliberately: it is a second copy of work that exists in one place, and the way back in by hand. |
 | `~/.claude/skills/treewright/` | The agent plugin, written by `agent-init` — one copy covering every checkout the agent is started in. The only thing on this list outside a repository besides the registry, and running the command that installs the wiring *is* the consent: nothing else writes there, `rm -r` and it is gone, and `claude plugin disable treewright@skills-dir` stops it loading without deleting anything. |
 | `<main_dir>/.claude/skills/treewright/` | The same plugin, when `agent-init --local` is asked for it — inside the repository, in a directory treewright named and nothing else writes to. |
+| `${XDG_CACHE_HOME:-~/.cache}/treewright/reviews/` | The `reviews` plugin's cache: the pull requests waiting on you, the lock one refresh holds, and the last refresh's failure. Written only by the plugin's own commands, so only once somebody placed its status-line fragment, bound its key or typed `tw reviews`. Everything in it can be fetched again, `rm -r` takes it, and the next refresh writes a new one. See [`plugins.md`](plugins.md). |
 | The worktrees themselves | What the tool is for, and `rm` takes each one back. |
 
 One path has come off that list rather than been added to it.
