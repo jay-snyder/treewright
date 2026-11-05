@@ -427,11 +427,19 @@ func (s guardScope) reaches(call hookCall) (guardFinding, bool) {
 // exact version; over-reaching by a segment or two is the safe direction, and
 // the message says how to proceed either way.
 func (s guardScope) reachesInCommand(command string) (guardFinding, bool) {
+	return s.reachesFrom(command, s.here)
+}
+
+// reachesFrom is reachesInCommand for a command that starts somewhere other
+// than where the caller stands: a command queued with cmdq, which a person
+// will run in the directory it was queued for. The scope stays the caller's —
+// which worktree is its own does not move with the command.
+func (s guardScope) reachesFrom(command, start string) (guardFinding, bool) {
 	found := func(slug, dir string) (guardFinding, bool) {
 		return guardFinding{slug: slug, dir: dir, what: abbreviatedCall(command)}, true
 	}
 
-	at := s.here
+	at := start
 	for _, seg := range scanCommand(command) {
 		program, args := programOf(seg.words)
 		if program == "" {

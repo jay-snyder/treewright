@@ -37,6 +37,10 @@ func main() {
 	if err == nil {
 		return
 	}
+	if outcome, ok := errors.AsType[*cli.OutcomeError](err); ok {
+		// Reported already, in words on stdout, by the wait that returned it.
+		os.Exit(waitExit(outcome.Outcome))
+	}
 	if !errors.Is(err, cli.ErrUsage) && !errors.Is(err, cli.ErrSilent) && !errors.Is(err, cli.ErrRefused) {
 		// The three sentinels have reported themselves already. Printed through
 		// cli rather than here, so that an error saying what to do next on a
@@ -59,4 +63,25 @@ func main() {
 		os.Exit(2)
 	}
 	os.Exit(1)
+}
+
+// waitExit is the exit code for each way `cmdq wait` can end other than with
+// the command having run and exited 0.
+//
+// An agent's next step is built on these, so they are a contract, listed in
+// docs/compatibility.md. They are the numbers the script cmdq replaced used,
+// but for the one that collided: a failed run was 2 there, and 2 is a usage
+// error here, so an agent that mistyped a flag would have read "the run
+// failed" and reported it. That one moved to 5, and an agent still holding
+// the old instructions misreads nothing but the number that had to change.
+func waitExit(o cli.WaitOutcome) int {
+	switch o {
+	case cli.WaitDismissed:
+		return 3
+	case cli.WaitTimedOut:
+		return 4
+	case cli.WaitRunFailed:
+		return 5
+	}
+	return 1
 }

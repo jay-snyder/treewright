@@ -48,6 +48,10 @@ func newFixture(t *testing.T, extraConfig string) *fixture {
 	// HOME does not cover either: on the machine of anyone who sets it, these
 	// tests would read and rewrite that person's real review queue.
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	// And the cmdq plugin's queue under XDG_STATE_HOME, for the same reason
+	// with more at stake: a test queuing into the developer's real queue puts
+	// a command in front of them that nobody meant them to run.
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
 
 	repo := gittest.New(t)
 	f := &fixture{Repo: repo, t: t, registry: filepath.Join(repo.Root, "conf")}
@@ -1737,7 +1741,15 @@ func TestMessagesShareOneVoice(t *testing.T) {
 
 	var lines []string
 	for _, args := range [][]string{
-		{"new", "beta"}, {"ls"}, {"prune"}, {"rm", "alpha"}, {"resume", "nope"}, {"scratch", "gamma"},
+		{"new", "beta"},
+		{"ls"},
+		{"prune"},
+		{"rm", "alpha"},
+		{"resume", "nope"},
+		{"scratch", "gamma"},
+		{"cmdq", "add", "--why", "x", "--", "true"},
+		{"cmdq", "list"},
+		{"cmdq", "history"},
 	} {
 		r := f.exec(args...)
 		lines = append(lines, strings.Split(strings.TrimRight(r.stderr, "\n"), "\n")...)

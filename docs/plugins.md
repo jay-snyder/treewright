@@ -16,8 +16,7 @@ candidates so far, and this file is written to cover both:
   pane is standing in: a pill in the status line, a popup picker, and a review
   run in an agent window of its own. Built, and described in full below.
 - **cmdq** — commands an agent queues for the person to run (a `sudo`, an
-  interactive login), with a popup to run them from. Not built; "cmdq, later" at
-  the end says how it would fit.
+  interactive login), with a popup to run them from. Described at the end.
 
 A plugin is **opt-in and separately scoped**. It is nothing an existing user
 meets without asking, it may depend on the one thing it is about and on nothing
@@ -511,29 +510,289 @@ config mentions the plugin except `review_prompt`, as a commented default.
 
 ---
 
-## cmdq, later
+## cmdq
 
-Commands an agent needs a person to run — a `sudo`, an interactive login — put
-in a queue the agent can wait on, with a popup to run them from. It is not
-built, and this section exists so that it does not need a seventh rule when it
-is.
+Commands an agent needs a person to run — a `sudo`, an interactive login,
+anything that wants the person's password or their terminal — put in a queue
+the agent can wait on, with a list in a popup to run them from. It began as a
+bash script in `~/.local/bin`, and this section is what was kept, what was
+ported away, and the decisions the port had to make.
 
-- **Reached as `tw cmdq`**, with its sub-commands — `add`, `wait`, `status` for
-  the agent, the picker for the person — in the command table under `plugins:`.
-- **Its queue is state, not cache**: a queued command cannot be fetched again
-  from anywhere. So it lives under `${XDG_STATE_HOME:-~/.local/state}/treewright/cmdq/`,
-  with its row in "What treewright is allowed to write".
-- **The popup key is `tmux-init --cmdq-key`**, empty by default.
-- **Agents learn about it through a feature**, switched on per repository and
-  explained by `session-start` at the start of each session, since an agent that
-  does not know the queue exists will not use it. That is the route above, and
-  the only one that reaches plugin copies already installed.
-- **Its dependency is the thing it is about, which is the terminal.** The
-  version that exists now runs the queued command under a pseudo-terminal from
-  python, so that a password prompt works and the output can still be kept for
-  `status`. Python is incidental tooling under rule five, and tmux is already a
-  pseudo-terminal per pane: running the command in a popup or pane, through
-  `internal/tmux`, gives it a real terminal, and `pipe-pane` keeps a copy of what
-  it printed. That is the shape to try first, before a pty package.
-- **Its messages name the key `tmux-init` bound**, read from the server the way
-  `newWorktreeKeys` does, rather than a key some terminal emulator was mapped to.
+```
+prefix + Q:
+
+  waiting to run · 2   ↑↓ pick  Enter run  d dismiss  h history  q close
+
+  storefront · queued just now
+  log gh in, so the reviews plugin can refresh
+  $ gh auth login
+  in ~/code/storefront
+
+▌ storefront-eng-2318 · queued 4m ago
+▌ install the toolchain the build now pins
+▌ $ sudo installer -pkg ./toolchain.pkg -target /
+▌ in ~/code/storefront-eng-2318
+```
+
+Newest first, as the script had it, so a command queued while the list is open
+arrives at the top.
+
+### What it keeps
+
+The script is trusted for a handful of properties, and each is a rule here with
+a test of its own:
+
+- **Only Enter in the list runs a command.** Nothing else ever runs one — not
+  `add`, not a refresh, not a key typed during the last run — and nothing
+  announces itself: no notification, no bell, no window opening on its own.
+- **The text shown is the text run.** An entry's command is read once, when the
+  list lays it out, and that string is what Enter hands to the shell. A file
+  rewritten between the two cannot slip a different command in.
+- **Hidden characters are shown, never sent to the terminal.** C0 controls
+  appear as their Control Pictures (ESC as ␛, tab as ␉), DEL as ␡, and the
+  zero-width and direction-override characters (U+200B–200F, U+202A–202E,
+  U+2060–2064, U+2066–2069, U+FEFF) as �, highlighted — and so are the C1
+  controls, which some terminals read as escapes of their own, and bytes that
+  are not UTF-8, which would otherwise reach the terminal raw. Newlines stay
+  newlines.
+  This holds for everything printed that somebody else wrote — the reason, who
+  asked, the directory and the output kept for `status` — and not only the
+  command, since an escape sequence in a `--why` can repaint the command
+  beneath it.
+- **The pick is an entry, not a row.** The list rereads the queue every few
+  seconds, and an entry queued meanwhile does not slide a different command
+  under the cursor. When the picked entry has left the list elsewhere — another
+  popup ran or dismissed it — Enter does nothing until the person picks again,
+  and the screen says so.
+- **An entry only partly on screen is scrolled into view before Enter runs
+  it**, so nothing runs that the person could not see whole: the first Enter
+  brings it into view and says so, and the next one runs it. One taller than
+  the popup runs as it is, there being no view that shows it all.
+- **Keys typed while a command ran are drained** before the list reads another,
+  so they do not answer it. Ctrl+C during a run goes to the command and the list
+  survives it; Ctrl+Z in the list is ignored, since it would stop the popup's
+  only program.
+- **`add` refuses** an empty command, a NUL byte, an empty `--why` and a
+  directory that does not exist. IDs are unique under concurrent `add`s: an
+  entry is written in a staging directory and renamed into the queue, a rename
+  that fails rather than replace an entry already there, and a clash retries
+  with a fresh ID.
+- **A failed run stays on the list**, marked "last run failed: exit N"; a
+  successful one moves to the history. `d` dismisses, `h` shows the history,
+  `u` there puts an entry back, and the history keeps the last fifty.
+- **`status` shows the last run's final twenty lines**, escape sequences
+  stripped.
+- **`wait` returns** once the entry ran, a run failed after the wait began, it
+  was dismissed or withdrawn, or the timeout passed — an hour unless told.
+
+### What it leaves behind
+
+The script's key was a terminal emulator's mapping, and its messages named it.
+A plugin of treewright's cannot know what somebody's terminal is mapped to, so
+every message names the key `tmux-init` bound, read from the server the way
+`newWorktreeKeys` reads the worktree picker's, and `tw cmdq` where none is.
+
+Its interpreter was a particular bash from Homebrew, its `date` and `mv` were
+GNU's through Homebrew's `gnubin`, and its pseudo-terminal came from python.
+All of that is incidental tooling under rule five, and Go does every part of it.
+
+Its queue at `~/.local/state/cmdq/` is not read. The two live side by side until
+the script is retired by hand, and an entry in one is invisible to the other.
+
+### Where the queue lives, and who asked
+
+**One queue per machine**, under `${XDG_STATE_HOME:-~/.local/state}/treewright/cmdq/`
+— state rather than cache, because a queued command cannot be fetched again from
+anywhere. Not one per repository, as `reviews` reads: the list is everything
+blocked on the person, and a `sudo` an agent in one repository asked for is no
+less theirs because the popup was opened from another repository's pane. Each
+entry says who asked, and the name says which repository. Inside the directory
+are `pending/`, `history/` and `staging/`, a directory per entry and a file per
+field, as the script had them; the layout is promised to nobody, and the IDs
+`add` prints are what `wait`, `status` and `drop` take.
+
+**`--from` defaults to the name of the agent asking**, read off the calling
+window's `@treewright_agent_name` through `tmux.CallersWindow`. The script used
+the git toplevel's folder name, which cannot tell the base agent from a scratch
+agent, both standing in the main checkout, and agents took to improvising names
+to make up for it. The agent's name is the one treewright gave it and the one
+other agents message it by, so the list, `ls` and a message all call it the same
+thing. Outside a window with a name it is the registered repository's config
+name, and outside a registered repository the checkout's folder name.
+
+### Running a command: in the popup, under a terminal of its own
+
+"A pane plus `pipe-pane`" was the shape this section first proposed, on the
+grounds that tmux is already a pseudo-terminal per pane. It was prototyped, and
+it works as far as it goes: the command sees a terminal on stdin and stdout, a
+password typed at a no-echo prompt stays out of the capture, everything else is
+in it down to the escape sequences, and the exit status can be written beside
+it. What sinks it is that **a popup is not a pane**. `pipe-pane` takes a pane,
+and a popup has none for it to take, so the run would have to leave the popup
+for a window or a split. What that costs the person, in order:
+
+1. **The list goes away, and does not come back.** The script's popup gives way
+   to the command and returns when it ends. Here the popup closes, a window
+   opens, and when the command ends the window closes too, leaving whoever ran
+   it where they started with the list gone. Bringing it back means the window's
+   wrapper opening a popup on the client that pressed Enter — a second trip
+   through `treewright popup`, with a window flashing past in between.
+2. **A window appears in somebody's session.** A split was the alternative, and
+   is worse: `send` and `capture-pane` aim at a window's active pane, so a split
+   under an agent's window would put the next `tw send` to that agent into the
+   password prompt.
+3. **A handshake, in shell.** The command must not print before `pipe-pane` is
+   attached, so the wrapper blocks on `tmux wait-for` — a shell line in the
+   window carrying the server flags, and one more place `TREEWRIGHT_TMUX_LABEL`
+   has to arrive intact, with an escape to the default server the price of a
+   slip.
+4. **The list would only work inside tmux.** The script's runs in any terminal,
+   so somebody ssh'd in with no client attached can still clear their queue.
+
+tmux 3.8's floating panes are a pane that sits over a window as a popup does,
+which would answer the first two. But Ubuntu's LTS ships tmux 3.4, which is what
+CI installs, and a plugin that needs the newest tmux is a dependency nobody
+chose.
+
+So the run stays where the script had it: **in the popup, under a pseudo-terminal
+treewright opens itself.** The code is Go and `golang.org/x/sys`, which is
+already in `go.mod` as a requirement of `x/term` and moves from indirect to
+direct — no new module. Opening one is `/dev/ptmx` and three ioctls whose names
+differ between macOS and Linux, a short file per platform. The command starts as
+the leader of a session of its own with the pty as its controlling terminal, so
+`sudo` asks for its password as it would at a prompt. The popup's terminal is
+in raw mode while the list is open, so during a run every key, Ctrl+C among
+them, is copied to the command rather than read by the list; output is copied
+to the screen with the last 64 KiB of it kept for `status`; and the pty's size
+follows the popup's. That is the shape the python had, in the language the rest
+is written in, and it runs on both CI platforms under the test suite, which
+needs no terminal of its own to drive one.
+
+Two details are easy to get wrong. **One reader takes the person's keys for as
+long as the list is open**, and hands them to the command during a run and to
+the list between runs: a read cannot be taken back, so a reader the run had
+left blocked on the terminal would swallow the first key typed at the list
+afterwards. And **the output is read with a timeout rather than a plain read**,
+because something the command started in the background can hold its terminal
+open, and print on, after the command itself has exited; what it prints in the
+next three seconds is shown, and then the list comes back, as the script's did.
+On macOS the name of the pty's other end comes from an ioctl that fills a
+buffer, which none of x/sys's wrappers takes, so that one call goes through the
+standard library's `syscall`.
+
+The command runs under `bash -c`, in the entry's directory, as it did under the
+script. Every shell command an agent writes is written for a bash-like shell,
+and a person's login shell is not one to guess at: a queued command handed to
+fish would fail on its first `&&`.
+
+### What an agent is told, and what `wait` says back
+
+**Agents learn about the queue through a feature**, `cmdq`, switched on per
+repository in `features` and explained by `session-start` at the start of each
+session — the route "Opt in through machinery that already exists" sets out.
+What it says is written for an agent: queue a command only when it needs the
+person (a `sudo`, an interactive login), never as a way to hand off work it can
+run itself; pass it on a quoted heredoc so nothing in it is expanded on the way
+in; and start `tw cmdq wait <id>` in the background straight after `add`, so the
+answer arrives as soon as there is one. `add` prints the ID on stdout and on
+stderr which key opens the list, for the agent to pass on.
+
+**`wait`'s exit codes are the script's, but for the one that collided:**
+
+| Exit | Meaning |
+|---|---|
+| 0 | it ran, and exited 0 |
+| 1 | an error: no such entry, or a queue that could not be read |
+| 2 | invoked wrong, as everywhere in treewright |
+| 3 | dismissed by the person, or withdrawn with `drop` |
+| 4 | still waiting when the time ran out |
+| 5 | a run failed after the wait began, and the entry stays waiting |
+
+The script said 2 for a failed run. In treewright 2 is a usage error, so an
+agent that mistyped a flag would have read "the run failed" and reported it.
+That one number moves, to 5, and the rest keep their meanings, so an agent still
+holding the old instruction misreads nothing but the number that had to change.
+Whatever the code, `wait` prints the entry's status on stdout first, so the
+outcome also arrives in words.
+
+The numbers are chosen in `main`, as every exit code is. `wait` returns an error
+carrying its outcome — reported already, so `main` prints nothing for it — and
+`main` holds the table from outcome to number beside its other three. They are a
+machine-read contract from the first release, since an agent's next step is
+built on them, and [`compatibility.md`](compatibility.md) lists them with the
+rest.
+
+### The asking agent's window keeps its own state
+
+An agent that queues a command and ends its turn is blocked on the person, and
+its window says otherwise: the agent's Stop hook signals `done`, "a result to
+look at", and the name gets no `!`. Reading `waiting` instead would need either
+`signal done` looking for a pending entry from that window — core consulting a
+plugin, which nothing does — or the plugin writing a state the agent's next hook
+overwrites a moment later.
+
+So this does neither, and the state stays the agent's. Its last message says
+what it queued and which key opens the list, so `done` still sends the person to
+the right place, without the `!`. The shape that would fix it belongs to
+`@treewright_agent_message`, which [`agents.md`](agents.md) reserves for "a short
+why": a window option core owns, that a plugin may write and `signal` reads, so
+the dependency runs from the plugin to core and never back. Designing it is a
+compatibility step of its own.
+
+### An entry whose directory has gone
+
+`tw rm` takes a worktree away and leaves any entry queued in it pointing at
+nothing. The dependency runs one way — cmdq knows about treewright, and core
+knows nothing about cmdq — so `rm` does not look in the queue and says nothing
+about it. The list does the work instead: such an entry is marked as gone, Enter
+on it says so in place rather than clearing the screen to say it, and `d`
+dismisses it. It is not retired on its own. `wait` would report a dismissal
+nobody made, and the command is still worth reading, perhaps to run somewhere
+else. `doctor` counts such entries in its cmdq section.
+
+### A command aimed at another agent's worktree
+
+`guard` refuses an agent's tool call that would change a worktree other than its
+own, and never refuses treewright's own commands, since they name other
+worktrees constantly. Without a check of its own, cmdq is the way around that
+refusal, one Enter away: a command the guard turned back, queued for a person to
+run in the other worktree instead — and a person reading a list of commands
+from several agents is the reader least likely to notice whose worktree a path
+is in.
+
+So **`add` asks the guard's question**. The queued command is read by the
+guard's own shell reader as a Bash call starting in `--cwd`, and refused when
+the guard would refuse it — which covers a `--cwd` in another worktree and a
+`cd` into one inside the command alike. Reads stay allowed, as they are for the
+guard, and the refusal names the handoff the guard's names. Outside the guard's
+scope — no tmux, no registered repository, no worktree but the caller's own —
+there is nothing to refuse.
+
+### The screen
+
+The list is not `internal/ui`'s picker. That one numbers single-line rows and
+must never be handed a newline, where an entry here is several lines: who and
+when, how its last run went, the reason wrapped at words, the command wrapped
+hard so every character stays where it is, and the directory. It lives in
+`internal/plugin/cmdq` as a screen of its own — the alternate screen, raw mode
+from `x/term`, redrawn every few seconds and on a resize. The layout — the
+wrapping, which lines belong to which entry, where the view sits and which entry
+is picked after a refresh — is a function of the entries and the size alone, and
+tested as one; the key loop reads from a reader the tests script. Color follows
+`internal/ui`'s rules, off under `NO_COLOR` and on a dumb terminal, and the
+stand-ins for hidden characters are in reverse video, so they are seen with or
+without it. A second plugin wanting a list of multi-line entries is the time to
+move it into `internal/ui`, and not before.
+
+The popup is sized to most of the terminal it opens on, since a command's
+output is what it ends up holding, and nobody can predict how wide that is.
+
+### Opting in
+
+| To have | Add |
+|---|---|
+| Agents that know the queue is there | `"cmdq"` in the repository's `features` |
+| The list on a key | `--cmdq-key Q` on the `tmux-init` line |
+
+`tw cmdq` works typed at a prompt with neither, in any terminal. The key has no
+default, for the reason `--reviews-key` has none.

@@ -2,7 +2,9 @@
 
 A Go CLI that gives each piece of work its own git worktree, tmux window, and
 agent session, created and torn down together. No runtime dependencies beyond
-the `git` and `tmux` binaries; two Go modules (`BurntSushi/toml`, `x/term`).
+the `git` and `tmux` binaries; three Go modules (`BurntSushi/toml`, `x/term`, and
+`x/sys`, which `x/term` already required and the cmdq plugin's pseudo-terminal
+now calls directly).
 
 This file is the map of the code and the rules that are easy to break. Two
 companions:
@@ -25,7 +27,7 @@ companions:
   - **`plugins.md`** — what a treewright plugin is and the six rules it is held
     to (run from the binary, ask treewright, opt in through existing machinery,
     tmux through the package, no incidental dependencies, script versus Go), and
-    `reviews`, the first plugin.
+    `reviews`, the first plugin, and `cmdq`, the second.
   - **`compatibility.md`** — which surfaces are contracts and which are not, what
     0.x promises and what 1.0 would freeze, how a break is made and announced.
 
@@ -201,7 +203,9 @@ and without the step a Mac gets a binary that exits 137 and prints nothing. See
 | `internal/cli/version.go` | What `version` reports: the ldflags stamp, else the build info — and `--check`. |
 | `internal/config` | TOML loading, defaults, and which config applies. |
 | `internal/feature` | The optional behaviors' vocabulary: name, moment, summary, and the prose a generated config explains them with. |
+| `internal/cli/cmdq.go` | `cmdq`, the second plugin: `add` and the guard's question it asks of a queued command, who is asking (the agent's name off its window), `wait`, `status`, `drop`, `list`, `history`, the key that opens the list, the popup's size, its `doctor` section and the briefing `session-start` gives an agent. |
 | `internal/plugin/reviews` | What the `reviews` plugin knows that is not about treewright: the `gh` queries, the cache and its lock, a remote URL's `owner/name`, ages, and the pill's tmux format. |
+| `internal/plugin/cmdq` | What the `cmdq` plugin knows that is not about treewright: the queue and its atomic adds, the stand-ins for hidden characters, the pseudo-terminal a command runs under (a short file per platform), and the list — its layout and view as plain functions, and the screen that reads keys and runs what Enter picks. |
 | `internal/refname` | git's branch-name rules, restated for slugs and prefixes. |
 | `internal/git` | Every git call, including merged/unpushed/dirty logic. |
 | `internal/tmux` | Every tmux call, window identity, popups. |
@@ -226,7 +230,10 @@ looks the name up in the `commands` table → the command calls `resolveConfig("
 silently, any other error → printed as `error: ...` then exit 1. `ErrRefused`
 shares a code with `ErrUsage` because the code was chosen by somebody else: a
 PreToolUse hook blocks on 2 and on nothing else. Nothing reads the two apart —
-one is answered to a shell and the other to an agent hook.
+one is answered to a shell and the other to an agent hook. The one other code
+is `cmdq wait`'s: it returns an `OutcomeError`, reported already, and
+`waitExit` in `main` turns its outcome into 3, 4 or 5 — numbers an agent acts
+on, listed in `docs/compatibility.md`.
 
 ## Invariants that are easy to break
 
@@ -438,7 +445,8 @@ else.** The whole list is `<config dir>/<name>.toml`,
 `.git/treewright/post-create-*`, `.git/treewright/move-*.patch` and
 `.git/treewright/sessions/*` inside the repo, the worktrees, a plugin's own
 cache or state under `$XDG_CACHE_HOME/treewright/<plugin>/` or
-`$XDG_STATE_HOME/treewright/<plugin>/` (today only `reviews`' cache), and
+`$XDG_STATE_HOME/treewright/<plugin>/` (today `reviews`' cache and `cmdq`'s
+queue), and
 `~/.claude/skills/treewright/` —
 `<main_dir>/.claude/skills/treewright/` when `agent-init --local` names it, and
 `$CLAUDE_CONFIG_DIR/skills/treewright/` when the agent's own variable moves that
@@ -774,8 +782,13 @@ only on its own commands' paths: `reviews segment` starts a background refresh
 because a person put it in their status line, and **no core command, hook or
 `doctor` ever asks GitHub anything** — doctor reads gh's login with `gh auth
 token`, which is local, and the last refresh's outcome from disk. Its state lives
-under `$XDG_CACHE_HOME/treewright/<plugin>/`, and doctor reports on a plugin only
-once that directory exists. **Which repository a pane is in is resolved exactly**
+under `$XDG_CACHE_HOME/treewright/<plugin>/`, or `$XDG_STATE_HOME/…` for what
+cannot be fetched again (`cmdq`'s queue), and doctor reports on a plugin only
+once that directory exists. **Only Enter in cmdq's list runs a queued command**,
+and **what runs is the string the list drew**, read once; everything somebody
+else wrote is shown through `cmdq.Visible`, never written raw. `cmdq add` asks
+the guard's question of the command it queues (`reachesFrom`, starting where the
+command will run), or cmdq is the way around the guard. **Which repository a pane is in is resolved exactly**
 (`configAt`), never through `resolveConfig`'s single-config fallback, which would
 draw one repository's pill from every directory on the machine. See
 `docs/plugins.md`.
@@ -916,8 +929,8 @@ by default, so without it a test of the plugin would rewrite the maintainer's ow
 wiring. `CLAUDE_CONFIG_DIR` is emptied for the same reason and is not covered by
 `HOME`: it is usually absolute, so on the machine of anyone who has moved that
 directory the suite would install into their real one. `XDG_CACHE_HOME` is
-pointed at a temp directory for the reviews plugin's cache, on the same
-argument, and a **failing `gh`** sits beside the `claude` stub so no test can
+pointed at a temp directory for the reviews plugin's cache, and `XDG_STATE_HOME`
+for the cmdq plugin's queue, on the same argument, and a **failing `gh`** sits beside the `claude` stub so no test can
 ask GitHub anything as whoever runs the suite — `stubGH` in `reviews_test.go`
 puts one that answers ahead of it. A background refresh re-runs
 `os.Executable()`, which under `go test` is the test binary, and `TestMain` in

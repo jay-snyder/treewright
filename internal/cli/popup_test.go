@@ -328,7 +328,7 @@ func TestTheEmptyRepoPopupFitsItsMessage(t *testing.T) {
 	f := newFixture(t, "")
 
 	env := &Env{Argv0: "treewright"}
-	w, h := sizeFor(env, "resume")
+	w, h := sizeFor(env, "", "resume")
 	want := utf8.RuneCountInString(noWorktreesMessage(env.Argv0, "proj"))
 	if w < want+2 {
 		t.Errorf("width = %d, but the message is %d wide — it would wrap", w, want)
@@ -354,14 +354,14 @@ func TestPopupSizesOnlyThePickers(t *testing.T) {
 	f.mustRun("new", "eng-1")
 
 	env := &Env{Argv0: "treewright"}
-	sized, _ := sizeFor(env, "resume")
-	fixed, _ := sizeFor(env, "new")
+	sized, _ := sizeFor(env, "", "resume")
+	fixed, _ := sizeFor(env, "", "new")
 	if sized == fixed {
 		t.Errorf("resume and new both sized %d; resume should follow its worktrees", sized)
 	}
 
 	// An unknown command must not panic its way to a size.
-	if w, h := sizeFor(env, "nonesuch"); w <= 0 || h <= 0 {
+	if w, h := sizeFor(env, "", "nonesuch"); w <= 0 || h <= 0 {
 		t.Errorf("sizeFor(unknown) = %dx%d, want the fallback", w, h)
 	}
 }

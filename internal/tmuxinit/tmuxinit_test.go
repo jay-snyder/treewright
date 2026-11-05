@@ -341,6 +341,37 @@ func TestThePluginKeyIsBoundOnlyWhenGiven(t *testing.T) {
 	}
 }
 
+// TestTheCmdqKeyIsBoundOnlyWhenGiven, for the reviews key's reason, and on a
+// key tmux leaves free: Q, the example the docs give, is not one of tmux's own.
+func TestTheCmdqKeyIsBoundOnlyWhenGiven(t *testing.T) {
+	if strings.Contains(Script(DefaultKeys()), "cmdq") || DefaultKeys().Cmdq != "" {
+		t.Errorf("the default snippet binds the cmdq list")
+	}
+	script := Script(Keys{Cmdq: "Q"})
+	if !strings.Contains(script, `bind-key Q run-shell -b 'treewright popup -c "#{client_tty}" -d "#{pane_current_path}" cmdq'`) {
+		t.Errorf("the cmdq key is not bound to the list:\n%s", script)
+	}
+	if (Keys{Cmdq: "a;b"}).Validate() == nil {
+		t.Errorf("a cmdq key with a semicolon in it was accepted")
+	}
+
+	tmux := server(t)
+	// tmux answers a key nothing is bound to with an error, "unknown key".
+	if before, err := tmux("list-keys", "-T", "prefix", "Q"); err == nil && strings.TrimSpace(before) != "" {
+		t.Fatalf("stock tmux binds prefix + Q, which the docs offer as free: %s", before)
+	}
+	path := filepath.Join(t.TempDir(), "treewright.tmux")
+	if err := os.WriteFile(path, []byte(script), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := tmux("source-file", path); err != nil {
+		t.Fatalf("tmux rejected the snippet with the cmdq key: %v\n%s", err, out)
+	}
+	if keys, _ := tmux("list-keys", "-T", "prefix", "Q"); !strings.Contains(keys, "cmdq") {
+		t.Errorf("prefix + Q = %q, want the cmdq list", keys)
+	}
+}
+
 // TestThePillAndItsClickArePrintedNeverLoaded: status-right is the person's own
 // format, and the click binding replaces one of tmux's own, so both are lines in
 // the snippet's comments for a person to place — and loading the snippet leaves

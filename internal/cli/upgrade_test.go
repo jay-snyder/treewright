@@ -1172,3 +1172,22 @@ func TestRefreshCarriesThePluginKeyOnlyWhereItWasBound(t *testing.T) {
 		t.Errorf("prefix + M-r = %q, want the reviews picker still there", keys)
 	}
 }
+
+// TestRefreshCarriesTheCmdqKey on the key it was bound to, as it does the
+// reviews picker's, and names it among the keys put back.
+func TestRefreshCarriesTheCmdqKey(t *testing.T) {
+	requireTmux(t)
+	f := newFixture(t, "command = 'sleep 300'\n")
+	startSession(t, "proj", "main", f.MainDir)
+	f.mustRun("tmux-init", "--apply", "--cmdq-key", "M-q")
+	if out, err := tmuxctl(t, "set", "-g", tmuxinit.VersionOption, "000000000000"); err != nil {
+		t.Fatalf("wind the stamp back: %v\n%s", err, out)
+	}
+	r := f.exec("refresh")
+	if !strings.Contains(flat(r.stderr), "queued commands M-q") {
+		t.Errorf("stderr = %q, want the cmdq key named among the ones put back", r.stderr)
+	}
+	if keys, _ := tmuxctl(t, "list-keys", "-T", "prefix", "M-q"); !strings.Contains(keys, "cmdq") {
+		t.Errorf("prefix + M-q = %q, want the cmdq list still there", keys)
+	}
+}

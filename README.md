@@ -386,6 +386,27 @@ plain words. If your agent has its own command for reviews, use that:
 review_prompt = "/review {number}"
 ```
 
+## Commands an agent needs you to run
+
+Also optional. Some commands need you rather than an agent: a `sudo`, or a
+login that asks for your password. With the `cmdq` feature on, an agent queues
+those for you and waits, instead of pasting them into its reply:
+
+```toml
+features = ["cmdq"]
+```
+
+`tw cmdq` opens the list. Each entry shows who asked, why, the command, and the
+folder it runs in. Press Enter on one to run it right there, where `sudo` can
+ask for your password. Nothing runs any other way. `d` dismisses an entry, and
+the agent that asked hears either way.
+
+To get the list on a key, add the key to your `tmux-init` line:
+
+```tmux
+run-shell 'treewright tmux-init --apply --cmdq-key Q'
+```
+
 ## It won't let you lose work
 
 - `tw rm` refuses if the worktree is dirty or has commits that aren't on origin.
@@ -462,6 +483,7 @@ rm -r ~/.config/treewright            # the registry
 rm -r ~/.claude/skills/treewright     # the agent plugin, if you installed it
                                       # ($CLAUDE_CONFIG_DIR/skills/… if you set it)
 rm -r ~/.cache/treewright             # tw reviews' cache, if you used it
+rm -r ~/.local/state/treewright       # tw cmdq's queue, if you used it
 ```
 
 Then delete the `shell-init` line from your shell startup file and the

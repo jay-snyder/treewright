@@ -98,6 +98,7 @@ func cmdSessionStart(env *Env, args []string) error {
 // better failure than a method signature nobody can implement wrong.
 var sessionStartFeatures = map[string]func(*config.Config) string{
 	feature.FreshBase: freshBase,
+	feature.Cmdq:      cmdqBriefing,
 }
 
 // freshBase fast-forwards the base checkout when an agent session starts in it

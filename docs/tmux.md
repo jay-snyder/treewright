@@ -464,8 +464,11 @@ on every existing server take a key nobody gave up. `refresh` carries it like th
 other two — onto the key a server already holds it on, and onto none where it was
 never bound. The plugin's status-line pill and its click binding are printed in
 the snippet's comments rather than loaded, the first because `status-right` is
-yours and the second because it replaces a binding of tmux's own. See
-[`plugins.md`](plugins.md).
+yours and the second because it replaces a binding of tmux's own.
+`--cmdq-key` is the same for the cmdq plugin's list of queued commands, with
+nothing printed beside it, and its popup is the one sized to most of the
+terminal rather than to its contents, since what it ends up holding is a
+command's output. See [`plugins.md`](plugins.md).
 
 Keys are validated as letters, digits, dashes, and underscores, which covers `V`,
 `C-n`, `M-Left`, and `F5`. Anything with punctuation tmux reads as config syntax

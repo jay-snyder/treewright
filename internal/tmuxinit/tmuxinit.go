@@ -39,6 +39,10 @@ type Keys struct {
 	// start, take a key they never gave up for a tool they never asked for. See
 	// "Opt in through machinery that already exists" in docs/plugins.md.
 	Reviews string
+
+	// Cmdq opens the cmdq plugin's list of commands waiting to be run, with
+	// no default for the reason Reviews has none.
+	Cmdq string
 }
 
 // DefaultKeys are what the snippet binds when the caller asks for nothing else.
@@ -83,6 +87,7 @@ func (k Keys) Validate() error {
 		{"--resume-key", k.Resume},
 		{"--new-key", k.New},
 		{"--reviews-key", k.Reviews},
+		{"--cmdq-key", k.Cmdq},
 	} {
 		if named.value == "" {
 			continue // asked for deliberately: bind nothing to this one
@@ -120,6 +125,9 @@ func Script(k Keys) string {
 	if k.Reviews != "" {
 		b.WriteString(fill(reviewsSection, k.Reviews))
 	}
+	if k.Cmdq != "" {
+		b.WriteString(fill(cmdqSection, k.Cmdq))
+	}
 
 	b.WriteString(titles)
 	b.WriteString(recorded)
@@ -154,7 +162,7 @@ const VersionOption = "@treewright_tmux_init"
 // choice, made at the tmux.conf line, and a fingerprint that moved with it would
 // report a custom binding as an old one forever.
 func Version() string {
-	sum := sha256.Sum256([]byte(header + reachHeader + resumeBinding + newBinding + reviewsSection + titles + recorded + stamp))
+	sum := sha256.Sum256([]byte(header + reachHeader + resumeBinding + newBinding + reviewsSection + cmdqSection + titles + recorded + stamp))
 	// Twelve hex characters, as internal/shellinit does for the same purpose: the
 	// value goes in a line a person reads, and 48 bits is far more than enough to
 	// separate one release's snippet from another's.
@@ -274,6 +282,21 @@ bind-key {{key}} run-shell -b 'treewright popup -c "#{client_tty}" -d "#{pane_cu
 # tmux's own for every other click on the status line:
 #
 #     bind-key -T root MouseDown1Status if-shell -F '#{m:tw-pr-*,#{mouse_status_range}}' { run-shell -b 'treewright reviews click -d "#{pane_current_path}" "#{mouse_status_range}"' } { switch-client -t = }
+`
+
+// The cmdq plugin's section: the list, on a key, through the same popup as the
+// worktree picker for every reason given above reachHeader. The list is one
+// per machine, so the directory does not choose what it shows — it is passed
+// all the same, because a binding without it is the bug that comment is about,
+// and the test that every binding carries it is simpler than an exception.
+const cmdqSection = `
+# --- commands waiting for you to run ------------------------------------------
+#
+# The cmdq plugin: commands an agent queued because they need you — a sudo, an
+# interactive login. Nothing runs until you press Enter on it in the list.
+
+# prefix + {{key}} — the list of commands waiting to run.
+bind-key {{key}} run-shell -b 'treewright popup -c "#{client_tty}" -d "#{pane_current_path}" cmdq'
 `
 
 const titles = `

@@ -52,6 +52,7 @@ _treewright() {
     'refresh:bring every checkout and the tmux server up to date with this treewright'
     'version:print the version, and with --check say whether a newer one is out'
     'reviews:pick a pull request waiting on you and review it in its own window'
+    'cmdq:commands an agent queued for you to run, and the list to run them from'
   )
   if (( CURRENT == 2 )); then
     _describe -t commands 'treewright command' cmds
@@ -85,6 +86,7 @@ _treewright() {
     signal)                      compadd -- ${(f)"$(command treewright __complete states 2>/dev/null)"} ;;
     agent-init)                  compadd -- ${(f)"$(command treewright __complete agents 2>/dev/null)"} ;;
     reviews)                     (( CURRENT == 3 )) && compadd -- ${(f)"$(command treewright __complete reviews 2>/dev/null)"} ;;
+    cmdq)                        (( CURRENT == 3 )) && compadd -- ${(f)"$(command treewright __complete cmdq 2>/dev/null)"} ;;
   esac
 }
 # tw calls the treewright *function*, resolved at call time, so the eval-file

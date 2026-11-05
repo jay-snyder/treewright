@@ -967,9 +967,18 @@ func ServerOption(name string) string {
 	return value
 }
 
+// Bindings are the prefix keys treewright's popups are on, with "" for any
+// that nothing is bound to.
+type Bindings struct {
+	Resume  string // the worktree picker
+	New     string // the new-worktree prompt
+	Reviews string // the reviews plugin's picker
+	Cmdq    string // the cmdq plugin's list
+}
+
 // BoundKeys reports which prefix keys currently run treewright's popups — the
-// worktree picker, the new-worktree prompt and the reviews plugin's picker — as
-// the server holds them, with "" for any that nothing is bound to.
+// worktree picker, the new-worktree prompt and the plugins' — as the server
+// holds them.
 //
 // It exists so that reloading the integration can put the bindings back on the
 // keys they are on rather than on the defaults. A user who moved them with
@@ -979,19 +988,22 @@ func ServerOption(name string) string {
 //
 // The same caveat as ServerOption: ask only once a server is up, since list-keys
 // starts one.
-func BoundKeys() (resume, create, reviews string) {
+func BoundKeys() Bindings {
 	out, err := run("list-keys", "-T", "prefix")
 	if err != nil {
-		return "", "", ""
+		return Bindings{}
 	}
 	// The same match popup.go uses to name a key in a hint. " new " and " resume"
 	// each appear in one binding's command and in neither's surroundings: the
 	// prompt in the new binding spells "new worktree:" against a quote rather
-	// than a space. " reviews" ends the plugin's binding the way " resume" ends
-	// the picker's, and appears in neither of the other two.
-	return parseBoundKey(out, "treewright", " resume"),
-		parseBoundKey(out, "treewright", " new "),
-		parseBoundKey(out, "treewright", " reviews")
+	// than a space. " reviews" and " cmdq" end the plugins' bindings the way
+	// " resume" ends the picker's, and appear in none of the others.
+	return Bindings{
+		Resume:  parseBoundKey(out, "treewright", " resume"),
+		New:     parseBoundKey(out, "treewright", " new "),
+		Reviews: parseBoundKey(out, "treewright", " reviews"),
+		Cmdq:    parseBoundKey(out, "treewright", " cmdq"),
+	}
 }
 
 // Prefix is the key that introduces a tmux binding, as tmux spells it — "C-b"
@@ -1139,6 +1151,27 @@ func Popup(client, dir, command string, width, height int) error {
 		return nil
 	}
 	return wrapExecErr(full, &stderr, err)
+}
+
+// ClientSize is the size of a client's terminal in cells, for a popup that
+// takes most of it: client as Popup takes one, "" for the current client.
+// ok is false wherever tmux cannot say — outside tmux with no client named.
+func ClientSize(client string) (width, height int, ok bool) {
+	args := []string{"display-message", "-p"}
+	if client != "" {
+		args = append(args, "-c", client)
+	}
+	out, err := run(append(args, "#{client_width} #{client_height}")...)
+	if err != nil {
+		return 0, 0, false
+	}
+	w, h, found := strings.Cut(strings.TrimSpace(out), " ")
+	width, werr := strconv.Atoi(w)
+	height, herr := strconv.Atoi(h)
+	if !found || werr != nil || herr != nil || width <= 0 || height <= 0 {
+		return 0, 0, false
+	}
+	return width, height, true
 }
 
 // popupArgs builds that command line. Split out because opening a popup needs a
