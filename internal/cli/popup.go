@@ -95,7 +95,7 @@ func cmdPopup(env *Env, args []string) error {
 		}
 	}
 
-	width, height := sizeFor(env, positional[0])
+	width, height := sizeFor(env, client, positional[0])
 
 	// The binary by its own path rather than by name: the popup runs through a
 	// shell whose PATH is the tmux server's, which is inherited from whatever
@@ -129,7 +129,7 @@ func cmdPopup(env *Env, args []string) error {
 // Only the pickers have a size worth deriving; everything else prints a few lines
 // of progress whose length nobody can predict, and for those a small fixed popup
 // beats a proportion of the terminal.
-func sizeFor(env *Env, command string) (width, height int) {
+func sizeFor(env *Env, client, command string) (width, height int) {
 	const (
 		defaultWidth  = 80
 		defaultHeight = 12
@@ -137,6 +137,9 @@ func sizeFor(env *Env, command string) (width, height int) {
 	cmd := lookup(command)
 	if cmd != nil && cmd.name == reviewsCommand {
 		return reviewsPopupSize()
+	}
+	if cmd != nil && cmd.name == cmdqCommand {
+		return cmdqPopupSize(client)
 	}
 	if cmd == nil || (cmd.name != "resume" && cmd.name != "cd") {
 		return defaultWidth, defaultHeight
@@ -222,7 +225,13 @@ func noWorktreesMessage(argv0, repo string) string {
 func newWorktreeKeys() string {
 	// Both, so that neither `bind n new-window` nor treewright's own resume binding
 	// is mistaken for this one.
-	key := tmux.KeyBoundTo("treewright", " new ")
+	return keystroke("treewright", " new ")
+}
+
+// keystroke spells the prefix key whose binding mentions all of match, with
+// the prefix in front of it, or "" when no binding does.
+func keystroke(match ...string) string {
+	key := tmux.KeyBoundTo(match...)
 	if key == "" {
 		return ""
 	}

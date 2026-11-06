@@ -42,6 +42,43 @@ var (
 	ErrRefused = errors.New("refused")
 )
 
+// WaitOutcome is how `cmdq wait` ended, when it ended any way but the one
+// that exits 0: the command ran, and exited 0.
+type WaitOutcome int
+
+// The outcomes of a wait, each of which main gives a code of its own. Their
+// numbers are main's to choose, and docs/compatibility.md lists them.
+const (
+	// WaitDismissed is an entry the person dismissed, or the agent withdrew.
+	WaitDismissed WaitOutcome = iota + 1
+	// WaitTimedOut is an entry still waiting when the time ran out.
+	WaitTimedOut
+	// WaitRunFailed is a run that failed after the wait began. The entry stays
+	// on the list, for the person to try again.
+	WaitRunFailed
+)
+
+// OutcomeError carries a wait's outcome to main, which turns it into an exit
+// code — the one place codes are chosen. It has been reported already, on
+// stdout in words, so main prints nothing for it.
+//
+// A type rather than a sentinel per outcome because the outcomes are one
+// vocabulary with one table in main, and three sentinels would be three
+// entries in main's list of things not to print, each a place to forget one.
+type OutcomeError struct{ Outcome WaitOutcome }
+
+func (e *OutcomeError) Error() string {
+	switch e.Outcome {
+	case WaitDismissed:
+		return "dismissed or withdrawn"
+	case WaitTimedOut:
+		return "still waiting when the time ran out"
+	case WaitRunFailed:
+		return "a run failed"
+	}
+	return "waited"
+}
+
 // usageError is a command invoked wrongly: a bad flag, a missing or extra
 // argument. Run turns it into a message plus that command's help.
 type usageError struct {
@@ -892,7 +929,7 @@ out of a directory it just deleted, and registers tab completion.`,
 		},
 		{
 			name:    "tmux-init",
-			args:    "[--apply] [--{resume,new,reviews}-key <key>]",
+			args:    "[--apply] [--{resume,new,reviews,cmdq}-key <key>]",
 			summary: "print the tmux integration: popup key bindings and titles",
 			long: `Prints tmux configuration to load from your tmux.conf:
 
@@ -923,6 +960,9 @@ snippet also prints the plugin's status-line pill and its click binding as
 comments, for you to place in your own tmux.conf — treewright never sets your
 status line. See "treewright help reviews".
 
+--cmdq-key binds the cmdq plugin's list of commands an agent queued for you to
+run, with no default for the same reason. See "treewright help cmdq".
+
 --apply loads the same text into the running server, flags included, for the
 one-line form above; printing is the default, since these are key bindings and
 worth reading first.`,
@@ -931,6 +971,7 @@ worth reading first.`,
 				{"--resume-key", "prefix key that switches worktrees (default G, empty to omit)"},
 				{"--new-key", "prefix key that starts a worktree (default N, empty to omit)"},
 				{"--reviews-key", "prefix key that picks a pull request to review (no default)"},
+				{"--cmdq-key", "prefix key that opens the list of queued commands (no default)"},
 			},
 			run: cmdTmuxInit,
 		},
@@ -1078,6 +1119,64 @@ printed to stdout but segment's pill.`,
 				repoFlagDoc,
 			},
 			run: cmdReviews,
+		},
+		{
+			name:    cmdqCommand,
+			args:    "[add|wait|status|drop|list|history] [<id>] [-- <command>]",
+			summary: "commands an agent queued for you to run, and the list to run them from",
+			plugin:  true,
+			long: `A plugin: commands an agent needs you to run — a sudo, an interactive
+login, anything that wants your password or your terminal — queued for you,
+with a list to run them from. Nothing runs until you press Enter on it there,
+and nothing announces itself.
+
+With no sub-command it opens the list, newest first: who asked and when, why,
+the command, and where it runs. Up and down pick an entry, and Enter runs it
+under bash in its directory, with a terminal of its own, so sudo asks for its
+password as it would at a prompt; the list comes back when it ends. A run that
+fails stays on the list, and one that exits 0 moves to the history, which
+keeps the last fifty. d dismisses an entry, h shows the history, and u there
+puts one back. Hidden characters — escape sequences, carriage returns,
+direction overrides — are shown as stand-ins and never sent to the terminal,
+in the command and in everything around it.
+
+The parts an agent runs:
+
+  add       queues a command and prints its ID. The command goes after --,
+            or on stdin as a quoted heredoc, so the shell running add
+            expands nothing in it:
+
+            treewright cmdq add --why "install the toolchain" <<'EOF'
+            sudo installer -pkg ./toolchain.pkg -target /
+            EOF
+
+            --why is required. --from is who asked, the asking agent's name
+            unless given; --cwd is where it runs, here unless given. A
+            command that would change another agent's worktree is refused,
+            as guard refuses one.
+
+  wait      waits for an entry, for an hour unless --timeout says otherwise,
+            prints how it went, and exits 0 when it ran and exited 0, 5 when
+            a run failed after the wait began, 3 when it was dismissed or
+            withdrawn, and 4 when the time ran out.
+
+  status    how an entry stands, and the last twenty lines of its last run.
+  drop      withdraws an entry that is no longer needed.
+  list      what is waiting, printed rather than shown.
+  history   what ran or was dismissed lately, printed.
+
+There is one queue per machine, under ~/.local/state/treewright/cmdq/.
+"treewright tmux-init --cmdq-key Q" binds the list to prefix + Q, in a popup,
+and the cmdq feature, in a repository's features, tells each agent session
+that the queue is there. Nothing is printed to stdout but add's ID, and what
+list, history, status and wait report.`,
+			flags: []flagDoc{
+				{"--why", "add: what the command is for, in one line (required)"},
+				{"--from", "add: who is asking (default: the asking agent's name)"},
+				{"--cwd", "add: the directory it runs in (default: here)"},
+				{"--timeout", "wait: seconds to wait (default 3600)"},
+			},
+			run: cmdCmdq,
 		},
 		{
 			name:    "__complete",

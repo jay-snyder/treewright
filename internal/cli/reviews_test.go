@@ -662,7 +662,7 @@ func TestThePopupIsSizedToTheQueue(t *testing.T) {
 	}
 
 	// Through sizeFor, which is what `popup reviews` asks.
-	if sw, sh := sizeFor(&Env{Argv0: "tw"}, "reviews"); sw != w || sh != h {
+	if sw, sh := sizeFor(&Env{Argv0: "tw"}, "", "reviews"); sw != w || sh != h {
 		t.Errorf("sizeFor(reviews) = %dx%d, want the plugin's own %dx%d", sw, sh, w, h)
 	}
 }

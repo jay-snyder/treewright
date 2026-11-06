@@ -53,7 +53,10 @@ func cmdTmuxInit(env *Env, args []string) error {
 	keys := tmuxinit.DefaultKeys()
 	if _, err := parseArgs("tmux-init", args,
 		map[string]*bool{"--apply": &apply},
-		map[string]*string{"--resume-key": &keys.Resume, "--new-key": &keys.New, "--reviews-key": &keys.Reviews},
+		map[string]*string{
+			"--resume-key": &keys.Resume, "--new-key": &keys.New,
+			"--reviews-key": &keys.Reviews, "--cmdq-key": &keys.Cmdq,
+		},
 		0); err != nil {
 		return err
 	}
@@ -339,6 +342,10 @@ func cmdComplete(env *Env, args []string) error {
 	// out a vocabulary internal/cli owns.
 	case reviewsCommand:
 		for _, sub := range reviewsSubcommands {
+			fmt.Fprintln(env.Stdout, sub)
+		}
+	case cmdqCommand:
+		for _, sub := range cmdqSubcommands {
 			fmt.Fprintln(env.Stdout, sub)
 		}
 	case "flags":

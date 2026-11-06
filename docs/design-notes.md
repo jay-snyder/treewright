@@ -14,8 +14,8 @@ Three subsystems are large enough, and separate enough, to be read on their own:
 - **[`agents.md`](agents.md)** — the agent-state protocol, the agent modules and
   the plugin they install, and the kickoff prompt.
 - **[`plugins.md`](plugins.md)** — the opt-in tools that are part of the binary
-  without being part of the worktree tool, the rules every one is held to, and
-  `reviews`, the first of them.
+  without being part of the worktree tool, the rules every one is held to,
+  `reviews`, the first of them, and `cmdq`, the second.
 
 A fifth file is not a subsystem but a commitment about all of them:
 **[`compatibility.md`](compatibility.md)** — which of the surfaces described
@@ -1058,6 +1058,11 @@ stdout carries the answer and nothing else, so any command can be piped:
 | `reviews` | nothing — the list is a prompt, so it is on stderr, and the answer is the window a review opens in |
 | `reviews segment` | the status-line pill as a tmux format, with no newline, or nothing at all while nothing is waiting — the reader is tmux, which draws whatever it is given |
 | `reviews click`, `reviews refresh` | nothing — a click's answer is a browser tab and a refresh's is the cache it left behind; what a refresh found, or what failed, goes to stderr |
+| `cmdq` | nothing — the list is a screen of its own, drawn on stderr as every picker is, and its answer is the command it ran |
+| `cmdq add` | the queued entry's ID, which is what `wait`, `status` and `drop` take — which key opens the list, and the `wait` line to run, go to stderr |
+| `cmdq wait`, `cmdq status` | how the entry stands, in a line, and the last lines its last run printed — the reader is an agent, and `wait` prints it whatever its exit code says, so the outcome arrives in words too |
+| `cmdq list`, `cmdq history` | the entries, as text a person reads over ssh — an empty list prints nothing, and says so on stderr |
+| `cmdq drop` | nothing — the answer is an entry that is no longer waiting; which one goes to stderr |
 | `session-start` | what each optional feature did, one message per feature — the reader is the agent, whose SessionStart hook adds a hook's stdout to the session as context, and with nothing to report it prints nothing at all; recording which conversation the session is prints nothing ever |
 
 Progress, warnings, prompts, and errors go to stderr, prefixed `warning:` or
@@ -1833,6 +1838,7 @@ What it writes, in full:
 | `~/.claude/skills/treewright/` | The agent plugin, written by `agent-init` — one copy covering every checkout the agent is started in. The only thing on this list outside a repository besides the registry, and running the command that installs the wiring *is* the consent: nothing else writes there, `rm -r` and it is gone, and `claude plugin disable treewright@skills-dir` stops it loading without deleting anything. |
 | `<main_dir>/.claude/skills/treewright/` | The same plugin, when `agent-init --local` is asked for it — inside the repository, in a directory treewright named and nothing else writes to. |
 | `${XDG_CACHE_HOME:-~/.cache}/treewright/reviews/` | The `reviews` plugin's cache: the pull requests waiting on you, the lock one refresh holds, and the last refresh's failure. Written only by the plugin's own commands, so only once somebody placed its status-line fragment, bound its key or typed `tw reviews`. Everything in it can be fetched again, `rm -r` takes it, and the next refresh writes a new one. See [`plugins.md`](plugins.md). |
+| `${XDG_STATE_HOME:-~/.local/state}/treewright/cmdq/` | The `cmdq` plugin's queue: the commands agents queued for you to run, the history of the last fifty that ran or were dismissed, and what each one's last run printed. State rather than cache, because a queued command cannot be fetched again from anywhere. Written only by the plugin's own commands — an agent's `add`, and the list — so only once a repository switched the feature on or somebody typed `tw cmdq`. `rm -r` takes it, and every command waiting in it with it. See [`plugins.md`](plugins.md). |
 | The worktrees themselves | What the tool is for, and `rm` takes each one back. |
 
 One path has come off that list rather than been added to it.

@@ -19,14 +19,22 @@ const (
 	Red
 	Cyan
 	Dim
+
+	// Bold and Reverse are the cmdq plugin's list: Bold for who asked, and
+	// Reverse for the stand-in a hidden character is shown as, which has to
+	// be found on a line by somebody about to run it.
+	Bold
+	Reverse
 )
 
 var ansiCodes = map[Color]string{
-	Green:  "\x1b[32m",
-	Yellow: "\x1b[33m",
-	Red:    "\x1b[31m",
-	Cyan:   "\x1b[36m",
-	Dim:    "\x1b[2m",
+	Green:   "\x1b[32m",
+	Yellow:  "\x1b[33m",
+	Red:     "\x1b[31m",
+	Cyan:    "\x1b[36m",
+	Dim:     "\x1b[2m",
+	Bold:    "\x1b[1m",
+	Reverse: "\x1b[7m",
 }
 
 const ansiReset = "\x1b[0m"

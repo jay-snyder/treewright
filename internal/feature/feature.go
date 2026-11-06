@@ -44,10 +44,16 @@ type Moment string
 // the module's matcher rather than anything here — see plugins/claude/hooks.
 const AtSessionStart Moment = "session-start"
 
-// FreshBase is the one feature there is. Named as a constant because two
-// packages spell it — this registry and the implementation in internal/cli —
-// and a string literal in each is a rename waiting to half-happen.
-const FreshBase = "fresh-base"
+// The features' names. Named as constants because two packages spell each —
+// this registry and the implementation in internal/cli — and a string literal
+// in each is a rename waiting to half-happen.
+const (
+	FreshBase = "fresh-base"
+
+	// Cmdq is the cmdq plugin's, and named after it: what it switches on is
+	// agents being told the plugin is there.
+	Cmdq = "cmdq"
+)
 
 // Feature is one optional behavior.
 type Feature struct {
@@ -93,6 +99,19 @@ var features = []Feature{
 			"reported and left exactly as it is. A session in a worktree does",
 			"not touch the base checkout, and a base checkout already current",
 			"is a silence.",
+		},
+	},
+	{
+		Name:    Cmdq,
+		Moment:  AtSessionStart,
+		Summary: "tell each agent it can queue a command for you to run",
+		Doc: []string{
+			"When an agent session starts, tell the agent about the cmdq plugin:",
+			"that a command needing you — a sudo, an interactive login — is",
+			"queued with \"treewright cmdq add\" rather than pasted into its reply,",
+			"and how to wait for you to run it. You run it from the list, which",
+			"\"treewright cmdq\" opens and tmux-init --cmdq-key binds to a key.",
+			"Nothing is run but by you, pressing Enter on it there.",
 		},
 	},
 }

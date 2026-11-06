@@ -216,8 +216,8 @@ func refreshTmuxBindings(env *Env) {
 	// binding somebody omitted with --new-key "", or a plugin nobody bound, and
 	// putting it back would be this command undoing a choice — or, for the
 	// plugin's key, making one — rather than refreshing one.
-	resume, create, reviews := tmux.BoundKeys()
-	keys := tmuxinit.Keys{Resume: resume, New: create, Reviews: reviews}
+	held := tmux.BoundKeys()
+	keys := tmuxinit.Keys{Resume: held.Resume, New: held.New, Reviews: held.Reviews, Cmdq: held.Cmdq}
 	if err := tmux.Source(tmuxinit.Script(keys)); err != nil {
 		env.warnf("could not reload the tmux key bindings\n%v", err)
 		return
@@ -267,6 +267,9 @@ func describeKeys(keys tmuxinit.Keys) string {
 	// refresh, for everyone who never wanted the plugin.
 	if keys.Reviews != "" {
 		lines = append(lines, fmt.Sprintf("%-*s  %s", width, "pull requests", keys.Reviews))
+	}
+	if keys.Cmdq != "" {
+		lines = append(lines, fmt.Sprintf("%-*s  %s", width, "queued commands", keys.Cmdq))
 	}
 	return strings.Join(lines, "\n")
 }

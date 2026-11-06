@@ -197,6 +197,7 @@ func cmdDoctor(env *Env, args []string) error {
 	// Last, and only for a plugin somebody opted into: the sections above are
 	// the worktree tool, which is what doctor is for first.
 	checkReviews(&r)
+	checkCmdq(&r)
 
 	r.render(env)
 	if r.failed {
