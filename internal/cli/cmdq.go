@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -474,6 +475,18 @@ func showQueue(env *Env, store cmdq.Store) error {
 			field("or print it", env.copyable(env.Argv0+" cmdq list")),
 		))
 	}
+	// Closing the popup from outside — tmux's display-popup -C, or anything
+	// else that tells treewright to end — closes the list as q does, and a
+	// command running from it is stopped and recorded as stopped first. Left
+	// to Go's default, the signal ended treewright on the spot: the command
+	// was left with the hangup of a closed terminal, which a command that
+	// ignores it outlives, and the entry recorded nothing at all.
+	//
+	// SIGINT among them though the terminal will not send it, being raw:
+	// whatever sends it from outside means the same as the other two.
+	quit, stopListening := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGHUP, syscall.SIGINT)
+	defer stopListening()
+
 	state, err := term.MakeRaw(int(in.Fd()))
 	if err != nil {
 		return fmt.Errorf("could not take the terminal: %w", err)
@@ -490,6 +503,7 @@ func showQueue(env *Env, store cmdq.Store) error {
 		Out:     out,
 		Term:    out,
 		Resized: resized,
+		Quit:    quit.Done(),
 		Color:   ui.ColorEnabled(out),
 	}.Show()
 }
@@ -582,6 +596,11 @@ queued, and the person may try again), 3 when the person dismissed it, and 4
 when it was still waiting after an hour (--timeout to change that).
 "treewright cmdq status <ID>" says the same at any time, and
 "treewright cmdq drop <ID>" withdraws one you no longer need.
+
+A run the person stopped is a failed run too, and exits 5, but wait's first
+line says "last run stopped by the person" where a failure gives its exit
+status. That was their decision, not the command's error: ask them what
+happened before you change the command or queue it again.
 
 Queue only what needs the person. Anything you can run yourself, run.`
 }

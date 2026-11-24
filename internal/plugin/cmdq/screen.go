@@ -601,6 +601,12 @@ type Screen struct {
 	// Size stands in for asking Term, in the tests, which have none.
 	Size func() (rows, cols int)
 
+	// Quit is closed when the list is told to close from outside: tmux
+	// closing the popup, or a signal. It closes as q would, and a run under
+	// way is stopped and recorded first. Nil is a list only the person
+	// closes.
+	Quit <-chan struct{}
+
 	Color bool
 	Every time.Duration // how often the queue is read again
 	Now   func() time.Time
@@ -695,8 +701,12 @@ func (s Screen) gone(m mode, entries []Entry) []bool {
 }
 
 // nextKey waits for a key, or for the next refresh or a resize, which return
-// keyNone so the loop draws again.
+// keyNone so the loop draws again. Being told to close is keyQuit, as Ctrl+C
+// at the list is.
 func (s Screen) nextKey(tick <-chan time.Time) key {
+	if s.closing() {
+		return keyQuit
+	}
 	if len(s.Keys.pending) == 0 && !s.Keys.eof {
 		select {
 		case chunk, open := <-s.Keys.chunks:
@@ -709,14 +719,27 @@ func (s Screen) nextKey(tick <-chan time.Time) key {
 			return keyNone
 		case <-s.Resized:
 			return keyNone
+		case <-s.Quit:
+			return keyQuit
 		}
 	}
 	return s.Keys.key()
 }
 
+// closing reports whether the list has been told to close.
+func (s Screen) closing() bool {
+	select {
+	case <-s.Quit:
+		return true
+	default:
+		return false
+	}
+}
+
 // runEntry runs one entry, from the screen it was picked on: the command as
 // drawn, not as it is on disk now. It reports false when the person closed
-// the list from the prompt that follows.
+// the list from the prompt that follows, or the list was told to close while
+// the command ran — which is reported only once the run is recorded.
 func (s Screen) runEntry(e Entry) bool {
 	fmt.Fprint(s.Out, altScreenOff+clearScreen+cursorOn)
 	fmt.Fprint(s.Out, s.header(e))
@@ -728,6 +751,7 @@ func (s Screen) runEntry(e Entry) bool {
 		Screen:  s.Out,
 		Size:    s.winsize,
 		Resized: s.Resized,
+		Quit:    s.Quit,
 	})
 
 	rule := ui.Dim.Apply(strings.Repeat("─", 40), s.Color)
@@ -735,6 +759,12 @@ func (s Screen) runEntry(e Entry) bool {
 	switch {
 	case err != nil:
 		fmt.Fprintf(s.Out, "%s · it stays on the list\r\n", ui.Red.Apply("not run: "+Visible(err.Error()), s.Color))
+	case result.Stopped:
+		// Before the exit status is looked at: a command that exits 0 on
+		// SIGTERM was still stopped rather than run.
+		_ = s.Store.KeepOutput(e.ID, result.Output)
+		_ = s.Store.RecordStop(e.ID, result.Status, s.Now())
+		fmt.Fprintf(s.Out, "%s · it stays on the list\r\n", ui.Red.Apply("stopped", s.Color))
 	case result.Status == 0:
 		// The output goes with the entry before it moves, so a wait that sees
 		// the move finds the lines already there.
@@ -749,11 +779,14 @@ func (s Screen) runEntry(e Entry) bool {
 		_ = s.Store.RecordFailure(e.ID, result.Status, s.Now())
 		fmt.Fprintf(s.Out, "%s · it stays on the list\r\n", ui.Red.Apply(fmt.Sprintf("exit %d", result.Status), s.Color))
 	}
+	if s.closing() {
+		return false
+	}
 	// Drained before the prompt is drawn, so that a key pressed in answer to
 	// the prompt is never mistaken for one typed at the command.
 	s.Keys.Drain(drainQuiet)
 	fmt.Fprint(s.Out, ui.Dim.Apply("any key: back to the list   q: close", s.Color))
-	k := s.Keys.waitKey()
+	k := s.Keys.waitKey(s.Quit)
 	fmt.Fprint(s.Out, altScreenOn+cursorOff+clearScreen)
 	return k != "q" && k != keyQuit && k != keyEOF
 }
@@ -778,15 +811,33 @@ func (s Screen) winsize() (*unix.Winsize, bool) {
 	return ws, err == nil
 }
 
-// waitKey waits as long as it takes for one key.
-func (k *Keyboard) waitKey() key {
+// waitKey waits as long as it takes for one key, or until quit is closed,
+// which is keyQuit.
+func (k *Keyboard) waitKey(quit <-chan struct{}) key {
 	for len(k.pending) == 0 {
-		if !k.fill(time.Hour) && k.eof {
+		if k.eof {
 			return keyEOF
+		}
+		select {
+		case chunk, open := <-k.chunks:
+			if !open {
+				k.eof = true
+				return keyEOF
+			}
+			k.pending = append(k.pending, chunk...)
+		case <-quit:
+			return keyQuit
 		}
 	}
 	return k.key()
 }
+
+// stopHint is the one thing the list says about a run while it is under way,
+// on the rule under the command. Said before the command starts, because once
+// it has, the screen is the command's: a full-screen command owns every cell
+// of it, and a line the list drew there later would land wherever that
+// command's cursor happened to be.
+const stopHint = "Ctrl+C twice stops it"
 
 // header is what a run is shown under: who asked, where it runs, and the
 // command, through Visible like everything else somebody else wrote.
@@ -800,6 +851,7 @@ func (s Screen) header(e Entry) string {
 		}
 		b.WriteString(ui.Dim.Apply(mark, s.Color) + paint(line, ui.Plain, s.Color) + "\r\n")
 	}
-	b.WriteString(ui.Dim.Apply(strings.Repeat("─", 40), s.Color) + "\r\n")
+	rule := "── " + stopHint + " "
+	b.WriteString(ui.Dim.Apply(rule+strings.Repeat("─", 40-utf8.RuneCountInString(rule)), s.Color) + "\r\n")
 	return b.String()
 }

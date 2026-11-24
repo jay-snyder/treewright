@@ -283,39 +283,56 @@ func TestTheTitleSaysWhichListAndHowMany(t *testing.T) {
 // ---- the screen, driven by scripted keys --------------------------------
 
 // liveScreen is a Screen over a store of the test's own, with keys the test
-// types and a run that records what it was asked to run instead of running it.
+// types, a quit the test can close as a signal would, and a run of the
+// test's choosing.
 type liveScreen struct {
 	Screen
 
 	typing *io.PipeWriter
 	out    *syncBuffer
 	ran    chan string
+	quit   chan struct{}
 	closed chan error
 }
 
 // startScreen shows the list, with every run answered by result after during
-// has happened, as if while the command ran.
+// has happened, as if while the command ran: a run that records what it was
+// asked to run instead of running it.
 func startScreen(t *testing.T, s Store, result Result, during func(ls *liveScreen)) *liveScreen {
 	t.Helper()
+	return startScreenRunning(t, s, func(ls *liveScreen, r Run) (Result, error) {
+		ls.ran <- r.Command
+		if during != nil {
+			during(ls)
+		}
+		return result, nil
+	})
+}
+
+// startScreenRunning shows the list, with every run handed to run.
+func startScreenRunning(t *testing.T, s Store, run func(ls *liveScreen, r Run) (Result, error)) *liveScreen {
+	t.Helper()
 	keys, typing := io.Pipe()
-	ls := &liveScreen{typing: typing, out: &syncBuffer{}, ran: make(chan string, 8), closed: make(chan error, 1)}
+	ls := &liveScreen{typing: typing, out: &syncBuffer{}, ran: make(chan string, 8), quit: make(chan struct{}), closed: make(chan error, 1)}
 	ls.Screen = Screen{
 		Store: s,
 		Keys:  NewKeyboard(keys),
 		Out:   ls.out,
 		Size:  func() (int, int) { return 40, 100 },
 		Every: time.Hour, // nothing redraws behind the test's back
-		run: func(r Run) (Result, error) {
-			ls.ran <- r.Command
-			if during != nil {
-				during(ls)
-			}
-			return result, nil
-		},
+		Quit:  ls.quit,
+		run:   func(r Run) (Result, error) { return run(ls, r) },
 	}
 	t.Cleanup(func() { _ = typing.Close() })
 	go func() { ls.closed <- ls.Show() }()
 	return ls
+}
+
+// runQuickly runs a command for real, stopped as the list stops one but in
+// the tests' time.
+func runQuickly(_ *liveScreen, r Run) (Result, error) {
+	r.timing = fastStop
+	return r.Do()
 }
 
 var ranFine = Result{Status: 0, Output: "done\n"}
@@ -445,11 +462,94 @@ func TestTheRunIsShownUnderWhoAskedAndTheCommand(t *testing.T) {
 	<-ls.ran
 	waitFor(t, ls.out, "exit 0 · done, moved to the history")
 	waitFor(t, ls.out, "any key: back to the list")
-	for _, want := range []string{"storefront-eng-2318 asked for this · in ", "$ echo one\r\n> echo two\r\n"} {
+	for _, want := range []string{"storefront-eng-2318 asked for this · in ", "$ echo one\r\n> echo two\r\n── Ctrl+C twice stops it ─"} {
 		if !strings.Contains(ls.out.String(), want) {
 			t.Errorf("the run's header is missing %q:\n%q", want, ls.out.String())
 		}
 	}
 	ls.press(t, "q")
 	ls.waitClosed(t)
+}
+
+// TestAStoppedRunStaysOnTheListAsStopped: a command that ignores Ctrl+C, run
+// from the list and stopped from it with a second press. The list comes back,
+// says what happened, and keeps the entry for the agent's wait to read as a
+// failed run the person stopped.
+func TestAStoppedRunStaysOnTheListAsStopped(t *testing.T) {
+	s := newStore(t)
+	// The output is worked out by the shell, so the test reads it rather
+	// than the command the list drew.
+	id := queue(t, s, `trap '' INT; echo "up $((6*7))"; sleep 60`)
+	ls := startScreenRunning(t, s, runQuickly)
+	waitFor(t, ls.out, "$ trap")
+	ls.press(t, "\r")
+	waitFor(t, ls.out, "up 42")
+	ls.press(t, "\x03")
+	time.Sleep(2 * fastStop.again)
+	ls.press(t, "\x03")
+	waitFor(t, ls.out, "stopped · it stays on the list")
+	waitFor(t, ls.out, "any key: back to the list")
+	ls.press(t, "x")
+	waitFor(t, ls.out, "last run stopped by the person")
+	ls.press(t, "q")
+	ls.waitClosed(t)
+
+	e, err := s.Find(id)
+	if err != nil || e.InHistory() || e.Failed.IsZero() || !e.Stopped {
+		t.Errorf("after a stopped run the entry is %+v (%v), want it waiting with the stop recorded", e, err)
+	}
+}
+
+// TestAStopIsNotARunWhateverTheCommandExitedWith: a command that exits 0 when
+// it is sent SIGTERM was still stopped, and does not go to the history as one
+// that ran.
+func TestAStopIsNotARunWhateverTheCommandExitedWith(t *testing.T) {
+	s := newStore(t)
+	id := queue(t, s, "sleep 60")
+	ls := startScreen(t, s, Result{Status: 0, Stopped: true}, nil)
+	waitFor(t, ls.out, "$ sleep 60")
+	ls.press(t, "\r")
+	waitFor(t, ls.out, "stopped · it stays on the list")
+	waitFor(t, ls.out, "any key: back to the list")
+	ls.press(t, "q")
+	ls.waitClosed(t)
+	if e, err := s.Find(id); err != nil || e.InHistory() || !e.Stopped {
+		t.Errorf("the entry is %+v (%v), want it waiting and stopped", e, err)
+	}
+}
+
+// TestClosingTheListMidRunStopsAndRecordsTheRun is the popup closed from
+// outside — tmux's display-popup -C, which signals treewright — while a
+// command runs that ignores the hangup it would get from its terminal
+// closing. The command is stopped, the stop recorded, and the list closes
+// without asking for a key nobody is there to press.
+func TestClosingTheListMidRunStopsAndRecordsTheRun(t *testing.T) {
+	s := newStore(t)
+	id := queue(t, s, `trap '' INT HUP; echo "up $((6*7))"; sleep 60`)
+	ls := startScreenRunning(t, s, runQuickly)
+	waitFor(t, ls.out, "$ trap")
+	ls.press(t, "\r")
+	waitFor(t, ls.out, "up 42")
+	close(ls.quit)
+	ls.waitClosed(t)
+	if strings.Contains(ls.out.String(), "any key: back to the list") {
+		t.Errorf("the list asked for a key after it was told to close:\n%q", ls.out.String())
+	}
+	if e, err := s.Find(id); err != nil || e.InHistory() || !e.Stopped {
+		t.Errorf("the entry is %+v (%v), want it waiting and stopped", e, err)
+	}
+}
+
+func TestTheListClosesWhenToldToWhileItWaits(t *testing.T) {
+	s := newStore(t)
+	queue(t, s, "echo one")
+	ls := startScreen(t, s, ranFine, nil)
+	waitFor(t, ls.out, "$ echo one")
+	close(ls.quit)
+	ls.waitClosed(t)
+	select {
+	case got := <-ls.ran:
+		t.Errorf("%q ran as the list closed", got)
+	default:
+	}
 }

@@ -142,6 +142,7 @@ func TestDescribeSaysHowAnEntryStands(t *testing.T) {
 	}{
 		{Entry{Added: now.Add(-4 * time.Minute)}, "waiting — queued 4m ago"},
 		{Entry{Added: now, Failed: now.Add(-time.Hour), Status: 3}, "waiting — last run failed: exit 3, 1h ago"},
+		{Entry{Added: now, Failed: now.Add(-time.Hour), Status: 143, Stopped: true}, "waiting — last run stopped by the person, 1h ago"},
 		{Entry{Outcome: Ran, Done: done}, "ran, exit 0, 2026-11-04 10:15"},
 		{Entry{Outcome: Dismissed, Done: done}, "dismissed by the person, 2026-11-04 10:15"},
 		{Entry{Outcome: Withdrawn}, "withdrawn"},
