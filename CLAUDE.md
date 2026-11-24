@@ -148,12 +148,13 @@ Releases are tag-driven: push `v*`, GoReleaser builds the binaries, publishes a
 Homebrew cask to `jay-snyder/homebrew-tap`, and stamps `main.version` via
 ldflags. Validate config changes with `goreleaser check`, and read the final cask
 with `goreleaser release --snapshot --skip=publish,validate --clean` — `dist/` is
-gitignored.
+gitignored. `check` validates the YAML and never asks Homebrew anything, so CI's
+`release-config` also loads that rendered cask in Homebrew.
 
 **The Ruby in `custom_block` is load-bearing and is not a `caveats:` key waiting
-to be tidied back into one.** It branches on `cask.installed_version` so that a
-`brew upgrade` is told to run `tw refresh` rather than the first-install steps,
-which is a question GoReleaser's `caveats:` key cannot ask — and a key added
+to be tidied back into one.** It branches on `self.cask.installed_version` so
+that a `brew upgrade` is told to run `tw refresh` rather than the first-install
+steps, a question GoReleaser's `caveats:` key cannot ask — and a key added
 beside the block would not replace it but print underneath it, casks accumulating
 caveats stanzas rather than the last one winning. It compares against the
 templated `{{ .Version }}` rather than the cask's `version` stanza because the
@@ -161,7 +162,12 @@ block runs before that stanza is set; substituting `version` there breaks nothin
 loudly and silently disables the branch. See "What the cask says after an upgrade"
 in `docs/design-notes.md` before editing it, and keep the Ruby trivial: a block
 that *raises* does not print a bad message, it stops the cask from loading and
-breaks `brew upgrade` for everyone.
+breaks `brew upgrade` for everyone. That is not hypothetical. **The `self.` is not
+redundant, whatever RuboCop says**: Homebrew evaluates the cask inside a method
+with a local named `cask`, so a bare `cask` is that local, nil, and every
+release from 0.3.1 to 0.7.0 stopped loading once Homebrew made that change.
+**The `begin … rescue` around the read is not dead code either**: it is what turns
+the next such change into the install text rather than a cask nobody can load.
 
 **The quarantine step is not a `hooks:` key waiting to be tidied back into one
 either.** It is `postflight_steps` in that same `custom_block`, because GoReleaser
