@@ -123,6 +123,24 @@ homebrew_casks:
     # and those get the install text, since somebody who is not moving between
     # versions has nothing to refresh.
     #
+    # It is reached as `self.cask`, and the `self.` is not redundant. Homebrew
+    # reads a cask file with a string `instance_eval` inside a loader method that
+    # has a local of its own named `cask` (`cask = instance_eval(content, ...)`
+    # in `cask/cask_loader.rb`, since Homebrew ec249da5f7). A string eval sees the
+    # caller's locals, and a bare `cask` with no arguments is a local before it is
+    # a method — nil, while the file is still being read. Written bare, the line
+    # raised, and every release from 0.3.1 to 0.7.0 stopped loading for anyone
+    # whose Homebrew had passed that commit. RuboCop's Style/RedundantSelf flags
+    # the `self.` and autocorrects it away, because it reads this file without the
+    # loader around it; that tidy-up is the bug.
+    #
+    # And the read is rescued, to nil, which prints the install text. It is the
+    # one line here that asks Homebrew anything at run time, of internals this
+    # file has no contract with, so whatever breaks it next should cost a wrong
+    # paragraph on an upgrade rather than every user's `brew upgrade`. A bare
+    # `rescue` catches StandardError, and is how Homebrew's own style spells it.
+    # Verified against Homebrew 7.0.16.
+    #
     # The version arriving is spelled as GoReleaser's own `{{ .Version }}`,
     # interpolated into the Ruby here, and deliberately not as the cask's
     # `version` stanza. GoReleaser emits custom_block at the *top* of the cask, a
@@ -143,7 +161,11 @@ homebrew_casks:
       end
 
       caveats do
-        replacing = cask.installed_version
+        replacing = begin
+          self.cask.installed_version
+        rescue
+          nil
+        end
         if replacing.nil? || replacing.to_s == "{{ .Version }}"
           <<~FIRST_INSTALL
             Add the shell integration to your shell's startup file:

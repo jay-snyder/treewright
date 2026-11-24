@@ -1556,9 +1556,9 @@ arriving at the one moment somebody is looking at treewright's output without
 having asked it anything.
 
 **The question is asked of the Caskroom, not of the cask.**
-`cask.installed_version` is a directory read — the version whose metadata is on
-disk while the incoming cask is being loaded — so it is nil on a first install
-and the outgoing version on an upgrade. What it is compared against is
+`self.cask.installed_version` is a directory read — the version whose metadata
+is on disk while the incoming cask is being loaded — so it is nil on a first
+install and the outgoing version on an upgrade. What it is compared against is
 GoReleaser's `{{ .Version }}`, interpolated into the Ruby at generation time, and
 deliberately *not* the cask's own `version` stanza. GoReleaser emits
 `custom_block` at the top of the cask, a cask body is `instance_eval`'d top to
@@ -1571,10 +1571,82 @@ at all", and the cost lands on the cases nobody tests: `brew info` and
 
 **A caveats block that raises is the failure to design against.** It does not
 print a bad message — it stops the cask from loading, and `brew upgrade` breaks
-for everybody who has the tap. That is why the Ruby is a nil check and a string
-compare and nothing else, and why what it compares against is a literal
-GoReleaser has already resolved rather than anything worked out on the user's
-machine.
+for everybody who has the tap. That is why the Ruby is a rescued read, a nil
+check and a string compare and nothing else, and why what it compares against is
+a literal GoReleaser has already resolved rather than anything worked out on the
+user's machine.
+
+**And it happened, through the one line that reads anything.** Homebrew commit
+`ec249da5f7`, on 1 November 2026, changed `Cask::CaskLoader::FromPathLoader#load`
+to read a cask file as `cask = instance_eval(content, path.to_s)`. A string
+`instance_eval` runs in the binding of the method that calls it, so the file sees
+that method's locals, and whether a bare identifier is a local or a method call is
+settled by whether a local of that name is in scope. One is: the `cask` the result
+is about to be assigned to, nil until the eval returns. So in the caveats block, a
+`cask` with no receiver and no arguments was that nil rather than
+`Cask::DSL::Base#cask`; `caveats` runs its block as the file is read; and the
+`NoMethodError` arrived as `Cask 'treewright' definition is invalid: undefined
+method 'installed_version' for nil`. Every command that loads the cask failed,
+`brew upgrade` among them, and with it the upgrade of everything else in the same
+run. `cask "treewright" do` on the first line was untouched, its arguments making
+it a method call whatever is in scope. The line had been there since 0.3.1, so no
+release caused it: each user's install broke on the `brew update` that brought
+them past the commit, and only a release could reach them with a fix.
+
+Two changes keep it from happening again, and neither is tidiness.
+
+**The receiver is explicit.** With `self.` in front, `cask` can only be a method
+call, and no local the loader keeps around the eval can reach it. RuboCop thinks
+otherwise — `brew style` reports `Style/RedundantSelf` on it, and `--fix` removes
+it — because it reads the file alone and cannot see the loader's local. Nothing
+runs RuboCop over the tap, which GoReleaser rewrites on every release, so that
+warning is for a person, who would reach RuboCop's conclusion by the same route.
+`cask()` would force a method call too, and
+`Style/MethodCallWithoutArgsParentheses` strips its parentheses on the same
+reasoning. `@cask` gets past both cops by reaching for an instance variable
+rather than the reader `DSL::Base` declares for it, which is a closer coupling to
+the internals this is guarding against, not a looser one.
+
+**The read is rescued, to nil.** A bare `rescue` around it, which catches
+`StandardError` and is how Homebrew's own style spells that. It is the one
+expression in the block that asks Homebrew anything at run time, and what it asks
+is not an API: `installed_version` is a method on `Cask::Cask`, reached through a
+stanza's reader, and neither is documented for cask authors. Whatever breaks it
+next should not cost what this break cost, and the two costs are far apart. A
+wrong caveat is one confusing paragraph on an upgrade, pointing at steps
+`tw doctor` would name anyway. An unloadable cask is every user's `brew upgrade`,
+for as long as it takes a release to reach them. So a failed read falls to nil,
+and nil prints the install text. What the rescue gives up is the noise: had it
+been there, the bare `cask` would have loaded and said the install text on every
+upgrade, with nothing to say why. A broken read is now quiet, and the check below
+asks whether the cask loads, not which text it prints.
+
+**`release-config` loads the cask, because `goreleaser check` never does.**
+`check` validates the YAML, and a cask that cannot load is valid YAML — which is
+how every release from 0.3.1 to 0.7.0 shipped this line without anything
+objecting. So the job also renders the cask the release would publish, with
+`goreleaser release --snapshot`, and loads it the way a user's Homebrew does: from
+a tap. The tap is a throwaway one, made with `brew tap-new --no-git` and passed to
+`brew trust`, since Homebrew now refuses to load from a tap nobody has trusted,
+and then `brew info --cask` loads the cask. A tap is not only the faithful route
+but the only one left: every public command refuses a cask by path. Homebrew is
+preinstalled on GitHub's Ubuntu images, off `PATH`, and the cask loads there as
+it does on a Mac, so the job stays on Linux. The step runs `brew update` first.
+The image's copy is whatever was current when the image was built, and the
+question is whether the cask loads under what a user has after `brew update`,
+the command that broke them. A failed update is a warning rather than a failure,
+and the check goes on under the image's copy.
+
+It is a step in the existing job rather than a job of its own, because the
+ruleset matches required checks by job name. It runs beside `test`, the slower
+job, so it adds nothing to how long a pull request waits. Verified in a Linux
+container under Homebrew 7.0.16: the published 0.7.0 cask fails it with the
+error above, and the fixed one passes.
+
+What it cannot catch is a change on Homebrew's side between pull requests. It
+runs when this repository changes, not when Homebrew does, so a break there
+surfaces on the next pull request, as a failing check on a change that did
+nothing wrong. That is the alarm wanted, since the published cask is broken too.
 
 There is also no `caveats:` key beside the block, and that is not tidiness. A
 cask accumulates every `caveats` stanza it is given rather than the last one

@@ -185,3 +185,42 @@ jobs:
         with:
           version: "~> v2"
           args: check
+
+      # `check` validates the YAML and never asks Homebrew anything, and a cask
+      # that cannot load is valid YAML: every release from 0.3.1 to 0.7.0 carried
+      # a caveats line that stopped the cask loading under current Homebrew, and
+      # this job passed on each of them. So render the cask a release would
+      # publish and load it the way a user's brew does. See "What the cask says
+      # after an upgrade" in docs/design-notes.md.
+      #
+      # Steps in this job rather than a job of their own: the ruleset matches
+      # required checks by job name.
+      - name: Render the cask
+        uses: goreleaser/goreleaser-action@v7
+        with:
+          version: "~> v2"
+          args: release --snapshot --skip=publish,validate --clean
+
+      # Homebrew is on the image but not on PATH. It is updated first because the
+      # image's copy is whatever was current when the image was built, and the
+      # question is whether the cask loads under what a user has after
+      # `brew update` — the command that broke them. An update that fails is
+      # reported and the load goes on under the image's copy, rather than failing
+      # a pull request on the network.
+      #
+      # Loaded from a tap, as a user's is: every public command refuses a cask by
+      # path now, and Homebrew refuses a tap nobody has trusted. `tap-new` turns
+      # developer mode on as it goes, which on a runner that is thrown away
+      # afterwards changes nothing.
+      - name: Load the cask in Homebrew
+        run: |
+          eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+          brew update || echo "::warning::brew update failed; loading under the image's Homebrew"
+          export HOMEBREW_NO_AUTO_UPDATE=1
+          brew --version
+          brew tap-new --no-git treewright/ci
+          tap="$(brew --repository treewright/ci)"
+          mkdir -p "$tap/Casks"
+          cp dist/homebrew/Casks/treewright.rb "$tap/Casks/"
+          brew trust treewright/ci
+          brew info --cask treewright/ci/treewright
