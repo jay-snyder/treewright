@@ -398,8 +398,9 @@ features = ["cmdq"]
 
 `tw cmdq` opens the list. Each entry shows who asked, why, the command, and the
 folder it runs in. Press Enter on one to run it right there, where `sudo` can
-ask for your password. Nothing runs any other way. `d` dismisses an entry, and
-the agent that asked hears either way.
+ask for your password. Nothing runs any other way. If a command hangs, Ctrl+C
+twice stops it, and it stays on the list. `d` dismisses an entry, and the agent
+that asked hears either way.
 
 To get the list on a key, add the key to your `tmux-init` line:
 

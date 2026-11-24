@@ -205,6 +205,49 @@ func TestRestorePutsAnEntryBackWithItsLastFailure(t *testing.T) {
 	}
 }
 
+// TestAStopIsRecordedAsAFailedRunThePersonStopped: the entry stays waiting
+// with its failure, marked as a stop, and an ordinary failure after it is
+// not one.
+func TestAStopIsRecordedAsAFailedRunThePersonStopped(t *testing.T) {
+	s := newStore(t)
+	id := queue(t, s, "sleep 60")
+	stoppedAt := time.Now().Add(-time.Minute)
+	if err := s.RecordStop(id, 143, stoppedAt); err != nil {
+		t.Fatal(err)
+	}
+	e, err := s.Find(id)
+	if err != nil || e.InHistory() || !e.Failed.Equal(stoppedAt) || e.Status != 143 || !e.Stopped {
+		t.Fatalf("after a stop the entry is %+v (%v)", e, err)
+	}
+	if err := s.RecordFailure(id, 1, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if e, _ := s.Find(id); e.Stopped || e.Status != 1 {
+		t.Errorf("a failure after a stop reads as %+v", e)
+	}
+}
+
+// TestAStopMarkerDescribesOnlyItsOwnRun: a treewright from before stops were
+// recorded rewrites last alone, in the form last has always had. A marker
+// left by an earlier stop no longer matches it, and the later failure reads
+// as the failure it was.
+func TestAStopMarkerDescribesOnlyItsOwnRun(t *testing.T) {
+	s := newStore(t)
+	id := queue(t, s, "sleep 60")
+	if err := s.RecordStop(id, 143, time.Now().Add(-time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	later := time.Now()
+	last := filepath.Join(s.Dir, pendingDir, id, lastFile)
+	if err := os.WriteFile(last, []byte(stampOf(later)+" 1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	e, err := s.Find(id)
+	if err != nil || e.Stopped || e.Status != 1 || !e.Failed.Equal(later) {
+		t.Errorf("the entry reads as %+v (%v), want the later failure, not stopped", e, err)
+	}
+}
+
 func TestKeptOutputFollowsTheEntry(t *testing.T) {
 	s := newStore(t)
 	id := queue(t, s, "echo hi")

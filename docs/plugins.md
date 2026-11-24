@@ -570,14 +570,17 @@ a test of its own:
   the popup runs as it is, there being no view that shows it all.
 - **Keys typed while a command ran are drained** before the list reads another,
   so they do not answer it. Ctrl+C during a run goes to the command and the list
-  survives it; Ctrl+Z in the list is ignored, since it would stop the popup's
-  only program.
+  survives it — the first one, always; a second is the list's, and stops a
+  command that would not stop, which the script could not do (see "Stopping a
+  command that will not stop" below). Ctrl+Z in the list is ignored, since it
+  would stop the popup's only program.
 - **`add` refuses** an empty command, a NUL byte, an empty `--why` and a
   directory that does not exist. IDs are unique under concurrent `add`s: an
   entry is written in a staging directory and renamed into the queue, a rename
   that fails rather than replace an entry already there, and a clash retries
   with a fresh ID.
-- **A failed run stays on the list**, marked "last run failed: exit N"; a
+- **A failed run stays on the list**, marked "last run failed: exit N", or
+  "last run stopped by the person" for one stopped from the list; a
   successful one moves to the history. `d` dismisses, `h` shows the history,
   `u` there puts an entry back, and the history keeps the last fifty.
 - **`status` shows the last run's final twenty lines**, escape sequences
@@ -661,8 +664,9 @@ direct — no new module. Opening one is `/dev/ptmx` and three ioctls whose name
 differ between macOS and Linux, a short file per platform. The command starts as
 the leader of a session of its own with the pty as its controlling terminal, so
 `sudo` asks for its password as it would at a prompt. The popup's terminal is
-in raw mode while the list is open, so during a run every key, Ctrl+C among
-them, is copied to the command rather than read by the list; output is copied
+in raw mode while the list is open, so during a run every key is copied to the
+command rather than read by the list — Ctrl+C too, but for the press the next
+section gives the list; output is copied
 to the screen with the last 64 KiB of it kept for `status`; and the pty's size
 follows the popup's. That is the shape the python had, in the language the rest
 is written in, and it runs on both CI platforms under the test suite, which
@@ -685,6 +689,106 @@ script. Every shell command an agent writes is written for a bash-like shell,
 and a person's login shell is not one to guess at: a queued command handed to
 fish would fail on its first `&&`.
 
+### Stopping a command that will not stop
+
+The script had a trap, and the port kept it until now. The list waited on the
+command with no limit, and Ctrl+C reached the command only as the command
+allowed: one that traps or ignores SIGINT, or one that put its terminal in raw
+mode so that Ctrl+C is a byte it reads — a login flow drawing its own screen,
+anything under `stty raw` — never exited. The popup is `-EE` and lasts exactly
+as long as treewright does, so from inside it there was no way out at all. Esc
+went to the command, as every key did; the only escape was another terminal.
+
+**Ctrl+C escalates.** The first one during a run goes to the command, unchanged.
+That is the ordinary interrupt, and nothing about a run that stops when asked
+may change: a single Ctrl+C at `sleep 60` still ends it as exit 130. A further
+Ctrl+C, typed once the command has gone on running for a second after the
+first, is the list's, and stops the command:
+
+1. SIGTERM to the command's process group. The command leads a session of its
+   own, so the group is its pid, and everything it started is in it unless it
+   left on purpose.
+2. SIGKILL to whatever is left in the group, two seconds later.
+3. One second after that, the list comes back **whatever happened**. The pty's
+   side treewright holds is closed, which hangs up anything still holding the
+   terminal, and a process stuck in an uninterruptible sleep is left to the
+   goroutine waiting on it, which reaps it whenever it ends. The popup is never
+   held by a command again.
+
+**The numbers.** The second is the window a press has to clear. A person
+pressing twice on purpose — at a tool that asks again on Ctrl+C, a login
+confirming that it should give up — presses the two as one gesture, well
+inside it: the double-click interval desktops default to is half that. And a
+person who pressed, saw nothing happen and pressed again has waited at least
+that long, since noticing that nothing is happening takes more than a second.
+Nothing starts the count again once the first press is made. A command that
+was pressed at, waited on and pressed at again has to stop, however long the
+wait, and everything that could tell a command that answered the first press
+from one that did not — output since, a key since — a stuck command does too:
+a raw terminal echoes the very byte. The cost is a long-lived tool that takes
+Ctrl+C as an ordinary key, which a second press minutes later stops; a queued
+command is a `sudo` or a login, not a session somebody lives in.
+
+Two seconds for SIGTERM, because what a command does with one is put its
+terminal back, take away a lock or a temporary file, and print a line — work
+counted in milliseconds — while the person is sitting in front of a popup that
+has stopped answering. One for SIGKILL, because it is not a request: what it
+has not ended in a second it will not end at all. So the list is back within
+three seconds of the press that asked for it, at most.
+
+**Why not Esc, or a key of its own.** Esc belongs to the command: login flows,
+pagers and readline's vi mode all use it, and a list that took Esc during a run
+would break the commands it exists to run. An escape chord in the style of
+telnet's Ctrl+] or ssh's `~.` takes a key from the command too, and nobody
+stuck in a popup knows to press it. Ctrl+C is what a stuck person presses
+anyway, and the first press still means what it always meant.
+
+**It is said before the command starts, and only then.** The header a run is
+drawn under — who asked, where, the command — ends in a rule that says "Ctrl+C
+twice stops it". Nothing is drawn while the command runs. A full-screen command
+owns every cell of the popup, and a line the list drew there would land
+wherever that command's cursor happened to be, in the middle of its picture.
+That is also why there is no notice after a first press the command did not
+answer: the list cannot tell an unanswered press from one answered quietly,
+and the only place to say so is a screen that is not the list's.
+
+**Keys the command is not reading do not hold up the press that stops it.** The
+side of the pty treewright writes to is non-blocking. A command in raw mode
+that reads nothing fills its terminal's input in about a kilobyte on macOS,
+and a write waiting for room there would have held every key typed after it —
+the second Ctrl+C included, so that the commands most in need of stopping
+were the ones that could not be. Keys the terminal has no room for wait in
+treewright instead, offered again every twenty milliseconds, and past 64 KiB
+they are dropped, as a terminal drops what its input queue cannot hold.
+
+**A stopped run is a failed run**, recorded as one: the entry stays on the
+list, and `wait` returns 5. No exit code is added, since
+[`compatibility.md`](compatibility.md) lists `wait`'s as a promise. But `status`
+and the list's second line say "last run stopped by the person" rather than
+"exit 143", because "the command failed" and "the person gave up on it" send
+an agent different ways — to the output to see what went wrong, or to the
+person to ask what happened. The exit status of a stop is the signal it was
+stopped with, which says nothing the words do not.
+
+The stop is a file of its own, `stopped`, beside `last` — which keeps the form
+it has always had — holding the stamp of the run it describes. Both halves are
+for a treewright of another version reading the same queue: a `wait` started
+before an upgrade runs on for up to an hour, and the queue outlives every
+install. One that has never heard of a stop reads `last` as before, so still
+sees the failure and still returns 5; and a later failure it records, rewriting
+`last` alone, leaves the stamps disagreeing, so that run is not described as a
+stop.
+
+**Closing the popup from outside stops the run the same way.** `tmux
+display-popup -C`, or anything else that sends treewright SIGTERM, SIGHUP or
+SIGINT, closes the list as `q` would, and a command running from it is stopped
+and recorded as stopped first. Go's default was to end treewright on the spot,
+which left the command with nothing but the hangup of its terminal closing —
+outlived, unseen, by a command that ignores SIGHUP — and the entry with no
+record of the run. Closing the popup is now a clean way out rather than an
+accident. SIGINT is among them though the list's raw terminal never sends it:
+from outside, it means what the other two mean.
+
 ### What an agent is told, and what `wait` says back
 
 **Agents learn about the queue through a feature**, `cmdq`, switched on per
@@ -706,7 +810,7 @@ stderr which key opens the list, for the agent to pass on.
 | 2 | invoked wrong, as everywhere in treewright |
 | 3 | dismissed by the person, or withdrawn with `drop` |
 | 4 | still waiting when the time ran out |
-| 5 | a run failed after the wait began, and the entry stays waiting |
+| 5 | a run failed after the wait began — the person stopping it among the ways — and the entry stays waiting |
 
 The script said 2 for a failed run. In treewright 2 is a usage error, so an
 agent that mistyped a flag would have read "the run failed" and reported it.

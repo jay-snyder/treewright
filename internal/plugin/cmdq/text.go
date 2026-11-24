@@ -193,6 +193,14 @@ func Describe(e Entry, now time.Time) string {
 }
 
 // LastFailure says how an entry's last run went, for one whose run failed.
+//
+// A run the person stopped says so instead of giving its exit status. The
+// status of a stop is the signal it was stopped with, which says nothing the
+// word does not; and "it failed" and "the person gave up on it" send whoever
+// reads this — an agent, through status and wait — different ways next.
 func LastFailure(e Entry, now time.Time) string {
+	if e.Stopped {
+		return "last run stopped by the person, " + Ago(e.Failed, now)
+	}
 	return "last run failed: exit " + strconv.Itoa(e.Status) + ", " + Ago(e.Failed, now)
 }

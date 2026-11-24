@@ -44,6 +44,7 @@ const (
 	cwdFile     = "cwd"
 	addedFile   = "added"
 	lastFile    = "last"
+	stoppedFile = "stopped"
 	outcomeFile = "outcome"
 	doneFile    = "done"
 	outputFile  = "output"
@@ -115,9 +116,12 @@ type Entry struct {
 
 	// Failed is when the last run failed, and Status what it exited with.
 	// Zero when no run has failed since the entry was queued, which is every
-	// entry in the history but one put back after a failure.
-	Failed time.Time
-	Status int
+	// entry in the history but one put back after a failure. Stopped says
+	// that run did not fail on its own: the person stopped it, or closed the
+	// list under it.
+	Failed  time.Time
+	Status  int
+	Stopped bool
 
 	// Outcome and Done say how and when an entry in the history left the
 	// list. Both are zero for one still waiting.
@@ -334,9 +338,38 @@ func (s Store) Restore(id string) error {
 // RecordFailure notes a run that failed, which leaves the entry waiting. A
 // `wait` that began before at reads it as its answer.
 func (s Store) RecordFailure(id string, status int, at time.Time) error {
+	return s.recordRun(id, status, false, at)
+}
+
+// RecordStop notes a run the person stopped, or that the list was closed
+// under. It is a failed run like any other — the entry stays waiting, and a
+// `wait` reads it as a failure — that says how it failed.
+func (s Store) RecordStop(id string, status int, at time.Time) error {
+	return s.recordRun(id, status, true, at)
+}
+
+// recordRun writes how a failed run went.
+//
+// The stop goes in a file of its own beside last, which keeps the form it has
+// always had, and holds the stamp of the run it describes. Both halves are for
+// a treewright of another version reading the same queue — a `wait` started
+// before an upgrade runs on for up to an hour, and the queue outlives every
+// install. One that has never heard of a stop reads last exactly as before,
+// and so still sees the failure; and a later failure it records, rewriting
+// last alone, leaves the stamps disagreeing, so that run is not described as
+// stopped. The marker is written first: last is what a `wait` is watching for.
+func (s Store) recordRun(id string, status int, stopped bool, at time.Time) error {
 	path, ok := s.pendingPath(id)
 	if !ValidID(id) || !ok {
 		return ErrNoEntry
+	}
+	marker := filepath.Join(path, stoppedFile)
+	if stopped {
+		if err := os.WriteFile(marker, []byte(stamp(at)), 0o600); err != nil {
+			return err
+		}
+	} else if err := os.Remove(marker); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
 	}
 	return os.WriteFile(filepath.Join(path, lastFile), []byte(stampOf(at)+" "+strconv.Itoa(status)+"\n"), 0o600)
 }
@@ -420,6 +453,7 @@ func readEntry(path string) (Entry, bool) {
 	if when, status, found := strings.Cut(strings.TrimSpace(read(lastFile)), " "); found {
 		if n, err := strconv.Atoi(status); err == nil {
 			e.Failed, e.Status = parseStamp(when), n
+			e.Stopped = !e.Failed.IsZero() && strings.TrimSpace(read(stoppedFile)) == when
 		}
 	}
 	return e, true

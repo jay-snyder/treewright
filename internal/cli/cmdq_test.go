@@ -1,14 +1,21 @@
 package cli
 
 import (
+	"bytes"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
+	"sync"
+	"syscall"
 	"testing"
 	"time"
 
 	"github.com/jay-snyder/treewright/internal/plugin/cmdq"
+	"github.com/jay-snyder/treewright/internal/shellinit"
 )
 
 // queueStore is the queue the fixture's commands write to, which newFixture
@@ -400,6 +407,104 @@ func TestTheCmdqListNeedsATerminal(t *testing.T) {
 // TestSessionStartTellsAnAgentAboutTheQueue only where the repository asked:
 // what it says is written for an agent — when to queue, how, and to wait in
 // the background straight after.
+// screenBuffer is a terminal's worth of output a test reads while something
+// else is still writing it.
+type screenBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *screenBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *screenBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+// waitForMatch waits for the screen to show pattern, and returns its first
+// group.
+func waitForMatch(t *testing.T, screen *screenBuffer, pattern string) string {
+	t.Helper()
+	re := regexp.MustCompile(pattern)
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if m := re.FindStringSubmatch(screen.String()); m != nil {
+			return m[len(m)-1]
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("the screen never showed %s:\n%q", pattern, screen.String())
+	return ""
+}
+
+// TestASignalToTheCmdqListStopsTheCommandItIsRunning is the popup closed from
+// outside, for real: tmux's display-popup -C signals the list, and Go's
+// default answer to a signal was to end treewright on the spot, leaving the
+// command with nothing but its terminal's hangup — which this one ignores —
+// and the entry with no record of the run. The list is a process of its own
+// here, under a terminal of its own, so that it can be sent SIGTERM in the
+// middle of a run. It stops the command, records the stop, and exits.
+func TestASignalToTheCmdqListStopsTheCommandItIsRunning(t *testing.T) {
+	f := newFixture(t, "")
+	id := f.queued("--why", "a command that will not stop", "--cwd", f.MainDir, "--",
+		`trap '' INT HUP; echo "pgid $$"; sleep 60`)
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	keys, typing := io.Pipe()
+	t.Cleanup(func() { _ = typing.Close() })
+	var screen screenBuffer
+	done := make(chan cmdq.Result, 1)
+	go func() {
+		// The test binary stands in for treewright: see TestMain.
+		result, err := cmdq.Run{
+			Command: `echo "list $$"; exec ` + shellinit.Quote(self) + ` cmdq`,
+			Dir:     f.MainDir,
+			Keys:    cmdq.NewKeyboard(keys),
+			Screen:  &screen,
+		}.Do()
+		if err != nil {
+			t.Error(err)
+		}
+		done <- result
+	}()
+	list, _ := strconv.Atoi(waitForMatch(t, &screen, `list ([0-9]+)`))
+	waitForMatch(t, &screen, `(waiting to run · 1)`)
+	if _, err := typing.Write([]byte("\r")); err != nil {
+		t.Fatal(err)
+	}
+	// $$ is a number only in what the command printed; the list draws it as
+	// the command was written.
+	group, _ := strconv.Atoi(waitForMatch(t, &screen, `pgid ([0-9]+)`))
+	if err := syscall.Kill(list, syscall.SIGTERM); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case result := <-done:
+		if result.Status != 0 {
+			t.Errorf("the list exited %d, want it to have closed as it does when asked:\n%q", result.Status, screen.String())
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatalf("the list was still open after SIGTERM:\n%q", screen.String())
+	}
+	e, err := queueStore().Find(id)
+	if err != nil || e.InHistory() || !e.Stopped {
+		t.Errorf("the entry is %+v (%v), want it waiting with the stop recorded", e, err)
+	}
+	if err := syscall.Kill(-group, 0); !errors.Is(err, syscall.ESRCH) {
+		_ = syscall.Kill(-group, syscall.SIGKILL)
+		t.Errorf("the command's process group outlived the list (kill -0: %v)", err)
+	}
+}
+
 func TestSessionStartTellsAnAgentAboutTheQueue(t *testing.T) {
 	f := newFixture(t, "")
 	if out := f.exec("session-start").stdout; strings.Contains(out, "cmdq") {
@@ -411,6 +516,14 @@ func TestSessionStartTellsAnAgentAboutTheQueue(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("session-start is missing %q:\n%s", want, out)
 		}
+	}
+	// The briefing tells an agent which words mean the person stopped a run,
+	// so it is held to the words wait actually prints. A status line reworded
+	// without it would leave every agent looking for a phrase that never comes.
+	now := time.Now()
+	stopped, _, _ := strings.Cut(cmdq.LastFailure(cmdq.Entry{Failed: now, Stopped: true}, now), ",")
+	if !strings.Contains(out, `"`+stopped+`"`) {
+		t.Errorf("session-start does not quote %q, which is what wait prints for a stopped run:\n%s", stopped, out)
 	}
 }
 
